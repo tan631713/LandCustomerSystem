@@ -1,2 +1,4 @@
 # LandCustomerSystem
 特定客戶資料管理庫
+關於如何更新版本，打開壓縮檔將LandCustomerSystem.exe及_internal資料夾複製到主程式資料夾並覆蓋
+注意!不要刪除customers.db它是最重要的資料。
