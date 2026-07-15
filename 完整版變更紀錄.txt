@@ -5,13 +5,14 @@
 ------------------------------------------------
 1. 正式部署架構固定為家中主機唯一伺服器；PostgreSQL、FastAPI、附件、備份與私鑰不移到公司筆電。
 2. 新增 `start_home_server_vpn.bat` 作為家中主機正式入口，同時提供 iPhone 瀏覽器與公司桌面客戶端。
+2a. 家中主機入口新增一鍵預檢與自動修復：自動處理 NetBird 連線、PostgreSQL Windows 服務、VPN 防火牆、專案資料庫設定、HTTPS 憑證與每日備份；重複開啟時只顯示現有網址，不會另開第二個伺服器。
 3. 新增 `setup_netbird_client.bat`、`company_client_preflight.ps1` 與 `start_company_laptop_desktop.bat`；公司端只檢查 NetBird 與家中 TCP 8732，再啟動完整桌面 EXE。
 4. 公司啟動器設定 `LAND_CUSTOMER_API_URL=https://家中NetBird-IP:8732` 與公開 CA，且明確不引用 LandCustomerServer 或 `--postgres`。
 5. 新增 CompanyLaptopClient 獨立打包器，只包含桌面程式、家中 NetBird IP、公開 CA 與客戶端說明；manifest 明確標示不含資料庫、PostgreSQL 帳密、Server 或私鑰。
 6. 公司客戶端桌面資料夾加入 `company-client-config.json`；即使使用者直接點 EXE，也會在載入 UI 前強制遠端 HTTPS API 模式，拒絕 HTTP、非 NetBird IP、錯誤連接埠及逃逸的 CA 路徑。
 7. 桌面 API 模式不再建立 `customers.db` 或完整 SQLite schema，改在 LocalAppData 建立只含 `app_settings` 的 `desktop-client-settings.db`，保存裝置欄寬、字體與介面偏好。
 8. 公司筆電可使用完整 Windows 桌面介面；iPhone 維持 Safari／主畫面瀏覽器版，兩者共用家中 PostgreSQL。
-9. 新增遠端封裝強制模式、HTTP 拒絕及裝置偏好資料庫無客戶表測試，全系統 153 項自動測試全部通過。
+9. 新增遠端封裝強制模式、HTTP 拒絕及裝置偏好資料庫無客戶表測試；目前全系統 157 項自動測試全部通過，並完成本機與 NetBird HTTPS 實機健康檢查。
 
 2026-07-14 v1.3.0 NetBird 私人 VPN 外出連線
 ------------------------------------------

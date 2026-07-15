@@ -22,10 +22,12 @@
 
 每次外出使用
 ------------
-1. 筆電保持開機、PostgreSQL 正常，並確認 Windows NetBird 顯示 Connected。
-2. 執行 start_mobile_server_vpn.bat。
+1. 家中主機保持開機並停用自動休眠。
+2. 家中主機只需執行 start_home_server_vpn.bat；它會自動確認 NetBird、PostgreSQL 服務、防火牆、資料庫、HTTPS 與備份。
 3. iPhone 開啟 NetBird 並 Connect；手機可用 4G、5G、任意 Wi-Fi 或個人熱點。
 4. Safari 輸入啟動視窗顯示的 https://100.x.x.x:8732/mobile/。
+
+第一次執行時可能會開啟 NetBird 登入頁、要求一次 Windows 管理員授權，或詢問 PostgreSQL 管理員密碼；完成後平常仍只開同一個檔案。
 
 公司筆電完整桌面程式請使用獨立 CompanyLaptopClient ZIP，詳見 `公司筆電遠端使用說明.txt`；公司筆電不執行本檔案中的家中伺服器啟動器。
 
@@ -38,4 +40,4 @@
 
 停止使用
 --------
-關閉 start_mobile_server_vpn.bat 的視窗即可停止 API。若暫時不用私人 VPN，也可在 NetBird App 按 Disconnect。
+關閉 start_home_server_vpn.bat 的伺服器視窗即可停止 API。若暫時不用私人 VPN，也可在 NetBird App 按 Disconnect。

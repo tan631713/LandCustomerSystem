@@ -4,6 +4,9 @@ chcp 65001 >nul
 title 土地資料系統 NetBird iPhone HTTPS 伺服器
 cd /d "%~dp0"
 
+set "PREPARED=0"
+if /I "%~1"=="--prepared" set "PREPARED=1"
+
 set "NETBIRD_EXE=%ProgramFiles%\NetBird\netbird.exe"
 set "PYTHON_EXE=%LocalAppData%\Programs\Python\Python314\python.exe"
 if not exist "%PYTHON_EXE%" set "PYTHON_EXE=python"
@@ -35,6 +38,7 @@ if exist "%SERVER_EXE%" (
 )
 if errorlevel 1 goto FAILED
 
+if "%PREPARED%"=="1" goto POSTGRES_READY
 echo 正在檢查 PostgreSQL...
 if exist "%SERVER_EXE%" (
   "%SERVER_EXE%" --postgres --check
@@ -49,6 +53,7 @@ if errorlevel 1 (
   goto FAILED
 )
 
+:POSTGRES_READY
 echo 正在檢查每日自動備份...
 if exist "%SERVER_EXE%" (
   "%SERVER_EXE%" --backup-if-due-hours 24 --backup-label auto
@@ -62,7 +67,7 @@ echo NetBird 私人 VPN 已就緒。
 echo iPhone 連上 NetBird 後請開啟：
 echo https://%VPN_IP%:8732/mobile/
 echo.
-echo 若無法連線，請先以系統管理員身分執行 allow_netbird_vpn_firewall.bat。
+echo start_home_server_vpn.bat 已自動檢查 PostgreSQL 與 NetBird 防火牆。
 echo 不要在路由器開放 8732、8733 或 PostgreSQL 5432。
 echo.
 

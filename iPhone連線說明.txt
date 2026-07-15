@@ -35,7 +35,7 @@
 
 - 不要在路由器做 8732、8733 或 5432 連接埠轉發。
 - PostgreSQL 5432 不可直接對外開放。
-- 外出使用請執行 `start_mobile_server_vpn.bat`，並讓筆電與 iPhone 登入同一個 NetBird 帳號；詳細步驟見 `私人VPN連線說明.txt`。
+- 外出使用時，家中主機只需執行 `start_home_server_vpn.bat`，並讓家中主機與 iPhone 登入同一個 NetBird 帳號；詳細步驟見 `私人VPN連線說明.txt`。
 - 手機版不保存獨立土地資料，每次都直接讀寫 PostgreSQL。
 - start_mobile_server_https.bat 每 24 小時會先建立一次壓縮備份。
 - 手動備份可執行 backup_postgresql_now.bat。

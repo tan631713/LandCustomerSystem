@@ -150,12 +150,24 @@ class ProductionLauncherTests(unittest.TestCase):
 
         home_launcher = (root / "start_home_server_vpn.bat").read_text(encoding="utf-8-sig")
         self.assertIn("start_mobile_server_vpn.bat", home_launcher)
+        self.assertIn("setup_netbird_vpn.bat", home_launcher)
+        self.assertIn("home_server_preflight.ps1", home_launcher)
+        self.assertIn("setup_local_postgresql.bat", home_launcher)
+        self.assertIn("--prepared", home_launcher)
+
+        home_preflight = (root / "home_server_preflight.ps1").read_text(encoding="utf-8")
+        self.assertIn("Get-Service -Name 'postgresql*'", home_preflight)
+        self.assertIn("configure_netbird_firewall.ps1", home_preflight)
+        self.assertIn("-Verb RunAs", home_preflight)
+        self.assertIn("Port = 8732", home_preflight)
+        self.assertNotIn("Port = 5432", home_preflight)
 
         postgres_setup = (root / "setup_local_postgresql.bat").read_text(
             encoding="utf-8-sig"
         )
         self.assertIn("LandCustomerServer\\LandCustomerServer.exe", postgres_setup)
         self.assertIn("--setup-postgresql", postgres_setup)
+        self.assertIn("--no-pause", postgres_setup)
 
         company_launcher = (root / "start_company_laptop_desktop.bat").read_text(
             encoding="utf-8-sig"

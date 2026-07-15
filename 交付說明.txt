@@ -6,12 +6,13 @@
 
 正式啟動方式
 1. 家中主機本機桌面版：執行 start_land_customer_system_postgresql.bat。
-2. 家中主機對外伺服器：執行 start_home_server_vpn.bat，視窗保持開啟。
+2. 家中主機對外伺服器：只執行 start_home_server_vpn.bat，視窗保持開啟。
 3. 公司筆電：使用獨立 CompanyLaptopClient ZIP，執行 start_company_laptop_desktop.bat。
 4. iPhone 行動版：NetBird Connect 後以 Safari 開啟家中主機的 /mobile/ 網址。
 5. iPhone 第一次連線：先依 iPhone連線說明.txt 安裝並信任本機 CA 憑證。
 
 重要提醒
+- start_home_server_vpn.bat 會自動檢查 NetBird、PostgreSQL 服務、私人 VPN 防火牆、資料庫連線、HTTPS 與備份；首次設定才會要求 UAC 或 PostgreSQL 管理員密碼。
 - 請不要只複製 LandCustomerSystem.exe。
 - LandCustomerSystem.exe 旁邊的 _internal 資料夾是必要執行檔案，必須一起保留。
 - 建議整個 LandCustomerSystem 資料夾一起搬移或備份。
@@ -24,6 +25,7 @@
 
 v1.4.0 家中伺服器／公司桌面客戶端
 - 家中主機固定為唯一 PostgreSQL、FastAPI、附件與備份來源。
+- 家中伺服器入口已改為一鍵預檢與自動修復，不必再分別執行 NetBird、防火牆、PostgreSQL 設定及 HTTPS 啟動檔。
 - 新增公司筆電完整桌面客戶端 ZIP；不含 PostgreSQL、Server、正式資料、帳密、備份或私鑰。
 - 公司桌面 EXE 由封裝設定強制連家中 NetBird HTTPS，直接點 EXE 也不會切回本機 SQLite 正式模式。
 - 公司端只建立 `desktop-client-settings.db` 保存介面偏好，資料表只有 `app_settings`，不含地主或土地。

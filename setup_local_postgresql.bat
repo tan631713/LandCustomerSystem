@@ -11,12 +11,13 @@ if exist "%SERVER_EXE%" (
 ) else (
   "%PYTHON_EXE%" setup_local_postgresql_gui.py
 )
-if errorlevel 1 (
+set "EXIT_CODE=%ERRORLEVEL%"
+if not "%EXIT_CODE%"=="0" (
   echo.
   echo 設定未完成，請查看上方錯誤訊息。
 ) else (
   echo.
-  echo 設定完成，請回到 Codex。
+  echo PostgreSQL 專案資料庫設定完成，可以繼續啟動伺服器。
 )
-pause >nul
-endlocal
+if /I not "%~1"=="--no-pause" pause >nul
+endlocal & exit /b %EXIT_CODE%

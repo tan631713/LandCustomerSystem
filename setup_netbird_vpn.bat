@@ -29,7 +29,7 @@ if not defined VPN_IP goto FAILED
 :CONNECTED
 echo.
 echo NetBird 已連線，這台筆電的私人 IP：%VPN_IP%
-echo 下一步請以系統管理員身分執行 allow_netbird_vpn_firewall.bat。
+echo 使用 start_home_server_vpn.bat 時，後續防火牆檢查會自動完成。
 if /I not "%~1"=="--no-pause" pause >nul
 exit /b 0
 

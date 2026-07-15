@@ -32,6 +32,7 @@ LAUNCHERS = (
     "allow_private_network_firewall.bat",
     "allow_netbird_vpn_firewall.bat",
     "configure_netbird_firewall.ps1",
+    "home_server_preflight.ps1",
     "start_mobile_server_vpn.bat",
     "start_home_server_vpn.bat",
     "setup_netbird_vpn.bat",

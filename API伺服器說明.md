@@ -133,9 +133,9 @@ python start_api_server.py --postgres
 
 本版本已接入 NetBird 私人 VPN：
 
-1. Windows 首次執行 `setup_netbird_vpn.bat` 並完成瀏覽器登入。
-2. 首次以系統管理員身分執行 `allow_netbird_vpn_firewall.bat`。
+1. 家中主機只需執行 `start_home_server_vpn.bat`；啟動器會檢查並在必要時引導修復 NetBird、PostgreSQL 服務、私人 VPN 防火牆、資料庫連線、HTTPS 與備份。
+2. 首次設定依畫面完成 NetBird 登入、Windows 管理員授權與 PostgreSQL 管理員密碼輸入。
 3. iPhone 安裝官方 NetBird App，使用同一帳號登入並 Connect。
-4. 每次外出執行 `start_mobile_server_vpn.bat`，Safari 開啟畫面顯示的 `https://100.x.x.x:8732/mobile/`。
+4. Safari 開啟畫面顯示的 `https://100.x.x.x:8732/mobile/`。
 
 NetBird 防火牆規則只允許該帳號的私人 `/16` 網段連入 8732／8733。不要在路由器轉發 5432、8732 或 8733；PostgreSQL 5432 仍只監聽 `127.0.0.1` 與 `::1`。電腦關機、休眠、斷網、NetBird 中斷或 API 關閉時，手機會暫時無法使用。完整步驟見 `私人VPN連線說明.txt`。

@@ -74,6 +74,8 @@ start_land_customer_system_postgresql.bat
 start_home_server_vpn.bat
 ```
 
+家中主機平常只需要開啟這一個檔案。它會依序確認 NetBird、PostgreSQL Windows 服務、私人 VPN 防火牆、專案資料庫連線、HTTPS 憑證與每日備份；只有首次缺少系統設定時才會要求管理員授權或 PostgreSQL 管理員密碼。啟動後請保持該視窗開啟。
+
 iPhone 行動版：
 
 ```text
@@ -82,15 +84,13 @@ start_mobile_server_https.bat
 
 iPhone 第一次設定請依 `iPhone連線說明.txt` 安裝本機 CA；之後用 Safari 開啟啟動視窗顯示的 `https://192.168.x.x:8732/mobile/`，即可加入主畫面。手機熱點首次使用前仍須以系統管理員身分重新執行防火牆設定檔。
 
-外出或不同網路使用：
+外出或不同網路使用時，家中主機仍只需執行：
 
 ```text
-setup_netbird_vpn.bat                 （只需首次登入）
-allow_netbird_vpn_firewall.bat        （首次以系統管理員執行）
-start_mobile_server_vpn.bat           （每次啟動）
+start_home_server_vpn.bat
 ```
 
-iPhone 安裝官方 NetBird App，與 Windows 使用同一帳號登入並 Connect，再開啟啟動視窗顯示的 `https://100.x.x.x:8732/mobile/`。完整步驟見 `私人VPN連線說明.txt`。
+啟動器會在需要時自動安裝／登入 NetBird、要求一次 UAC 並補齊防火牆。iPhone 安裝官方 NetBird App，與 Windows 使用同一帳號登入並 Connect，再開啟啟動視窗顯示的 `https://100.x.x.x:8732/mobile/`。完整步驟見 `私人VPN連線說明.txt`。
 
 公司筆電使用獨立的 `LandCustomerSystem-CompanyLaptopClient-v1.4.0-*.zip`。解壓縮後執行 `setup_netbird_client.bat` 登入同一個 NetBird 帳號，再執行 `start_company_laptop_desktop.bat`；完整步驟見 `公司筆電遠端使用說明.txt`。公司客戶端包不含 PostgreSQL、FastAPI Server、正式資料庫、帳密、備份或私鑰。
 

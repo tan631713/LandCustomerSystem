@@ -3,11 +3,12 @@
 
 2026-07-14 v1.4.0 家中伺服器／公司桌面客戶端
 - 家中主機是唯一 PostgreSQL、FastAPI、附件與備份伺服器。
+- `start_home_server_vpn.bat` 改為唯一一鍵入口，自動預檢 NetBird、PostgreSQL 服務、防火牆、資料庫連線、HTTPS 與備份；缺少權限或首次資料庫設定時會在同一流程引導完成。
 - 新增公司筆電完整桌面客戶端 ZIP，透過 NetBird HTTPS 讀寫家中資料，不含或啟動本機 PostgreSQL／Server。
 - 客戶端封裝會強制桌面 EXE 使用家中 API，避免直接點 EXE 誤建第二份正式資料。
 - 公司端只保存介面偏好資料庫，沒有 customers、地主、土地或附件資料表。
 - iPhone 維持 Safari 瀏覽器版；手機與公司桌面可同時操作家中 PostgreSQL。
-- 全系統 153 項自動測試全部通過。
+- 全系統 157 項自動測試全部通過，並完成本機與 NetBird HTTPS 實機健康檢查。
 
 2026-07-14 v1.3.0 NetBird 私人 VPN 外出連線
 - Windows 與 iPhone 登入同一個 NetBird 帳號後，可跨不同 Wi-Fi／4G／5G 安全連回自架系統。
