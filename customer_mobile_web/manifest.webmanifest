@@ -1,0 +1,20 @@
+{
+  "name": "土地資料系統－地主開發助手",
+  "short_name": "地主助手",
+  "description": "Windows 與 iPhone 共用 PostgreSQL 的土地開發 CRM",
+  "lang": "zh-Hant",
+  "start_url": "/mobile/",
+  "scope": "/mobile/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f2f6f4",
+  "theme_color": "#0f766e",
+  "icons": [
+    {
+      "src": "/mobile/app-icon.png",
+      "sizes": "1254x1254",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

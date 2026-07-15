@@ -1,0 +1,3 @@
+cryptography==49.0.0
+fastapi[standard-no-fastapi-cloud-cli]==0.139.0
+psycopg[binary]==3.3.4
