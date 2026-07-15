@@ -1,0 +1,49 @@
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Build and packaged delivery output
+build/
+dist/
+releases/
+*.spec
+*.zip
+*.sha256.txt
+
+# Graphify generated knowledge graph
+graphify-out/
+
+# Customer data, attachments, backups, and logs
+customers.db
+*.sqlite
+*.sqlite3
+backups/
+attachments/
+logs/
+.build-preserved-data/
+
+# Machine-specific reports and acceptance output
+local-postgres-setup-report.json
+postgres-migration-report.json
+release-acceptance*.json
+
+# Secrets, protected connection settings, and certificates
+.env
+.env.*
+*.key
+*.pem
+*.pfx
+*.p12
+*.dpapi
+
+# Editor and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini

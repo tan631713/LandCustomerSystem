@@ -1,0 +1,41 @@
+土地資料系統－公司筆電完整桌面程式
+====================================
+
+正式架構
+--------
+家中主機是唯一伺服器與唯一 PostgreSQL 資料來源。
+公司筆電只安裝完整桌面客戶端，不安裝 PostgreSQL、不啟動 FastAPI，也不保存第二份正式資料。
+iPhone 只使用 Safari／主畫面瀏覽器版。
+
+家中主機
+--------
+1. 保持 Windows、PostgreSQL 與 NetBird 開機連線，停用自動休眠。
+2. 執行 start_home_server_vpn.bat。
+3. 視窗不可關閉；畫面會顯示手機網址與家中 NetBird IP。
+
+公司筆電首次設定
+----------------
+1. 解壓縮完整的 CompanyLaptopClient ZIP，不可只複製 EXE。
+2. 執行 setup_netbird_client.bat，使用與家中主機相同的 NetBird 帳號登入。
+3. 不需要安裝 PostgreSQL，也不需要執行伺服器防火牆設定。
+
+公司筆電每次使用
+----------------
+1. 確認公司網路可以上網，NetBird 顯示 Connected。
+2. 執行 start_company_laptop_desktop.bat。
+3. 程式會先測試家中主機 8732，再開啟完整 Windows 桌面介面。
+4. 使用土地資料系統帳號登入；資料會立即讀寫家中 PostgreSQL。
+
+iPhone
+------
+1. NetBird 使用同一帳號登入並 Connect。
+2. Safari 開啟 https://家中NetBird-IP:8732/mobile/。
+3. iPhone 不需安裝 Windows 桌面程式。
+
+安全與限制
+----------
+- 公司筆電客戶端包只包含桌面程式、公開 CA 與家中 NetBird IP，不包含資料庫、PostgreSQL 帳密、伺服器私鑰或備份。
+- 公開 CA 只用於驗證家中 HTTPS 伺服器，不是私鑰。
+- 家中主機關機、休眠、斷網、NetBird 中斷或伺服器視窗關閉時，公司筆電與手機都無法使用。
+- 不要在家中路由器開放 5432、8732 或 8733。
+- 若家中主機重新加入 NetBird 而 IP 改變，更新 home_server_ip.txt 並重新建立包含新 IP 的 HTTPS 憑證。

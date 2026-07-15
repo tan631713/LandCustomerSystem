@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f766e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="地主助手">
+  <meta name="description" content="土地資料系統 iPhone 行動版">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" href="./app-icon.png">
+  <link rel="stylesheet" href="./styles.css">
+  <title>地主開發助手</title>
+</head>
+<body>
+  <div id="connection-banner" class="connection-banner" role="status">正在連線至自架伺服器…</div>
+
+  <main id="login-view" class="login-shell">
+    <section class="login-card" aria-labelledby="login-title">
+      <img class="app-logo" src="./app-icon.png" alt="土地資料系統">
+      <p class="eyebrow">土地資料系統</p>
+      <h1 id="login-title">地主開發助手</h1>
+      <p class="muted">使用桌面系統的帳號登入，資料會直接讀寫 PostgreSQL。</p>
+      <form id="login-form" class="stack-form">
+        <label>帳號
+          <input id="login-username" name="username" autocomplete="username" value="admin" required maxlength="80">
+        </label>
+        <label>密碼
+          <input id="login-password" name="password" type="password" autocomplete="current-password" required maxlength="256">
+        </label>
+        <button id="login-button" class="primary-button" type="submit">登入</button>
+      </form>
+      <p id="login-error" class="form-error" role="alert"></p>
+      <details class="install-help">
+        <summary>加入 iPhone 主畫面</summary>
+        <p>用 Safari 開啟此頁，點「分享」→「加入主畫面」，之後即可像 App 一樣啟動。</p>
+      </details>
+    </section>
+  </main>
+
+  <div id="app-shell" class="app-shell hidden">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">地主開發助手</p>
+        <h1 id="page-title">首頁</h1>
+      </div>
+      <button id="user-button" class="user-button" type="button" aria-label="登出">
+        <span id="user-name">使用者</span>
+        <small id="user-role"></small>
+      </button>
+    </header>
+
+    <main class="content-area">
+      <section id="page-home" class="page active" aria-labelledby="home-heading">
+        <h2 id="home-heading" class="sr-only">首頁</h2>
+        <div id="stats-grid" class="stats-grid">
+          <article class="stat-card"><span>土地持分</span><strong id="stat-records">—</strong></article>
+          <article class="stat-card"><span>地主</span><strong id="stat-owners">—</strong></article>
+          <article class="stat-card"><span>土地</span><strong id="stat-lands">—</strong></article>
+          <article class="stat-card accent"><span>待追蹤</span><strong id="stat-followups">—</strong></article>
+        </div>
+        <section class="panel">
+          <h2>快速開始</h2>
+          <div class="quick-grid">
+            <button type="button" data-go="owners">搜尋地主</button>
+            <button type="button" data-go="lands">搜尋土地</button>
+            <button type="button" data-go="followups">查看追蹤</button>
+            <button id="refresh-dashboard" type="button">重新整理</button>
+          </div>
+        </section>
+        <section class="panel safety-panel">
+          <h2>同步狀態</h2>
+          <p>此手機版不另外保存土地資料；每次操作都直接透過 FastAPI 讀寫自架 PostgreSQL。</p>
+        </section>
+      </section>
+
+      <section id="page-owners" class="page" aria-labelledby="owners-heading">
+        <h2 id="owners-heading">地主搜尋</h2>
+        <form id="owner-search-form" class="search-row">
+          <input id="owner-query" type="search" placeholder="姓名、身分證或地址" maxlength="200" enterkeyhint="search">
+          <button type="submit">搜尋</button>
+        </form>
+        <p id="owner-count" class="result-count"></p>
+        <div id="owner-results" class="result-list"></div>
+      </section>
+
+      <section id="page-lands" class="page" aria-labelledby="lands-heading">
+        <h2 id="lands-heading">土地搜尋</h2>
+        <form id="land-search-form" class="stack-form compact-form">
+          <label>關鍵字<input id="land-query" type="search" placeholder="地號或地主姓名" maxlength="200"></label>
+          <div class="field-pair">
+            <label>地區<input id="land-district" maxlength="100"></label>
+            <label>地段<input id="land-section" maxlength="100"></label>
+          </div>
+          <button type="submit">搜尋土地</button>
+        </form>
+        <p id="land-count" class="result-count"></p>
+        <div id="land-results" class="result-list"></div>
+      </section>
+
+      <section id="page-followups" class="page" aria-labelledby="followups-heading">
+        <div class="section-heading">
+          <h2 id="followups-heading">追蹤提醒</h2>
+          <button id="refresh-followups" type="button">重新整理</button>
+        </div>
+        <div id="followup-results" class="result-list"></div>
+      </section>
+    </main>
+
+    <nav class="bottom-nav" aria-label="主要功能">
+      <button class="active" type="button" data-page="home"><span>首頁</span></button>
+      <button type="button" data-page="owners"><span>地主</span></button>
+      <button type="button" data-page="lands"><span>土地</span></button>
+      <button type="button" data-page="followups"><span>追蹤</span></button>
+    </nav>
+  </div>
+
+  <section id="record-sheet" class="sheet hidden" role="dialog" aria-modal="true" aria-labelledby="record-title">
+    <div class="sheet-backdrop" data-close-sheet></div>
+    <div class="sheet-card">
+      <header class="sheet-header">
+        <div><p class="eyebrow">土地持分明細</p><h2 id="record-title">資料</h2></div>
+        <button type="button" class="icon-button" data-close-sheet aria-label="關閉">×</button>
+      </header>
+      <div id="record-detail" class="detail-grid"></div>
+      <section id="contact-section" class="sheet-section">
+        <h3>聯絡／拜訪紀錄</h3>
+        <div id="contact-results" class="timeline"></div>
+        <form id="contact-form" class="stack-form compact-form editor-only">
+          <div class="field-pair">
+            <label>日期<input id="contact-date" type="date" required></label>
+            <label>方式
+              <select id="contact-method"><option>面談</option><option>電話</option><option>LINE</option><option>簡訊</option><option>郵件</option><option>其他</option></select>
+            </label>
+          </div>
+          <label>結果<input id="contact-result" maxlength="200" placeholder="例如：願意進一步洽談"></label>
+          <label>內容<textarea id="contact-note" maxlength="5000" rows="3"></textarea></label>
+          <label>下次追蹤<input id="contact-next" type="date"></label>
+          <button type="submit">新增紀錄</button>
+        </form>
+      </section>
+      <section class="sheet-section editor-only">
+        <h3>設定追蹤</h3>
+        <form id="followup-form" class="stack-form compact-form">
+          <div class="field-pair">
+            <label>追蹤日期<input id="followup-date" type="date"></label>
+            <label>狀態<select id="followup-status"><option>未處理</option><option>進行中</option><option>完成</option></select></label>
+          </div>
+          <label>提醒備註<textarea id="followup-note" maxlength="3000" rows="2"></textarea></label>
+          <button type="submit">儲存追蹤</button>
+        </form>
+      </section>
+    </div>
+  </section>
+
+  <div id="toast" class="toast hidden" role="status"></div>
+  <script src="./app.js" defer></script>
+</body>
+</html>
