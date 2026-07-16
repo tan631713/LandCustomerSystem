@@ -129,6 +129,19 @@ class ProductionLauncherTests(unittest.TestCase):
         self.assertIn("--postgres', '--lan', '--prefer-vpn", runtime)
         self.assertIn("home-server-diagnostics.json", runtime)
         self.assertIn("Netbird.Netbird", runtime)
+        self.assertIn("PostgreSQL.PostgreSQL.18", runtime)
+        self.assertIn("Get-PrerequisiteState", runtime)
+        self.assertIn("Confirm-PrerequisiteInstallation", runtime)
+        self.assertIn("Read-Host '是否現在由系統協助安裝以上軟體？請輸入 Y 或 N'", runtime)
+        self.assertIn("install_decision = 'not_required'", runtime)
+        self.assertIn("missing_software = @()", runtime)
+        self.assertIn("--interactive", runtime)
+        self.assertIn("--accept-package-agreements", runtime)
+        self.assertIn("使用者選擇不安裝必要軟體", runtime)
+        self.assertLess(
+            runtime.index("Confirm-PrerequisiteInstallation -Missing"),
+            runtime.index("Install-MissingPrerequisites" , runtime.index("try {")),
+        )
         self.assertIn("status --ipv4", runtime)
         self.assertIn("100.64.0.0/10", runtime)
         self.assertNotIn("5432', '--lan", runtime)

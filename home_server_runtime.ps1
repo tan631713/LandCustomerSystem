@@ -27,6 +27,11 @@ $state = [ordered]@{
     status = 'starting'
     stage = 'initializing'
     message = ''
+    software_check = 'not_checked'
+    missing_software = @()
+    install_decision = 'not_required'
+    installed_software = @()
+    winget_available = $false
     netbird_ip = ''
     netbird_allowed_range = '100.64.0.0/10'
     postgresql_service = ''
@@ -57,6 +62,144 @@ function Set-Stage {
     $state.message = $Description
     Save-Diagnostics
     Write-Host $Description
+}
+
+function Get-PostgreSqlService {
+    return Get-Service -Name 'postgresql*' -ErrorAction SilentlyContinue |
+        Sort-Object @{ Expression = { if ($_.Status -eq 'Running') { 0 } else { 1 } } }, Name |
+        Select-Object -First 1
+}
+
+function Get-PostgreSqlBackupTool {
+    $command = Get-Command pg_dump -ErrorAction SilentlyContinue
+    if ($command) {
+        return $command.Source
+    }
+    $root = Join-Path $env:ProgramFiles 'PostgreSQL'
+    if (-not (Test-Path -LiteralPath $root -PathType Container)) {
+        return ''
+    }
+    $tool = Get-ChildItem -LiteralPath $root -Filter 'pg_dump.exe' -File -Recurse -ErrorAction SilentlyContinue |
+        Sort-Object FullName -Descending | Select-Object -First 1
+    if ($tool) {
+        return $tool.FullName
+    }
+    return ''
+}
+
+function Get-PrerequisiteState {
+    $missing = [Collections.Generic.List[object]]::new()
+    $postgresService = Get-PostgreSqlService
+    $postgresBackupTool = Get-PostgreSqlBackupTool
+    if (-not (Test-Path -LiteralPath $netBirdExecutable -PathType Leaf)) {
+        $missing.Add([PSCustomObject]@{
+            Key = 'netbird'
+            Name = 'NetBird 私人 VPN'
+            Reason = '手機與公司筆電需要透過私人 VPN 連回家中主機。'
+        })
+    }
+    if (-not $postgresService) {
+        $missing.Add([PSCustomObject]@{
+            Key = 'postgresql'
+            Name = 'PostgreSQL Server 18'
+            Reason = '正式地主、土地、持分與聯絡資料儲存在 PostgreSQL。'
+        })
+    } elseif (-not $postgresBackupTool) {
+        $missing.Add([PSCustomObject]@{
+            Key = 'postgresql_tools'
+            Name = 'PostgreSQL pg_dump 備份工具'
+            Reason = '每日壓縮備份需要 PostgreSQL 官方 pg_dump。'
+        })
+    }
+    $winget = Get-Command winget -ErrorAction SilentlyContinue
+    return [PSCustomObject]@{
+        Missing = @($missing)
+        Winget = $winget
+        PostgreSqlService = $postgresService
+        PostgreSqlBackupTool = $postgresBackupTool
+    }
+}
+
+function Confirm-PrerequisiteInstallation {
+    param([Parameter(Mandatory = $true)][object[]]$Missing)
+    Write-Host ''
+    Write-Host '偵測到尚未安裝的必要軟體：' -ForegroundColor Yellow
+    for ($index = 0; $index -lt $Missing.Count; $index++) {
+        Write-Host ("  {0}. {1}" -f ($index + 1), $Missing[$index].Name)
+        Write-Host ("     {0}" -f $Missing[$index].Reason)
+    }
+    Write-Host ''
+    $answer = (Read-Host '是否現在由系統協助安裝以上軟體？請輸入 Y 或 N').Trim()
+    return $answer -match '^(?i:y|yes|是)$'
+}
+
+function Resolve-PostgreSqlWingetId {
+    param([Parameter(Mandatory = $true)]$Winget)
+    foreach ($candidate in @(
+        'PostgreSQL.PostgreSQL.18',
+        'PostgreSQL.PostgreSQL.17',
+        'PostgreSQL.PostgreSQL.16'
+    )) {
+        & $Winget.Source show --id $candidate --exact --source winget --accept-source-agreements *> $null
+        if ($LASTEXITCODE -eq 0) {
+            return $candidate
+        }
+    }
+    throw 'Windows 套件來源中找不到可用的 PostgreSQL 安裝套件。'
+}
+
+function Install-WingetPackage {
+    param(
+        [Parameter(Mandatory = $true)]$Winget,
+        [Parameter(Mandatory = $true)][string]$PackageId,
+        [switch]$Interactive,
+        [switch]$Force
+    )
+    $arguments = [Collections.Generic.List[string]]::new()
+    foreach ($value in @(
+        'install', '--id', $PackageId, '--exact', '--source', 'winget',
+        '--accept-package-agreements', '--accept-source-agreements'
+    )) {
+        $arguments.Add($value)
+    }
+    if ($Interactive) {
+        $arguments.Add('--interactive')
+    } else {
+        $arguments.Add('--silent')
+    }
+    if ($Force) {
+        $arguments.Add('--force')
+    }
+    & $Winget.Source @arguments | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw "必要軟體安裝失敗：$PackageId（錯誤代碼 $LASTEXITCODE）。"
+    }
+}
+
+function Install-MissingPrerequisites {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Missing,
+        [Parameter(Mandatory = $true)]$Winget
+    )
+    $installed = [Collections.Generic.List[string]]::new()
+    $keys = @($Missing | ForEach-Object { $_.Key })
+    if ($keys -contains 'netbird') {
+        Write-Host '正在安裝 NetBird 官方用戶端...'
+        Install-WingetPackage -Winget $Winget -PackageId 'Netbird.Netbird'
+        $installed.Add('NetBird 私人 VPN')
+    }
+    if ($keys -contains 'postgresql' -or $keys -contains 'postgresql_tools') {
+        $postgresPackage = Resolve-PostgreSqlWingetId -Winget $Winget
+        Write-Host '即將開啟 PostgreSQL 官方互動安裝程式。'
+        Write-Host '請自行設定並記住 postgres 管理員密碼；系統不會保存這個密碼。'
+        Install-WingetPackage `
+            -Winget $Winget `
+            -PackageId $postgresPackage `
+            -Interactive `
+            -Force:($keys -contains 'postgresql_tools')
+        $installed.Add('PostgreSQL Server 與備份工具')
+    }
+    return @($installed)
 }
 
 function Get-NetBirdIp {
@@ -131,22 +274,42 @@ function Start-CertificateService {
 try {
     Save-Diagnostics
 
-    Set-Stage -Name 'netbird' -Description '[1/6] 檢查 NetBird 私人 VPN...'
-    if (-not (Test-Path -LiteralPath $netBirdExecutable -PathType Leaf)) {
+    Set-Stage -Name 'prerequisites' -Description '[1/7] 檢查必要軟體...'
+    $prerequisites = Get-PrerequisiteState
+    $state.winget_available = [bool]$prerequisites.Winget
+    $state.missing_software = @($prerequisites.Missing | ForEach-Object { $_.Name })
+    $state.software_check = if ($prerequisites.Missing.Count -eq 0) { 'ok' } else { 'missing' }
+    Save-Diagnostics
+    if ($prerequisites.Missing.Count -gt 0) {
         if ($Mode -eq 'Check') {
-            throw '尚未安裝 NetBird。'
+            throw ("缺少必要軟體：{0}。" -f ($state.missing_software -join '、'))
         }
-        $winget = Get-Command winget -ErrorAction SilentlyContinue
-        if (-not $winget) {
-            throw '找不到 NetBird，也找不到 Windows 套件管理員 winget。'
+        if (-not $prerequisites.Winget) {
+            $state.install_decision = 'unavailable'
+            Save-Diagnostics
+            throw '缺少必要軟體，而且找不到 Windows 套件管理員 winget；請先從 Microsoft Store 安裝「應用程式安裝程式」。'
         }
-        Write-Host '正在安裝 NetBird 官方用戶端...'
-        & $winget.Source install --id Netbird.Netbird --exact --silent --accept-package-agreements --accept-source-agreements | Out-Host
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $netBirdExecutable -PathType Leaf)) {
-            throw 'NetBird 自動安裝失敗，請先安裝 NetBird 後再試。'
+        if (-not (Confirm-PrerequisiteInstallation -Missing $prerequisites.Missing)) {
+            $state.install_decision = 'declined'
+            Save-Diagnostics
+            throw '使用者選擇不安裝必要軟體，伺服器未啟動。'
         }
+        $state.install_decision = 'approved'
+        Save-Diagnostics
+        $state.installed_software = @(Install-MissingPrerequisites `
+            -Missing $prerequisites.Missing `
+            -Winget $prerequisites.Winget)
+        $verifiedPrerequisites = Get-PrerequisiteState
+        $state.missing_software = @($verifiedPrerequisites.Missing | ForEach-Object { $_.Name })
+        if ($verifiedPrerequisites.Missing.Count -gt 0) {
+            Save-Diagnostics
+            throw ("安裝完成後仍缺少：{0}。請重新啟動 Windows 後再試。" -f ($state.missing_software -join '、'))
+        }
+        $state.software_check = 'ok'
+        Save-Diagnostics
     }
 
+    Set-Stage -Name 'netbird' -Description '[2/7] 檢查 NetBird 私人 VPN...'
     $vpnIp = Get-NetBirdIp
     if (-not $vpnIp -and $Mode -eq 'Start') {
         Write-Host 'NetBird 尚未登入，接下來會開啟官方登入頁。'
@@ -164,7 +327,7 @@ try {
     Save-Diagnostics
     Write-Host "NetBird IP：$vpnIp"
 
-    Set-Stage -Name 'windows_services' -Description '[2/6] 檢查 PostgreSQL 服務與 NetBird 防火牆...'
+    Set-Stage -Name 'windows_services' -Description '[3/7] 檢查 PostgreSQL 服務與 NetBird 防火牆...'
     if (-not (Test-Path -LiteralPath $preflightScript -PathType Leaf)) {
         throw '找不到伺服器環境檢查檔，封裝可能不完整。'
     }
@@ -205,7 +368,7 @@ try {
         throw "連接埠 8732 已被其他程式占用（PID $owner），請關閉舊伺服器視窗後再試。"
     }
 
-    Set-Stage -Name 'database' -Description '[3/6] 檢查 PostgreSQL 專案資料庫...'
+    Set-Stage -Name 'database' -Description '[4/7] 檢查 PostgreSQL 專案資料庫...'
     $databaseCode = Invoke-ServerTool -Arguments @('--postgres', '--check')
     if ($databaseCode -ne 0 -and $Mode -eq 'Start') {
         Write-Host '尚未完成這台 Windows 使用者的資料庫設定，現在進行一次性設定。'
@@ -230,7 +393,7 @@ try {
         exit 0
     }
 
-    Set-Stage -Name 'https' -Description '[4/6] 建立包含目前 NetBird IP 的 HTTPS 憑證...'
+    Set-Stage -Name 'https' -Description '[5/7] 建立包含目前 NetBird IP 的 HTTPS 憑證...'
     $httpsCode = Invoke-ServerTool -Arguments @('--setup-https', '--prefer-vpn')
     if ($httpsCode -ne 0 -or
         -not (Test-Path -LiteralPath $serverCertificate -PathType Leaf) -or
@@ -247,7 +410,7 @@ try {
     }
     Save-Diagnostics
 
-    Set-Stage -Name 'backup' -Description '[5/6] 檢查每日 PostgreSQL 備份...'
+    Set-Stage -Name 'backup' -Description '[6/7] 檢查每日 PostgreSQL 備份...'
     $backupCode = Invoke-ServerTool -Arguments @('--backup-if-due-hours', '24', '--backup-label', 'auto')
     if ($backupCode -eq 0) {
         $state.backup_status = 'ok'
@@ -257,7 +420,7 @@ try {
     }
     Save-Diagnostics
 
-    Set-Stage -Name 'server' -Description '[6/6] 啟動 HTTPS 伺服器...'
+    Set-Stage -Name 'server' -Description '[7/7] 啟動 HTTPS 伺服器...'
     Write-Host ''
     Write-Host 'NetBird 私人 VPN 已就緒。'
     Write-Host "手機瀏覽器：$($state.api_url)"

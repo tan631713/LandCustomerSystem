@@ -1,6 +1,6 @@
 土地資料系統 交付說明
 
-版本：v1.4.1
+版本：v1.4.2
 建置日期：2026-07-16
 驗收日期：2026-07-16
 
@@ -20,6 +20,13 @@
 - API 或手機伺服器啟動時會檢查每日 PostgreSQL 壓縮備份。
 - 啟動器每 24 小時自動建立備份；備份包含 PostgreSQL dump、manifest 與納管附件。
 - 備份預設放在 %LOCALAPPDATA%\LandCustomerSystem\postgres-backups，保留 90 天、最多 30 份且至少保留 3 份。
+
+v1.4.2 必要軟體確認安裝
+- 啟動前判斷 NetBird、PostgreSQL Server 與 pg_dump 是否已安裝。
+- 缺少軟體時先列出名稱與用途，必須由使用者輸入 Y／Yes／是才會安裝；拒絕時不修改系統並停止啟動。
+- NetBird 由官方 winget 套件靜默安裝；PostgreSQL 使用官方互動安裝程式，由使用者自行設定管理密碼。
+- 缺少 winget 時不會嘗試繞過，會指示安裝 Microsoft「應用程式安裝程式」。
+- 診斷檔記錄缺少項目、winget 狀態與使用者決定，不記錄密碼、DSN 或權杖。
 
 v1.4.1 單一伺服器入口修正
 - 伺服器包最外層只保留「啟動家中伺服器.bat」，刪除所有舊版與重複啟動檔。
