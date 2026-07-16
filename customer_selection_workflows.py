@@ -1,0 +1,167 @@
+"""Desktop table selection and checked-record workflows."""
+
+from customer_preferences import encode_table_preferences
+from PySide6.QtCore import QTimer
+
+
+class SelectionWorkflowMixin:
+    def selected_or_checked_record_ids(self):
+        ids = set(self.checked_record_ids)
+        ids.update(self.selected_table_record_ids())
+        return sorted(ids)
+
+    def selected_table_record_ids(self):
+        if self.table_view is None or self.table_view.selectionModel() is None:
+            return []
+        selected_rows = sorted(
+            {
+                index.row()
+                for index in self.table_view.selectionModel().selectedIndexes()
+                if index.isValid()
+            }
+        )
+        record_ids = []
+        for row_number in selected_rows:
+            row = self.table_model.row_record(row_number)
+            if row is not None:
+                record_ids.append(row["id"])
+        if not record_ids and self.selected_record_id is not None:
+            record_ids.append(self.selected_record_id)
+        return record_ids
+
+    def current_result_record_ids(self):
+        if self.table_model is None:
+            return []
+        return [row["id"] for row in self.table_model.load_all()]
+
+    def update_checked_records(self, record_ids, checked, action_label):
+        ids = sorted({int(record_id) for record_id in record_ids})
+        if not ids:
+            self._app_component("QMessageBox").information(self, "沒有資料", "目前沒有可處理的資料。")
+            return 0
+        changed = 0
+        for record_id in ids:
+            already_checked = record_id in self.checked_record_ids
+            if checked and not already_checked:
+                self.checked_record_ids.add(record_id)
+                changed += 1
+            elif not checked and already_checked:
+                self.checked_record_ids.discard(record_id)
+                changed += 1
+            self.table_model.update_checked_state(record_id, record_id in self.checked_record_ids)
+        if changed:
+            self.schedule_selection_state_save()
+        if self.show_checked_only:
+            QTimer.singleShot(0, self.refresh_records)
+        self.update_selection_status(f"{action_label}：{changed} 筆，已勾選 {len(self.checked_record_ids)} 筆")
+        return changed
+
+    def check_selected_rows(self):
+        ids = self.selected_table_record_ids()
+        if not ids:
+            self._app_component("QMessageBox").information(self, "尚未選取", "請先在表格中選取一列或多列。")
+            return
+        self.update_checked_records(ids, True, "勾選選取列")
+
+    def uncheck_selected_rows(self):
+        ids = self.selected_table_record_ids()
+        if not ids:
+            self._app_component("QMessageBox").information(self, "尚未選取", "請先在表格中選取一列或多列。")
+            return
+        self.update_checked_records(ids, False, "取消選取列勾選")
+
+    def check_visible_records(self):
+        self.update_checked_records(self.current_result_record_ids(), True, "勾選目前搜尋結果")
+
+    def uncheck_visible_records(self):
+        self.update_checked_records(self.current_result_record_ids(), False, "取消目前搜尋結果勾選")
+
+    def invert_visible_checked_records(self):
+        ids = self.current_result_record_ids()
+        if not ids:
+            self._app_component("QMessageBox").information(self, "沒有資料", "目前搜尋結果沒有可反轉的資料。")
+            return
+        changed = 0
+        for record_id in ids:
+            if record_id in self.checked_record_ids:
+                self.checked_record_ids.discard(record_id)
+            else:
+                self.checked_record_ids.add(record_id)
+            changed += 1
+            self.table_model.update_checked_state(record_id, record_id in self.checked_record_ids)
+        if changed:
+            self.schedule_selection_state_save()
+        if self.show_checked_only:
+            QTimer.singleShot(0, self.refresh_records)
+        self.update_selection_status(f"已反轉目前搜尋結果 {changed} 筆，已勾選 {len(self.checked_record_ids)} 筆")
+
+    def clear_checked_selection(self):
+        count = len(self.checked_record_ids)
+        if not count:
+            self.update_selection_status("目前沒有已勾選資料")
+            return
+        ids = sorted(self.checked_record_ids)
+        self.checked_record_ids.clear()
+        for record_id in ids:
+            self.table_model.update_checked_state(record_id, False)
+        self.schedule_selection_state_save()
+        if self.show_checked_only:
+            QTimer.singleShot(0, self.refresh_records)
+        self.update_selection_status(f"已取消全部勾選：{count} 筆")
+
+    def update_selection_status(self, message=None):
+        if self.table_view is None or self.table_model is None:
+            return
+        if message:
+            self.statusBar().showMessage(message, 3500)
+            return
+        selected_count = len(self.selected_table_record_ids())
+        checked_count = len(self.checked_record_ids)
+        if selected_count or checked_count:
+            self.statusBar().showMessage(
+                f"已選取 {selected_count} 筆；已勾選 {checked_count} 筆",
+                2500,
+            )
+
+    def selected_record_plain_data(self):
+        if self.selected_record_id is None:
+            return None, None
+        row = self.active_record_repository().get_customer(self.selected_record_id)
+        if row is None:
+            return None, None
+        return row, self.get_plain_record_data(row)
+
+    def filter_management_records(self, field_key, value):
+        value = str(value or "").strip()
+        if not value:
+            return
+        self.advanced_search_criteria = {}
+        self.repository.set_setting(self.advanced_search_setting_key, encode_table_preferences({}))
+        self.search_input.setText(value)
+        index = self.filter_field_combo.findData(field_key)
+        self.filter_field_combo.blockSignals(True)
+        try:
+            self.filter_field_combo.setCurrentIndex(index if index >= 0 else 0)
+        finally:
+            self.filter_field_combo.blockSignals(False)
+        self.refresh_records()
+        self.statusBar().showMessage(f"已顯示「{value}」相關資料。", 3500)
+
+    def on_checked_state_changed(self, record_id, checked):
+        if checked:
+            self.checked_record_ids.add(record_id)
+        else:
+            self.checked_record_ids.discard(record_id)
+        self.schedule_selection_state_save()
+        self.update_selection_status()
+        if self.show_checked_only:
+            QTimer.singleShot(0, self.refresh_records)
+
+    def toggle_checked_only(self, enabled):
+        self.show_checked_only = enabled
+        self.refresh_records()
+        message = "目前僅顯示勾選資料" if enabled else "已顯示全部符合條件的資料"
+        self.statusBar().showMessage(message, 2500)
+
+    def eventFilter(self, watched, event):
+        return super().eventFilter(watched, event)

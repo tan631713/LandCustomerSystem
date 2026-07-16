@@ -404,6 +404,129 @@ class CustomerApiTests(unittest.TestCase):
             404,
         )
 
+    def test_desktop_productivity_endpoints_complete_remote_workflow(self):
+        headers = self.login()
+
+        field = self.client.post(
+            "/api/v1/custom-fields",
+            headers=headers,
+            json={"label": "開發進度", "field_key": "development_stage"},
+        )
+        self.assertEqual(field.status_code, 201, field.text)
+        field_id = field.json()["id"]
+        values = self.client.put(
+            f"/api/v1/records/{self.record_id}/custom-values",
+            headers=headers,
+            json={"values": {str(field_id): "已拜訪"}},
+        )
+        self.assertEqual(values.status_code, 200, values.text)
+        stored_values = self.client.get(
+            f"/api/v1/records/{self.record_id}/custom-values", headers=headers
+        )
+        self.assertEqual(stored_values.json()["values"][str(field_id)], "已拜訪")
+
+        template = self.client.post(
+            "/api/v1/text-templates",
+            headers=headers,
+            json={
+                "title": "首次拜訪",
+                "content": "已完成首次拜訪",
+                "template_type": "visit_log",
+            },
+        )
+        self.assertEqual(template.status_code, 201, template.text)
+        templates = self.client.get("/api/v1/text-templates", headers=headers)
+        self.assertEqual(templates.json()["items"][0]["title"], "首次拜訪")
+
+        watchlist = self.client.put(
+            "/api/v1/watchlist",
+            headers=headers,
+            json={"items": [{"name": "王大明", "note": "先電話聯絡"}]},
+        )
+        self.assertEqual(watchlist.json()["count"], 1)
+        self.assertEqual(
+            self.client.get("/api/v1/watchlist", headers=headers).json()["items"][0][
+                "note"
+            ],
+            "先電話聯絡",
+        )
+
+        change_logs = self.client.post(
+            "/api/v1/record-change-logs",
+            headers=headers,
+            json={
+                "items": [
+                    {
+                        "record_id": self.record_id,
+                        "action_type": "批次修改",
+                        "field_key": "note",
+                        "field_label": "備註",
+                        "old_value": "",
+                        "new_value": "完成",
+                    }
+                ]
+            },
+        )
+        self.assertEqual(change_logs.json()["count"], 1)
+        history = self.client.get(
+            f"/api/v1/records/{self.record_id}/change-logs", headers=headers
+        )
+        self.assertEqual(history.json()["items"][0]["field_label"], "備註")
+
+        operation = self.client.post(
+            "/api/v1/operation-logs",
+            headers=headers,
+            json={"action_type": "測試", "summary": "遠端操作", "detail": "完成"},
+        )
+        self.assertEqual(operation.status_code, 201, operation.text)
+        operation_logs = self.client.get("/api/v1/operation-logs", headers=headers)
+        self.assertEqual(operation_logs.json()["items"][0]["summary"], "遠端操作")
+
+        location = self.client.put(
+            f"/api/v1/records/{self.record_id}/location",
+            headers=headers,
+            json={"latitude": 24.99, "longitude": 121.31, "source": "manual"},
+        )
+        self.assertEqual(location.status_code, 200, location.text)
+        locations = self.client.get("/api/v1/record-locations", headers=headers)
+        self.assertEqual(locations.json()["items"][0]["customer_id"], self.record_id)
+
+        second_id = self.source.repository.save_customer(
+            encrypt_record(
+                self.fernet,
+                self.record(
+                    district="桃園區",
+                    section="中正段",
+                    land_number="100-2",
+                    owner_name="王大明",
+                ),
+            )
+        )
+        ignored = self.client.post(
+            "/api/v1/duplicate-reviews",
+            headers=headers,
+            json={
+                "left_record_id": self.record_id,
+                "right_record_id": second_id,
+            },
+        )
+        self.assertEqual(ignored.status_code, 201, ignored.text)
+        reviews = self.client.get("/api/v1/duplicate-reviews", headers=headers)
+        self.assertEqual(len(reviews.json()["items"]), 1)
+
+        attachment_check = self.client.post(
+            "/api/v1/attachments/verify", headers=headers, json={}
+        )
+        self.assertEqual(attachment_check.status_code, 200, attachment_check.text)
+
+        viewer_headers = self.login("viewer", "viewer-password")
+        denied = self.client.put(
+            "/api/v1/watchlist",
+            headers=viewer_headers,
+            json={"items": []},
+        )
+        self.assertEqual(denied.status_code, 403)
+
     def test_transactional_record_import_inserts_updates_and_enforces_roles(self):
         admin_headers = self.login()
         inserted_values = self.record(

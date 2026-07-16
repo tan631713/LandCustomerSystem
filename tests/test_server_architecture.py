@@ -1,0 +1,76 @@
+import unittest
+
+from customer_api.app import create_app
+from customer_api.config import ApiSettings
+
+
+class ServerRouteInventoryTests(unittest.TestCase):
+    def test_all_public_api_routes_are_registered_after_modularization(self):
+        app = create_app(settings=ApiSettings(), data_source=object())
+        actual = {
+            (method, route.path)
+            for route in app.routes
+            for method in (getattr(route, "methods", None) or ())
+            if route.path == "/health" or route.path.startswith("/api/v1/")
+        }
+        expected = {
+            ("GET", "/health"),
+            ("POST", "/api/v1/auth/login"),
+            ("POST", "/api/v1/auth/logout"),
+            ("GET", "/api/v1/auth/me"),
+            ("GET", "/api/v1/records"),
+            ("GET", "/api/v1/records/{record_id}"),
+            ("POST", "/api/v1/records"),
+            ("PUT", "/api/v1/records/{record_id}"),
+            ("DELETE", "/api/v1/records/{record_id}"),
+            ("POST", "/api/v1/imports/records"),
+            ("GET", "/api/v1/records/{record_id}/contact-logs"),
+            ("POST", "/api/v1/records/{record_id}/contact-logs"),
+            ("DELETE", "/api/v1/records/{record_id}/contact-logs/{log_id}"),
+            ("GET", "/api/v1/records/{record_id}/follow-up"),
+            ("PUT", "/api/v1/records/{record_id}/follow-up"),
+            ("DELETE", "/api/v1/records/{record_id}/follow-up"),
+            ("GET", "/api/v1/follow-ups"),
+            ("GET", "/api/v1/projects"),
+            ("POST", "/api/v1/projects"),
+            ("PUT", "/api/v1/projects/{project_id}"),
+            ("DELETE", "/api/v1/projects/{project_id}"),
+            ("PUT", "/api/v1/projects/{project_id}/records"),
+            ("GET", "/api/v1/tags"),
+            ("POST", "/api/v1/tags"),
+            ("PUT", "/api/v1/tags/assignments"),
+            ("PUT", "/api/v1/tags/{tag_id}"),
+            ("DELETE", "/api/v1/tags/{tag_id}"),
+            ("GET", "/api/v1/records/{record_id}/tags"),
+            ("PUT", "/api/v1/records/{record_id}/tags"),
+            ("GET", "/api/v1/records/{record_id}/attachments"),
+            ("POST", "/api/v1/records/{record_id}/attachments"),
+            ("POST", "/api/v1/records/{record_id}/attachments/upload"),
+            ("GET", "/api/v1/records/{record_id}/attachments/{attachment_id}/content"),
+            ("DELETE", "/api/v1/records/{record_id}/attachments/{attachment_id}"),
+            ("GET", "/api/v1/owners"),
+            ("GET", "/api/v1/lands"),
+            ("GET", "/api/v1/records/{record_id}/change-logs"),
+            ("POST", "/api/v1/record-change-logs"),
+            ("GET", "/api/v1/custom-fields"),
+            ("POST", "/api/v1/custom-fields"),
+            ("PUT", "/api/v1/custom-fields/{field_id}"),
+            ("DELETE", "/api/v1/custom-fields/{field_id}"),
+            ("GET", "/api/v1/records/{record_id}/custom-values"),
+            ("PUT", "/api/v1/records/{record_id}/custom-values"),
+            ("PUT", "/api/v1/custom-values/assignments"),
+            ("GET", "/api/v1/text-templates"),
+            ("POST", "/api/v1/text-templates"),
+            ("PUT", "/api/v1/text-templates/{template_id}"),
+            ("DELETE", "/api/v1/text-templates/{template_id}"),
+            ("GET", "/api/v1/watchlist"),
+            ("PUT", "/api/v1/watchlist"),
+            ("GET", "/api/v1/operation-logs"),
+            ("POST", "/api/v1/operation-logs"),
+            ("GET", "/api/v1/record-locations"),
+            ("PUT", "/api/v1/records/{record_id}/location"),
+            ("GET", "/api/v1/duplicate-reviews"),
+            ("POST", "/api/v1/duplicate-reviews"),
+            ("POST", "/api/v1/attachments/verify"),
+        }
+        self.assertEqual(actual, expected)

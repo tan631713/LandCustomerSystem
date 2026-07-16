@@ -80,13 +80,11 @@ def build_parser():
     return parser
 
 
-def main(argv=None):
-    parser = build_parser()
-    args = parser.parse_args(argv)
+def run_maintenance_action(args):
     if args.setup_postgresql:
         from setup_local_postgresql import main as setup_postgresql_main
 
-        return setup_postgresql_main([])
+        return True, setup_postgresql_main([])
     if args.setup_https:
         from setup_local_https import create_local_https_certificate
 
@@ -97,41 +95,45 @@ def main(argv=None):
                 indent=2,
             )
         )
-        return 0
+        return True, 0
     if args.install_iphone_certificate:
         from install_iphone_certificate_server import main as install_certificate_main
 
         certificate_arguments = ["--port", str(args.certificate_port)]
         if args.prefer_vpn:
             certificate_arguments.append("--prefer-vpn")
-        return install_certificate_main(certificate_arguments)
+        return True, install_certificate_main(certificate_arguments)
     if args.backup or args.backup_if_due_hours:
         from backup_postgresql import main as backup_main
 
         backup_arguments = ["--label", args.backup_label]
         if args.backup_if_due_hours:
             backup_arguments.extend(["--if-due-hours", str(args.backup_if_due_hours)])
-        return backup_main(backup_arguments)
+        return True, backup_main(backup_arguments)
+    return False, None
+
+
+def run_database_check(args):
     if args.postgres:
         os.environ["CUSTOMER_API_BACKEND"] = "postgresql"
 
-    if args.check:
-        try:
-            settings = ApiSettings.from_env()
-            source = create_data_source(settings)
-            result = source.health()
-        except Exception as exc:
-            print(
-                json.dumps(database_check_failure(exc), ensure_ascii=False, indent=2),
-                file=sys.stderr,
-            )
-            return 1
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-        return 0
+    if not args.check:
+        return None
+    try:
+        settings = ApiSettings.from_env()
+        source = create_data_source(settings)
+        result = source.health()
+    except Exception as exc:
+        print(
+            json.dumps(database_check_failure(exc), ensure_ascii=False, indent=2),
+            file=sys.stderr,
+        )
+        return 1
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
 
-    settings = ApiSettings.from_env()
-    source = create_data_source(settings)
 
+def validate_listener(parser, args):
     host = "0.0.0.0" if args.lan else args.host
     is_public_listener = host not in LOOPBACK_HOSTS
     has_tls = bool(args.ssl_certfile and args.ssl_keyfile)
@@ -142,24 +144,46 @@ def main(argv=None):
             "區域網路登入會傳送敏感資料；請設定 SSL，或僅在可信 Wi-Fi 測試時加上 "
             "--allow-insecure-lan。絕對不可直接開放到網際網路。"
         )
+    return host, has_tls
+
+
+def show_lan_addresses(args, has_tls):
+    if not args.lan:
+        return
+    from setup_local_https import lan_ipv4_addresses
+
+    scheme = "https" if has_tls else "http"
+    addresses = lan_ipv4_addresses(prefer_vpn=args.prefer_vpn)
+    if addresses:
+        print("iPhone 行動版（請使用手機目前所在網路對應的 IP）：")
+        for address in addresses:
+            print(f"  {scheme}://{address}:{args.port}/mobile/")
+        print(f"API 文件：{scheme}://{addresses[0]}:{args.port}/docs")
+    else:
+        print("找不到可供手機連線的區域網路 IPv4；請先讓電腦連上 Wi-Fi 或熱點。")
+    if args.prefer_vpn:
+        print("私人 VPN 模式：請優先使用 100.x 開頭的 NetBird 網址。")
+    print("若使用手機熱點，請先以系統管理員執行防火牆設定檔；熱點在 Windows 常屬公用網路。")
+    print("外出使用時請透過私人 VPN，不要在路由器開放 API 或 PostgreSQL 連接埠。")
+
+
+def main(argv=None):
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    handled, exit_code = run_maintenance_action(args)
+    if handled:
+        return exit_code
+
+    check_exit_code = run_database_check(args)
+    if check_exit_code is not None:
+        return check_exit_code
+
+    settings = ApiSettings.from_env()
+    source = create_data_source(settings)
+    host, has_tls = validate_listener(parser, args)
 
     app = create_app(settings=settings, data_source=source)
-    if args.lan:
-        from setup_local_https import lan_ipv4_addresses
-
-        scheme = "https" if has_tls else "http"
-        addresses = lan_ipv4_addresses(prefer_vpn=args.prefer_vpn)
-        if addresses:
-            print("iPhone 行動版（請使用手機目前所在網路對應的 IP）：")
-            for address in addresses:
-                print(f"  {scheme}://{address}:{args.port}/mobile/")
-            print(f"API 文件：{scheme}://{addresses[0]}:{args.port}/docs")
-        else:
-            print("找不到可供手機連線的區域網路 IPv4；請先讓電腦連上 Wi-Fi 或熱點。")
-        if args.prefer_vpn:
-            print("私人 VPN 模式：請優先使用 100.x 開頭的 NetBird 網址。")
-        print("若使用手機熱點，請先以系統管理員執行防火牆設定檔；熱點在 Windows 常屬公用網路。")
-        print("外出使用時請透過私人 VPN，不要在路由器開放 API 或 PostgreSQL 連接埠。")
+    show_lan_addresses(args, has_tls)
     uvicorn.run(
         app,
         host=host,

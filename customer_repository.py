@@ -770,7 +770,7 @@ class CustomerRepository:
 
     def log_operation(self, action_type, summary, detail=None):
         with self.database.connect() as conn:
-            conn.execute(
+            cursor = conn.execute(
                 """
                 INSERT INTO operation_logs (
                     action_type, summary, detail, actor_username
@@ -778,6 +778,7 @@ class CustomerRepository:
                 """,
                 (action_type, summary, detail, self.current_actor),
             )
+        return int(cursor.lastrowid)
 
     def get_operation_logs(self, limit=300):
         with self.database.connect() as conn:

@@ -1489,9 +1489,11 @@ class UiWorkflowTests(unittest.TestCase):
                 [
                     "同地號批量新增",
                     "匯入 .xlsx",
+                    "Excel 匯入設定檔",
                     "匯出 Excel",
                     "匯出選取資料",
                     "匯出選取 Word",
+                    "報表與列印範本",
                     "傳送選取資料到手機",
                 ],
             )
@@ -1531,6 +1533,12 @@ class UiWorkflowTests(unittest.TestCase):
             self.assertIn("進階搜尋", supported_tool_labels)
             self.assertIn("資料統計儀表板", supported_tool_labels)
             self.assertIn("系統健康檢查", supported_tool_labels)
+            self.assertIn("查看修改歷史", supported_tool_labels)
+            self.assertIn("批次修改勾選資料", supported_tool_labels)
+            self.assertIn("自訂欄位管理", supported_tool_labels)
+            self.assertIn("智慧重複資料檢查", supported_tool_labels)
+            self.assertIn("地圖與地號視覺化", supported_tool_labels)
+            self.assertIn("刪除已勾選資料", supported_tool_labels)
             self.assertTrue(
                 all(action.isEnabled() for action in window.api_supported_tool_actions)
             )
@@ -1542,7 +1550,16 @@ class UiWorkflowTests(unittest.TestCase):
             }
             self.assertEqual(
                 supported_setting_labels,
-                {"字體大小", "欄位顯示", "唯讀模式", "使用說明", "關於系統"},
+                {
+                    "注意名單管理",
+                    "操作記錄",
+                    "字體大小",
+                    "欄位顯示",
+                    "唯讀模式",
+                    "檢查納管附件",
+                    "使用說明",
+                    "關於系統",
+                },
             )
             self.assertTrue(
                 all(action.isEnabled() for action in window.api_supported_settings_actions)
