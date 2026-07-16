@@ -684,6 +684,8 @@ def init_operation_log_db(conn):
 
 
 def log_operation(action_type, summary, detail=None):
+    if desktop_api_requested():
+        return None
     return REPOSITORY.log_operation(action_type, summary, detail)
 
 
@@ -1169,15 +1171,17 @@ class LandApp(
         share_mobile_action = QAction("傳送選取資料到手機", self)
         share_mobile_action.triggered.connect(self.share_selected_to_mobile)
         self.data_menu.addAction(share_mobile_action)
-        self.api_preview_supported_data_actions = (import_action,)
-        self.api_preview_unavailable_data_actions = (
+        self.api_preview_supported_data_actions = (
             batch_add_action,
-            import_profiles_action,
+            import_action,
             export_action,
             export_selected_action,
             export_selected_word_action,
-            report_templates_action,
             share_mobile_action,
+        )
+        self.api_preview_unavailable_data_actions = (
+            import_profiles_action,
+            report_templates_action,
         )
 
         self.tools_menu = QMenu(self)
@@ -1395,16 +1399,92 @@ class LandApp(
         about_action.triggered.connect(self.show_about)
         self.settings_menu.addAction(about_action)
 
+        self.api_supported_tool_actions = (
+            advanced_search_action,
+            save_search_action,
+            load_search_action,
+            toggle_external_id_action,
+            follow_up_action,
+            contact_log_action,
+            attachment_action,
+            customer_tags_action,
+            self.show_checked_only_action,
+            check_selected_action,
+            uncheck_selected_action,
+            check_visible_action,
+            uncheck_visible_action,
+            invert_visible_action,
+            clear_checked_action,
+            assign_case_action,
+            remove_case_action,
+            batch_tags_action,
+            case_manage_action,
+            tag_manage_action,
+            data_quality_action,
+            dashboard_action,
+            follow_up_list_action,
+            health_check_action,
+        )
+        self.api_unavailable_tool_actions = (
+            notification_action,
+            workflow_action,
+            recycle_action,
+            undo_action,
+            record_history_action,
+            customer_custom_values_action,
+            apply_template_action,
+            batch_edit_action,
+            merge_action,
+            batch_custom_values_action,
+            custom_field_manage_action,
+            template_manage_action,
+            duplicate_action,
+            map_action,
+            delete_checked_action,
+            delete_all_action,
+            encrypt_action,
+        )
+        self.api_supported_settings_actions = (
+            font_size_action,
+            column_visibility_action,
+            self.readonly_mode_action,
+            help_action,
+            about_action,
+        )
+        self.api_unavailable_settings_actions = (
+            watchlist_action,
+            operation_log_action,
+            user_management_action,
+            change_password_action,
+            backup_status_action,
+            backup_management_action,
+            external_backup_action,
+            backup_now_action,
+            restore_backup_action,
+            open_backup_action,
+            attachment_check_action,
+        )
+
     def configure_api_mode_ui(self):
-        unavailable_text = "PostgreSQL 正式版尚未接通此功能"
+        unavailable_text = "這項本機資料庫功能尚未提供遠端版本"
         self.data_button.setEnabled(True)
-        self.data_button.setToolTip("PostgreSQL 正式版可使用 Excel 匯入")
+        self.data_button.setToolTip("遠端資料可批量新增、匯入與匯出")
         for button in (self.tools_button, self.settings_button):
-            button.setEnabled(False)
-            button.setToolTip(unavailable_text)
+            button.setEnabled(True)
+            button.setToolTip("可使用的遠端工具已開放；灰色項目仍僅限家中主機")
         for action in getattr(self, "api_preview_supported_data_actions", ()):
             action.setEnabled(True)
         for action in getattr(self, "api_preview_unavailable_data_actions", ()):
+            action.setEnabled(False)
+            action.setStatusTip(unavailable_text)
+        for action in getattr(self, "api_supported_tool_actions", ()):
+            action.setEnabled(True)
+        for action in getattr(self, "api_unavailable_tool_actions", ()):
+            action.setEnabled(False)
+            action.setStatusTip(unavailable_text)
+        for action in getattr(self, "api_supported_settings_actions", ()):
+            action.setEnabled(True)
+        for action in getattr(self, "api_unavailable_settings_actions", ()):
             action.setEnabled(False)
             action.setStatusTip(unavailable_text)
         for action in getattr(self, "api_preview_unavailable_context_actions", ()):
@@ -1794,7 +1874,7 @@ class LandApp(
         selected_rule_keys = rules_dialog.selected_rules()
         save_quality_rule_keys(selected_rule_keys)
 
-        rows = REPOSITORY.fetch_all_customer_rows()
+        rows = self.active_record_repository().fetch_all_customer_rows()
         plain_records = []
         for row in rows:
             data = self.get_plain_record_data(row)
@@ -1928,9 +2008,10 @@ class LandApp(
         QMessageBox.information(self, "已儲存", "追蹤提醒已儲存。")
 
     def show_follow_up_list(self):
+        repository = self.active_record_repository()
         reminders = [
             self.plain_follow_up_reminder(row)
-            for row in self.repository.list_follow_up_reminders()
+            for row in repository.list_follow_up_reminders()
         ]
         FollowUpListDialog(reminders, self, on_record_activated=self.open_quality_issue_record).exec()
 
@@ -2107,6 +2188,45 @@ class LandApp(
         HealthCheckDialog(self.build_health_checks(), self).exec()
 
     def build_health_checks(self):
+        if self.api_mode:
+            checks = []
+            try:
+                health = self.record_repository.client.health()
+                checks.append(
+                    {
+                        "status": "OK" if health.get("status") == "ok" else "錯誤",
+                        "title": "家中 PostgreSQL API",
+                        "detail": (
+                            f"版本 {health.get('version') or '未知'}；"
+                            f"資料結構 {health.get('schema_version') or '未知'}；"
+                            f"資料 {health.get('record_count') or 0} 筆"
+                        ),
+                    }
+                )
+            except Exception as exc:
+                checks.append(
+                    {"status": "錯誤", "title": "家中 PostgreSQL API", "detail": str(exc)}
+                )
+            checks.append(
+                {
+                    "status": "提醒" if self.is_readonly_mode() else "OK",
+                    "title": "客戶端權限模式",
+                    "detail": "唯讀模式已啟用" if self.is_readonly_mode() else "可依帳號權限修改資料",
+                }
+            )
+            diagnostics_path = (
+                Path(os.environ.get("LOCALAPPDATA", APP_DIR))
+                / "LandCustomerSystem"
+                / "client-network-diagnostics.json"
+            )
+            checks.append(
+                {
+                    "status": "OK" if diagnostics_path.is_file() else "提醒",
+                    "title": "客戶端連線診斷",
+                    "detail": str(diagnostics_path),
+                }
+            )
+            return checks
         checks = []
         try:
             with self.database.connect() as conn:
@@ -3196,7 +3316,8 @@ class LandApp(
         return data
 
     def dashboard_stats(self):
-        rows = self.repository.fetch_all_customer_rows()
+        repository = self.active_record_repository()
+        rows = repository.fetch_all_customer_rows()
         district_counts = {}
         section_counts = {}
         total_area = 0
@@ -3235,7 +3356,7 @@ class LandApp(
                 with_custom_values += 1
             if row["last_contact"]:
                 with_contact += 1
-        reminders = [self.plain_follow_up_reminder(row) for row in self.repository.list_follow_up_reminders()]
+        reminders = [self.plain_follow_up_reminder(row) for row in repository.list_follow_up_reminders()]
         follow_status_counts = {}
         open_follow_ups = 0
         for reminder in reminders:
@@ -3243,9 +3364,15 @@ class LandApp(
             follow_status_counts[status] = follow_status_counts.get(status, 0) + 1
             if status != "完成":
                 open_follow_ups += 1
-        cases = [dict(row) for row in self.repository.list_cases()]
-        tags = [dict(row) for row in self.repository.list_tags()]
-        management_counts = self.repository.management_table_counts()
+        cases = [dict(row) for row in repository.list_cases()]
+        tags = [dict(row) for row in repository.list_tags()]
+        if hasattr(repository, "management_table_counts"):
+            management_counts = repository.management_table_counts()
+        else:
+            management_counts = {
+                "customer_attachments": sum(int(row.get("attachment_count") or 0) for row in rows),
+                "contact_logs": with_contact,
+            }
         return {
             "total_records": len(rows),
             "total_area": format_number(total_area),

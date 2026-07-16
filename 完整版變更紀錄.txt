@@ -12,7 +12,12 @@
 6. 公司客戶端桌面資料夾加入 `company-client-config.json`；即使使用者直接點 EXE，也會在載入 UI 前強制遠端 HTTPS API 模式，拒絕 HTTP、非 NetBird IP、錯誤連接埠及逃逸的 CA 路徑。
 7. 桌面 API 模式不再建立 `customers.db` 或完整 SQLite schema，改在 LocalAppData 建立只含 `app_settings` 的 `desktop-client-settings.db`，保存裝置欄寬、字體與介面偏好。
 8. 公司筆電可使用完整 Windows 桌面介面；iPhone 維持 Safari／主畫面瀏覽器版，兩者共用家中 PostgreSQL。
-9. 新增遠端封裝強制模式、HTTP 拒絕及裝置偏好資料庫無客戶表測試；目前全系統 157 項自動測試全部通過，並完成本機與 NetBird HTTPS 實機健康檢查。
+9. 公司啟動器改為單一入口，自動完成 NetBird、5 秒 TCP、公開 CA HTTPS、PostgreSQL backend 與 schema 驗證；錯誤會寫入不含帳密／權杖的 LocalAppData 診斷報告。
+10. 桌面 API 的安全 GET 查詢遇到短暫連線錯誤會重試一次；POST／PUT／DELETE 不重試，避免新增或修改被重複送出；憑證、逾時、拒絕連線訊息改為可操作的中文說明。
+11. 公司封裝器會排除 customers.db、裝置設定 DB、備份、附件、記錄、舊遠端設定與 Server，並在 ZIP 建立前再次稽核禁止項目。
+12. 公司介面開放遠端可安全使用的批量新增、匯出、進階搜尋、品質檢查、儀表板、案件、標籤、附件、聯絡、追蹤、匯出與裝置偏好；本機限定工具維持灰色。
+13. API 模式操作記錄不再誤寫只含 app_settings 的裝置偏好資料庫，避免遠端新增／修改完成後出現本機資料表錯誤。
+14. 新增遠端封裝強制模式、HTTP 拒絕、診斷、重試、封裝排除及裝置偏好資料庫無客戶表測試；目前全系統 164 項自動測試全部通過，並完成本機與 NetBird HTTPS 實機健康檢查。
 
 2026-07-14 v1.3.0 NetBird 私人 VPN 外出連線
 ------------------------------------------

@@ -2,6 +2,7 @@ import ipaddress
 import json
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -45,9 +46,65 @@ def apply_company_client_config():
     return {"api_url": api_url, "ca_certificate": str(ca_path)}
 
 
+def run_company_client_health_check(report_path):
+    """Validate the packaged client connection without opening the desktop UI."""
+
+    from customer_desktop_api import DesktopApiClient, DesktopApiError
+
+    destination = Path(report_path).expanduser().resolve()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    report = {
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "status": "error",
+        "api_url": os.environ.get("LAND_CUSTOMER_API_URL", ""),
+    }
+    try:
+        client = DesktopApiClient(
+            report["api_url"],
+            timeout_seconds=6,
+            read_retry_count=1,
+            retry_delay_seconds=0.25,
+        )
+        health = client.health()
+        if not isinstance(health, dict) or health.get("status") != "ok":
+            raise DesktopApiError("家中 API 健康檢查未回傳正常狀態。")
+        if health.get("backend") != "postgresql":
+            raise DesktopApiError("連線目標不是 PostgreSQL 正式伺服器。")
+        if int(health.get("schema_version") or 0) < 2:
+            raise DesktopApiError("家中伺服器資料結構版本過舊，請先更新伺服器端。")
+        report.update(
+            {
+                "status": "ok",
+                "backend": "postgresql",
+                "server_version": str(health.get("version") or ""),
+                "schema_version": int(health.get("schema_version") or 0),
+                "record_count": int(health.get("record_count") or 0),
+            }
+        )
+        exit_code = 0
+    except (DesktopApiError, ValueError, OSError) as exc:
+        report["message"] = str(exc)
+        exit_code = 1
+    destination.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return exit_code
+
+
 def entrypoint():
     install_exception_handler(get_runtime_directory())
     apply_company_client_config()
+    if "--client-health-report" in sys.argv:
+        argument_index = sys.argv.index("--client-health-report")
+        report_path = (
+            sys.argv[argument_index + 1]
+            if argument_index + 1 < len(sys.argv)
+            else Path(os.environ.get("LOCALAPPDATA", Path.home()))
+            / "LandCustomerSystem"
+            / "client-network-diagnostics.json"
+        )
+        return run_company_client_health_check(report_path)
     if "--release-smoke-report" in sys.argv:
         argument_index = sys.argv.index("--release-smoke-report")
         report_path = (

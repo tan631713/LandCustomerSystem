@@ -180,8 +180,9 @@ class ProductionLauncherTests(unittest.TestCase):
         self.assertNotIn("--postgres", company_launcher)
 
         company_preflight = (root / "company_client_preflight.ps1").read_text(encoding="utf-8")
-        self.assertIn("Test-NetConnection", company_preflight)
-        self.assertIn("Port = 8732", company_preflight)
+        self.assertIn("ConnectAsync", company_preflight)
+        self.assertIn("--client-health-report", company_preflight)
+        self.assertIn("[int]$Port = 8732", company_preflight)
         self.assertNotIn("5432", company_preflight)
 
 

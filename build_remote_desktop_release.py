@@ -52,6 +52,49 @@ def resolve_server_ip(explicit: str | None) -> str:
     return validate_server_ip(addresses[0])
 
 
+def copy_desktop_client(destination: Path) -> None:
+    """Copy the desktop runtime without device-local data or prior package state."""
+
+    excluded_names = {
+        "customers.db",
+        "desktop-client-settings.db",
+        "backups",
+        "attachments",
+        "logs",
+        ".build-preserved-data",
+        "company-client-config.json",
+    }
+
+    def ignore(_directory, names):
+        return [name for name in names if name.casefold() in excluded_names]
+
+    shutil.copytree(DESKTOP_DIST, destination, ignore=ignore)
+
+
+def audit_client_bundle(bundle: Path) -> None:
+    """Refuse to package known customer data, server secrets, or server binaries."""
+
+    forbidden_names = {
+        "customers.db",
+        "desktop-client-settings.db",
+        "postgresql-dsn.bin",
+        "land-customer-server-key.pem",
+        "landcustomerserver.exe",
+    }
+    forbidden_parts = {"backups", "attachments", ".build-preserved-data"}
+    violations = []
+    for path in bundle.rglob("*"):
+        relative = path.relative_to(bundle)
+        lowered_parts = {part.casefold() for part in relative.parts}
+        if path.name.casefold() in forbidden_names or lowered_parts & forbidden_parts:
+            violations.append(str(relative))
+    if violations:
+        raise RuntimeError(
+            "Company client bundle contains forbidden server/data files: "
+            + ", ".join(violations[:10])
+        )
+
+
 def package_remote_client(server_ip: str) -> tuple[Path, Path]:
     server_ip = validate_server_ip(server_ip)
     if not DESKTOP_DIST.is_dir():
@@ -72,7 +115,7 @@ def package_remote_client(server_ip: str) -> tuple[Path, Path]:
     release_name = f"LandCustomerSystem-CompanyLaptopClient-v{APP_VERSION}-{timestamp}"
     with tempfile.TemporaryDirectory(prefix="land-customer-client-", dir=RELEASES) as temporary:
         bundle = Path(temporary) / release_name
-        shutil.copytree(DESKTOP_DIST, bundle / "LandCustomerSystem")
+        copy_desktop_client(bundle / "LandCustomerSystem")
         for name in CLIENT_FILES:
             shutil.copy2(ROOT / name, bundle / name)
         (bundle / "home_server_ip.txt").write_text(server_ip + "\n", encoding="ascii")
@@ -102,10 +145,14 @@ def package_remote_client(server_ip: str) -> tuple[Path, Path]:
             "private_keys_included": False,
             "public_ca_included": True,
             "direct_exe_click_forces_remote_mode": True,
+            "https_health_preflight": True,
+            "safe_get_retry": True,
+            "diagnostics_file": "%LOCALAPPDATA%/LandCustomerSystem/client-network-diagnostics.json",
         }
         (bundle / "client-manifest.json").write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
         )
+        audit_client_bundle(bundle)
         permanent_directory = RELEASES / release_name
         shutil.copytree(bundle, permanent_directory)
         zip_path = RELEASES / f"{release_name}.zip"

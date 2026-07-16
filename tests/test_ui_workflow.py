@@ -1447,7 +1447,7 @@ class UiWorkflowTests(unittest.TestCase):
         finally:
             window.close()
 
-    def test_postgresql_api_mode_uses_record_repository_and_disables_local_tools(self):
+    def test_postgresql_api_mode_enables_remote_safe_tools_only(self):
         app.REPOSITORY.create_admin_user("test-password")
         encryption_key = app.REPOSITORY.authenticate_user("admin", "test-password")
 
@@ -1482,11 +1482,18 @@ class UiWorkflowTests(unittest.TestCase):
             self.assertIs(window.record_repository, preview_repository)
             self.assertIn("PostgreSQL 正式版", window.windowTitle())
             self.assertTrue(window.data_button.isEnabled())
-            self.assertFalse(window.tools_button.isEnabled())
-            self.assertFalse(window.settings_button.isEnabled())
+            self.assertTrue(window.tools_button.isEnabled())
+            self.assertTrue(window.settings_button.isEnabled())
             self.assertEqual(
                 [action.text() for action in window.api_preview_supported_data_actions],
-                ["匯入 .xlsx"],
+                [
+                    "同地號批量新增",
+                    "匯入 .xlsx",
+                    "匯出 Excel",
+                    "匯出選取資料",
+                    "匯出選取 Word",
+                    "傳送選取資料到手機",
+                ],
             )
             self.assertTrue(
                 all(
@@ -1516,6 +1523,34 @@ class UiWorkflowTests(unittest.TestCase):
                 all(
                     not action.isEnabled()
                     for action in window.api_preview_unavailable_context_actions
+                )
+            )
+            supported_tool_labels = {
+                action.text() for action in window.api_supported_tool_actions
+            }
+            self.assertIn("進階搜尋", supported_tool_labels)
+            self.assertIn("資料統計儀表板", supported_tool_labels)
+            self.assertIn("系統健康檢查", supported_tool_labels)
+            self.assertTrue(
+                all(action.isEnabled() for action in window.api_supported_tool_actions)
+            )
+            self.assertTrue(
+                all(not action.isEnabled() for action in window.api_unavailable_tool_actions)
+            )
+            supported_setting_labels = {
+                action.text() for action in window.api_supported_settings_actions
+            }
+            self.assertEqual(
+                supported_setting_labels,
+                {"字體大小", "欄位顯示", "唯讀模式", "使用說明", "關於系統"},
+            )
+            self.assertTrue(
+                all(action.isEnabled() for action in window.api_supported_settings_actions)
+            )
+            self.assertTrue(
+                all(
+                    not action.isEnabled()
+                    for action in window.api_unavailable_settings_actions
                 )
             )
         finally:

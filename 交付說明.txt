@@ -30,6 +30,9 @@ v1.4.0 家中伺服器／公司桌面客戶端
 - 公司桌面 EXE 由封裝設定強制連家中 NetBird HTTPS，直接點 EXE 也不會切回本機 SQLite 正式模式。
 - 公司端只建立 `desktop-client-settings.db` 保存介面偏好，資料表只有 `app_settings`，不含地主或土地。
 - iPhone 維持 Safari／主畫面瀏覽器版，與公司筆電同時讀寫家中 PostgreSQL。
+- 公司啟動器新增 NetBird、TCP、HTTPS 憑證、API backend 與 schema 完整預檢，並產生不含帳密的診斷報告。
+- 公司介面開放遠端安全的批量新增、匯出、進階搜尋、品質、儀表板、案件、標籤、附件、聯絡與追蹤工具；本機限定功能保持灰色。
+- 安全查詢遇到短暫網路錯誤會重試一次，寫入操作不自動重送。
 
 v1.3.0 NetBird 私人 VPN 外出連線
 - Windows 與 iPhone 可透過同一個 NetBird 帳號安全互連，不必位於同一 Wi-Fi，也不需要路由器連接埠轉發。
