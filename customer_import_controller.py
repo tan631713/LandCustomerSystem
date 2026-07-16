@@ -462,20 +462,24 @@ class ImportControllerMixin:
             if reply != QMessageBox.Yes:
                 return
 
-        self.create_safety_backup("batch-add")
+        repository = self.active_import_repository()
+        is_api_import = bool(getattr(self, "api_mode", False))
+        if not is_api_import:
+            self.create_safety_backup("batch-add")
         encrypted_records = [encrypt_record(self.fernet, record) for record in records]
-        inserted_count = self.repository.insert_customers(encrypted_records)
-        self.repository.record_insert_undo(
-            "同地號批量新增",
-            self.repository.last_inserted_customer_ids,
-            f"同地號批量新增 {inserted_count} 筆",
-        )
-        self.repository.log_operation(
-            "批量新增",
-            f"新增 {inserted_count} 筆同地號資料",
-            f"{shared_values['district']} {shared_values['section']} "
-            f"{shared_values['land_number']}；略過重複 {skipped_count} 筆",
-        )
+        inserted_count = repository.insert_customers(encrypted_records)
+        if not is_api_import:
+            repository.record_insert_undo(
+                "同地號批量新增",
+                repository.last_inserted_customer_ids,
+                f"同地號批量新增 {inserted_count} 筆",
+            )
+            repository.log_operation(
+                "批量新增",
+                f"新增 {inserted_count} 筆同地號資料",
+                f"{shared_values['district']} {shared_values['section']} "
+                f"{shared_values['land_number']}；略過重複 {skipped_count} 筆",
+            )
         self.refresh_records()
         QMessageBox.information(
             self,

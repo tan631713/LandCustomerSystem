@@ -92,7 +92,9 @@ start_home_server_vpn.bat
 
 啟動器會在需要時自動安裝／登入 NetBird、要求一次 UAC 並補齊防火牆。iPhone 安裝官方 NetBird App，與 Windows 使用同一帳號登入並 Connect，再開啟啟動視窗顯示的 `https://100.x.x.x:8732/mobile/`。完整步驟見 `私人VPN連線說明.txt`。
 
-公司筆電使用獨立的 `LandCustomerSystem-CompanyLaptopClient-v1.4.0-*.zip`。解壓縮後執行 `setup_netbird_client.bat` 登入同一個 NetBird 帳號，再執行 `start_company_laptop_desktop.bat`；完整步驟見 `公司筆電遠端使用說明.txt`。公司客戶端包不含 PostgreSQL、FastAPI Server、正式資料庫、帳密、備份或私鑰。
+公司筆電使用獨立的 `LandCustomerSystem-CompanyLaptopClient-v1.4.0-*.zip`。解壓縮後平常只需執行 `start_company_laptop_desktop.bat`；它會自動確認 NetBird，並在開啟介面前驗證家中主機 TCP、HTTPS 憑證、PostgreSQL API 與資料結構。失敗時會在 `%LOCALAPPDATA%\LandCustomerSystem\client-network-diagnostics.json` 留下不含帳密的診斷報告。完整步驟見 `公司筆電遠端使用說明.txt`。公司客戶端包不含 PostgreSQL、FastAPI Server、正式資料庫、帳密、備份或私鑰。
+
+公司桌面版已開放遠端安全功能：同地號批量新增、Excel 匯入／匯出、進階搜尋、資料品質、儀表板、案件、標籤、附件、聯絡紀錄與追蹤提醒。仍依賴本機 SQLite 的回收桶、備份還原、使用者管理等項目會保持灰色，避免誤寫公司筆電的裝置偏好資料庫。
 
 ## PostgreSQL API 與手機同步
 

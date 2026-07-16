@@ -1,15 +1,17 @@
 import io
 import json
+import ssl
 import tempfile
 import unittest
 from pathlib import Path
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlparse
 
 from cryptography.fernet import Fernet
 
 from customer_desktop_api import (
     DesktopApiClient,
+    DesktopApiConnectionError,
     DesktopApiRecordRepository,
     DesktopApiResponseError,
 )
@@ -279,6 +281,59 @@ class DesktopApiClientTests(unittest.TestCase):
             )
         self.assertIn("系統不支援的欄位", str(validation_caught.exception))
         self.assertEqual(str(validation_caught.exception).count("_duplicate_reason"), 1)
+
+    def test_safe_get_retries_once_after_transient_network_failure(self):
+        attempts = []
+        sleeps = []
+
+        def transient_then_success(request, timeout):
+            del request, timeout
+            attempts.append(1)
+            if len(attempts) == 1:
+                raise URLError(TimeoutError("timed out"))
+            return FakeResponse({"status": "ok", "backend": "postgresql"})
+
+        client = DesktopApiClient(
+            urlopen_fn=transient_then_success,
+            retry_delay_seconds=0.1,
+            sleep_fn=sleeps.append,
+        )
+        self.assertEqual(client.health()["status"], "ok")
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(sleeps, [0.1])
+
+    def test_write_request_is_not_retried_when_connection_fails(self):
+        attempts = []
+
+        def unavailable(request, timeout):
+            del request, timeout
+            attempts.append(1)
+            raise URLError(ConnectionRefusedError("connection refused"))
+
+        client = DesktopApiClient(
+            urlopen_fn=unavailable,
+            retry_delay_seconds=0,
+        )
+        with self.assertRaises(DesktopApiConnectionError) as caught:
+            client.login("admin", "password")
+        self.assertEqual(len(attempts), 1)
+        self.assertIn("尚未啟動", str(caught.exception))
+
+    def test_certificate_failure_is_clear_and_not_retried(self):
+        attempts = []
+
+        def invalid_certificate(request, timeout):
+            del request, timeout
+            attempts.append(1)
+            raise URLError(
+                ssl.SSLCertVerificationError(1, "certificate verify failed")
+            )
+
+        client = DesktopApiClient(urlopen_fn=invalid_certificate)
+        with self.assertRaises(DesktopApiConnectionError) as caught:
+            client.health()
+        self.assertEqual(len(attempts), 1)
+        self.assertIn("最新公司筆電客戶端包", str(caught.exception))
 
 
 class FakeRecordClient:

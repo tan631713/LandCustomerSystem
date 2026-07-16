@@ -17,15 +17,23 @@ iPhone 只使用 Safari／主畫面瀏覽器版。
 公司筆電首次設定
 ----------------
 1. 解壓縮完整的 CompanyLaptopClient ZIP，不可只複製 EXE。
-2. 執行 setup_netbird_client.bat，使用與家中主機相同的 NetBird 帳號登入。
+2. 執行 start_company_laptop_desktop.bat；若尚未安裝或登入 NetBird，啟動器會在同一流程引導完成。
 3. 不需要安裝 PostgreSQL，也不需要執行伺服器防火牆設定。
 
 公司筆電每次使用
 ----------------
 1. 確認公司網路可以上網，NetBird 顯示 Connected。
 2. 執行 start_company_laptop_desktop.bat。
-3. 程式會先測試家中主機 8732，再開啟完整 Windows 桌面介面。
+3. 程式會依序檢查 NetBird、家中主機 8732、HTTPS 憑證、PostgreSQL API 與資料結構，再開啟完整 Windows 桌面介面。
 4. 使用土地資料系統帳號登入；資料會立即讀寫家中 PostgreSQL。
+
+公司桌面可用功能
+------------------
+- 同地號批量新增、Excel 匯入、Excel／Word 匯出。
+- 進階搜尋、常用條件、資料品質檢查、資料統計儀表板與系統健康檢查。
+- 案件、標籤、附件、聯絡紀錄、追蹤提醒與批量標籤。
+- 字體、欄位顯示、勾選狀態與唯讀模式等裝置偏好。
+- 回收桶、備份還原、異地備份、使用者管理等仍依賴家中本機資料庫的功能會顯示為灰色，不會在公司筆電建立第二份正式資料。
 
 iPhone
 ------
@@ -40,3 +48,5 @@ iPhone
 - 家中主機關機、休眠、斷網、NetBird 中斷或伺服器視窗關閉時，公司筆電與手機都無法使用。
 - 不要在家中路由器開放 5432、8732 或 8733。
 - 若家中主機重新加入 NetBird 而 IP 改變，更新 home_server_ip.txt 並重新建立包含新 IP 的 HTTPS 憑證。
+- 若啟動失敗，請查看 `%LOCALAPPDATA%\LandCustomerSystem\client-network-diagnostics.json`。此檔只包含連線狀態、版本與筆數，不包含密碼或登入權杖。
+- 安全的 GET 查詢遇到短暫斷線會自動重試一次；新增、修改、刪除不會自動重送，避免重複寫入。

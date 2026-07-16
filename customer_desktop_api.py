@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import socket
 import ssl
+import time
 import uuid
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -46,6 +48,9 @@ class DesktopApiClient:
         allow_insecure_lan=False,
         ca_certificate=None,
         urlopen_fn=None,
+        read_retry_count=1,
+        retry_delay_seconds=0.25,
+        sleep_fn=None,
     ):
         self.base_url = str(base_url or DEFAULT_API_URL).strip().rstrip("/")
         parsed = urlparse(self.base_url)
@@ -58,6 +63,9 @@ class DesktopApiClient:
         ):
             raise ValueError("Non-loopback desktop API connections must use HTTPS")
         self.timeout_seconds = max(1, int(timeout_seconds))
+        self.read_retry_count = max(0, min(int(read_retry_count), 3))
+        self.retry_delay_seconds = max(0.0, float(retry_delay_seconds))
+        self._sleep = sleep_fn or time.sleep
         self._urlopen = urlopen_fn or urlopen
         self._ssl_context = None
         if parsed.scheme == "https":
@@ -83,6 +91,27 @@ class DesktopApiClient:
                 self._ssl_context = ssl.create_default_context(cafile=str(ca_path))
         self.access_token = ""
         self.current_user = None
+
+    @staticmethod
+    def _connection_error_detail(exc):
+        reason = getattr(exc, "reason", exc)
+        reason_text = str(reason or exc)
+        normalized = reason_text.casefold()
+        if isinstance(reason, ssl.SSLCertVerificationError) or (
+            "certificate_verify_failed" in normalized
+            or "certificate verify failed" in normalized
+        ):
+            return (
+                "HTTPS 憑證驗證失敗。請改用最新公司筆電客戶端包，"
+                "或由家中主機重新建立客戶端包。"
+            )
+        if isinstance(reason, (TimeoutError, socket.timeout)) or "timed out" in normalized:
+            return "家中伺服器回應逾時。請確認家中主機未休眠且 NetBird 已連線。"
+        if "connection refused" in normalized or "actively refused" in normalized:
+            return "家中伺服器尚未啟動，或 8732 連接埠目前沒有服務。"
+        if "network is unreachable" in normalized or "no route to host" in normalized:
+            return "目前無法透過 NetBird 到達家中主機。"
+        return f"無法連線至家中伺服器：{reason_text}"
 
     @property
     def authenticated(self):
@@ -155,33 +184,49 @@ class DesktopApiClient:
                 raise DesktopApiResponseError(401, "尚未登入 API")
             headers["Authorization"] = f"Bearer {self.access_token}"
         request = Request(url, data=body, headers=headers, method=str(method).upper())
-        try:
-            urlopen_options = {"timeout": self.timeout_seconds}
-            if self._ssl_context is not None:
-                urlopen_options["context"] = self._ssl_context
-            with self._urlopen(request, **urlopen_options) as response:
-                raw = response.read()
-                if not raw:
-                    return None
-                return json.loads(raw.decode("utf-8"))
-        except HTTPError as exc:
+        request_method = str(method).upper()
+        attempts = 1 + (self.read_retry_count if request_method == "GET" else 0)
+        for attempt in range(attempts):
             try:
-                raw = exc.read()
-                error_payload = json.loads(raw.decode("utf-8")) if raw else {}
-            except (UnicodeDecodeError, json.JSONDecodeError):
-                error_payload = {}
-            finally:
-                exc.close()
-            if exc.code == 401:
-                self.access_token = ""
-                self.current_user = None
-            raise DesktopApiResponseError(
-                exc.code,
-                self._error_detail(error_payload, exc.reason),
-            ) from exc
-        except (URLError, TimeoutError, OSError) as exc:
-            reason = getattr(exc, "reason", exc)
-            raise DesktopApiConnectionError(f"無法連線至 API：{reason}") from exc
+                urlopen_options = {"timeout": self.timeout_seconds}
+                if self._ssl_context is not None:
+                    urlopen_options["context"] = self._ssl_context
+                with self._urlopen(request, **urlopen_options) as response:
+                    raw = response.read()
+                    if not raw:
+                        return None
+                    try:
+                        return json.loads(raw.decode("utf-8"))
+                    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                        raise DesktopApiError("家中 API 回傳了無法辨識的資料格式。") from exc
+            except HTTPError as exc:
+                try:
+                    raw = exc.read()
+                    error_payload = json.loads(raw.decode("utf-8")) if raw else {}
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    error_payload = {}
+                finally:
+                    exc.close()
+                if exc.code == 401:
+                    self.access_token = ""
+                    self.current_user = None
+                raise DesktopApiResponseError(
+                    exc.code,
+                    self._error_detail(error_payload, exc.reason),
+                ) from exc
+            except (URLError, TimeoutError, OSError) as exc:
+                reason = getattr(exc, "reason", exc)
+                certificate_failure = isinstance(reason, ssl.SSLCertVerificationError) or (
+                    "certificate_verify_failed" in str(reason).casefold()
+                    or "certificate verify failed" in str(reason).casefold()
+                )
+                if attempt + 1 < attempts and not certificate_failure:
+                    if self.retry_delay_seconds:
+                        self._sleep(self.retry_delay_seconds)
+                    continue
+                raise DesktopApiConnectionError(
+                    self._connection_error_detail(exc)
+                ) from exc
 
     def health(self):
         return self._request("GET", "/health", authenticated=False)
