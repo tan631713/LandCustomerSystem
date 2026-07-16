@@ -21,20 +21,20 @@ def database_check_failure(exc):
     if error_type == "OperationalError" or error_type.startswith("Connection"):
         message = (
             "無法在 5 秒內連線 PostgreSQL。請確認 PostgreSQL 服務正在執行；"
-            "若已更換主機或 Windows 使用者，請重新執行 setup_local_postgresql.bat。"
+            "若已更換主機或 Windows 使用者，請重新執行「啟動家中伺服器.bat」。"
         )
     elif isinstance(exc, ValueError):
         message = (
             "尚未完成這台 Windows 使用者的 PostgreSQL 設定，"
-            "請先執行 setup_local_postgresql.bat。"
+            "請執行「啟動家中伺服器.bat」完成設定。"
         )
     elif isinstance(exc, OSError):
         message = (
             "無法讀取這台 Windows 使用者保存的 PostgreSQL 設定，"
-            "請重新執行 setup_local_postgresql.bat。"
+            "請重新執行「啟動家中伺服器.bat」。"
         )
     else:
-        message = "PostgreSQL 檢查失敗，請重新執行 setup_local_postgresql.bat 後再試。"
+        message = "PostgreSQL 檢查失敗，請重新執行「啟動家中伺服器.bat」後再試。"
     return {
         "status": "error",
         "backend": "postgresql",
@@ -101,7 +101,10 @@ def main(argv=None):
     if args.install_iphone_certificate:
         from install_iphone_certificate_server import main as install_certificate_main
 
-        return install_certificate_main(["--port", str(args.certificate_port)])
+        certificate_arguments = ["--port", str(args.certificate_port)]
+        if args.prefer_vpn:
+            certificate_arguments.append("--prefer-vpn")
+        return install_certificate_main(certificate_arguments)
     if args.backup or args.backup_if_due_hours:
         from backup_postgresql import main as backup_main
 

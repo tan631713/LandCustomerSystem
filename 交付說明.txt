@@ -1,27 +1,32 @@
 土地資料系統 交付說明
 
-版本：v1.4.0
-建置日期：2026-07-14
-驗收日期：2026-07-14
+版本：v1.4.1
+建置日期：2026-07-16
+驗收日期：2026-07-16
 
 正式啟動方式
-1. 家中主機本機桌面版：執行 start_land_customer_system_postgresql.bat。
-2. 家中主機對外伺服器：只執行 start_home_server_vpn.bat，視窗保持開啟。
-3. 公司筆電：使用獨立 CompanyLaptopClient ZIP，執行 start_company_laptop_desktop.bat。
-4. iPhone 行動版：NetBird Connect 後以 Safari 開啟家中主機的 /mobile/ 網址。
-5. iPhone 第一次連線：先依 iPhone連線說明.txt 安裝並信任本機 CA 憑證。
+1. 家中主機：只執行「啟動家中伺服器.bat」，視窗保持開啟。
+2. 公司筆電：使用獨立 CompanyLaptopClient ZIP，執行 start_company_laptop_desktop.bat。
+3. iPhone 行動版：NetBird Connect 後以 Safari 開啟家中主機的 /mobile/ 網址。
+4. iPhone 第一次連線：依「伺服器使用說明.txt」開啟 8733 公開憑證頁並完成信任。
 
 重要提醒
-- start_home_server_vpn.bat 會自動檢查 NetBird、PostgreSQL 服務、私人 VPN 防火牆、資料庫連線、HTTPS 與備份；首次設定才會要求 UAC 或 PostgreSQL 管理員密碼。
-- 請不要只複製 LandCustomerSystem.exe。
-- LandCustomerSystem.exe 旁邊的 _internal 資料夾是必要執行檔案，必須一起保留。
-- 建議整個 LandCustomerSystem 資料夾一起搬移或備份。
+- 「啟動家中伺服器.bat」是伺服器包唯一正式入口；不要開啟 _server_support 或 LandCustomerServer 內部檔案。
+- 啟動器會自動檢查 NetBird、PostgreSQL 服務、私人 VPN 防火牆、資料庫連線、HTTPS 與備份；首次設定才會要求 UAC 或 PostgreSQL 管理員密碼。
+- 請完整保留整個伺服器資料夾，不要只複製 LandCustomerServer.exe。
 
 資料與備份
 - PostgreSQL 是 Windows 與 iPhone 唯一共用的正式資料來源；舊 SQLite 不參與同步。
 - API 或手機伺服器啟動時會檢查每日 PostgreSQL 壓縮備份。
-- 手動備份可執行 backup_postgresql_now.bat；備份包含 PostgreSQL dump、manifest 與納管附件。
+- 啟動器每 24 小時自動建立備份；備份包含 PostgreSQL dump、manifest 與納管附件。
 - 備份預設放在 %LOCALAPPDATA%\LandCustomerSystem\postgres-backups，保留 90 天、最多 30 份且至少保留 3 份。
+
+v1.4.1 單一伺服器入口修正
+- 伺服器包最外層只保留「啟動家中伺服器.bat」，刪除所有舊版與重複啟動檔。
+- 修正 NetBird 防火牆來源範圍，由錯誤的單一 `/16` 改為官方 CGNAT `100.64.0.0/10`，不同 NetBird IP 區段的手機與公司筆電可正常連線。
+- 新增不含帳密的 home-server-diagnostics.json，明確指出 NetBird、服務、防火牆、資料庫、憑證、備份或連接埠問題。
+- 自動啟動只提供公開 CA 的 8733 安裝頁，主伺服器停止時一併關閉。
+- 伺服器封裝不再包含桌面客戶端，並拒絕資料庫、備份、附件、DSN 或私鑰。
 
 v1.4.0 家中伺服器／公司桌面客戶端
 - 家中主機固定為唯一 PostgreSQL、FastAPI、附件與備份來源。
@@ -38,7 +43,7 @@ v1.3.0 NetBird 私人 VPN 外出連線
 - Windows 與 iPhone 可透過同一個 NetBird 帳號安全互連，不必位於同一 Wi-Fi，也不需要路由器連接埠轉發。
 - 新增 NetBird 自動安裝／登入、VPN HTTPS 啟動器與專用防火牆設定。
 - HTTPS 憑證自動納入並優先顯示 NetBird `100.x` IP。
-- Windows 防火牆只允許目前 NetBird 帳號的私人 `/16` 網段連到 8732／8733。
+- 舊版曾只允許單一 `/16`；v1.4.1 已修正為完整 `100.64.0.0/10`。
 - PostgreSQL 5432 維持只監聽本機；實機 HTTPS 由 127.0.0.1 與 NetBird IP 連線都回傳 200，正式資料為 267 筆。
 
 v1.2.1 手機熱點連線修正

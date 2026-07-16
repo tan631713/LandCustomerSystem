@@ -60,7 +60,7 @@ set "EXIT_CODE=1"
 :FAILED_WITH_CODE
 echo.
 echo 遠端桌面程式啟動失敗。
-echo 請確認家中主機的 start_home_server_vpn.bat 視窗、NetBird 與網路都保持運作。
+echo 請確認家中主機的「啟動家中伺服器.bat」視窗、NetBird 與網路都保持運作。
 echo 可提供以下診斷檔協助排查：
 echo %DIAGNOSTICS%
 

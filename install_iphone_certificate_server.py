@@ -5,7 +5,12 @@ from __future__ import annotations
 import argparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from setup_local_https import certificate_paths, create_local_https_certificate, local_ip_address
+from setup_local_https import (
+    certificate_paths,
+    create_local_https_certificate,
+    lan_ipv4_addresses,
+    local_ip_address,
+)
 
 
 HTML = """<!doctype html>
@@ -54,15 +59,18 @@ def build_parser():
     parser = argparse.ArgumentParser(description="讓 iPhone 安裝土地資料系統公開 CA 憑證")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8733)
+    parser.add_argument("--prefer-vpn", action="store_true")
     return parser
 
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
-    create_local_https_certificate()
+    create_local_https_certificate(prefer_vpn=args.prefer_vpn)
     public_certificate = certificate_paths().ca_certificate_der.read_bytes()
     server = ThreadingHTTPServer((args.host, args.port), handler_class(public_certificate))
-    print(f"請用 iPhone Safari 開啟：http://{local_ip_address()}:{args.port}/")
+    addresses = lan_ipv4_addresses(prefer_vpn=args.prefer_vpn)
+    address = addresses[0] if addresses else local_ip_address()
+    print(f"請用 iPhone Safari 開啟：http://{address}:{args.port}/")
     print("安裝完成後按 Ctrl+C 停止此臨時憑證下載服務。")
     try:
         server.serve_forever()

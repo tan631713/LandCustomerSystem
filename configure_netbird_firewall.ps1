@@ -1,9 +1,9 @@
-param()
+﻿param()
 
 $ErrorActionPreference = 'Stop'
 $netBirdExe = Join-Path $env:ProgramFiles 'NetBird\netbird.exe'
 if (-not (Test-Path -LiteralPath $netBirdExe -PathType Leaf)) {
-    throw 'NetBird was not found. Run setup_netbird_vpn.bat first.'
+    throw '找不到 NetBird，請重新執行「啟動家中伺服器.bat」。'
 }
 
 $vpnIpText = (& $netBirdExe status --ipv4 | Select-Object -First 1).Trim()
@@ -15,7 +15,7 @@ $bytes = $vpnIp.GetAddressBytes()
 if ($bytes.Length -ne 4 -or $bytes[0] -ne 100 -or $bytes[1] -lt 64 -or $bytes[1] -gt 127) {
     throw "Unexpected NetBird IPv4 address: $vpnIpText"
 }
-$vpnRange = "100.$($bytes[1]).0.0/16"
+$vpnRange = '100.64.0.0/10'
 
 $rules = @(
     @{ Name = 'Land Customer System NetBird HTTPS'; Port = 8732 },
