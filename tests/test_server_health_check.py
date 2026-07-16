@@ -60,7 +60,7 @@ class PostgreSQLHealthCheckTests(unittest.TestCase):
 
         self.assertIn("5 秒內", result["message"])
         self.assertIn("PostgreSQL 服務", result["message"])
-        self.assertIn("setup_local_postgresql.bat", result["message"])
+        self.assertIn("啟動家中伺服器.bat", result["message"])
 
     def test_packaged_server_can_run_local_postgresql_setup(self):
         with patch("setup_local_postgresql.main", return_value=0) as setup_main:

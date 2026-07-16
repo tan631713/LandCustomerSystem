@@ -1,6 +1,6 @@
 # 土地資料系統
 
-目前正式版：`v1.4.0`（建置日期：2026-07-14）
+目前正式版：`v1.4.2`（建置日期：2026-07-16）
 
 正式共用資料儲存在自架 `PostgreSQL`；Windows 桌面程式與 iPhone 行動版都透過 `FastAPI` 讀寫同一份資料。舊 `customers.db` 只保留為歷史安全備份與單機相容資料，不再作為手機同步來源。
 
@@ -13,9 +13,10 @@
 - 公司客戶端即使直接點 EXE 也會由封裝設定強制使用家中 API；只在 LocalAppData 保存不含地主資料的介面偏好
 - iPhone 維持 Safari／主畫面瀏覽器版，不需要安裝桌面程式
 - 新增 NetBird 私人 VPN 外出連線：iPhone 不必和筆電位於同一個 Wi-Fi，也不用在路由器開放連接埠
-- NetBird 防火牆只允許同一帳號的私人 `/16` 網段連到 HTTPS 8732／憑證 8733；PostgreSQL 5432 仍只監聽本機
+- NetBird 防火牆只允許官方 CGNAT 私人網段 `100.64.0.0/10` 連到 HTTPS 8732／公開憑證 8733；PostgreSQL 5432 仍只監聽本機
 - 修正手機熱點區網連線：防火牆規則支援公用網路但僅限同一子網路，啟動時會列出目前所有可用 LAN IP，切換網路後會更新 HTTPS 憑證
-- PostgreSQL 已成為正式共用資料來源；桌面正式入口為 `start_land_customer_system_postgresql.bat`
+- 家中主機伺服器包最外層只保留 `啟動家中伺服器.bat`，避免誤開舊版 API、手機或測試啟動檔
+- 啟動前會盤點 NetBird、PostgreSQL Server 與 pg_dump；缺少時先列出原因，必須由使用者輸入 Y 確認才會透過 winget 安裝
 - 新增可安裝到 iPhone 主畫面的「地主開發助手」，可登入、搜尋地主／土地、查看持分、新增聯絡紀錄與設定追蹤
 - 新增零月費區網 HTTPS：自建本機 CA 與伺服器憑證，手機帳密及敏感資料不以明文在 Wi-Fi 傳輸
 - 新增 iPhone 公開憑證安裝頁，只提供 `.cer`，不會暴露資料庫或私鑰
@@ -62,35 +63,15 @@
 
 ## 正式啟動
 
-Windows 桌面版：
+家中主機只執行：
 
 ```text
-start_land_customer_system_postgresql.bat
+啟動家中伺服器.bat
 ```
 
-上式用於家中主機本機操作。家中要同時提供手機與公司筆電服務時執行：
+家中伺服器包最外層只有這一個 `.bat`。它會先盤點 NetBird、PostgreSQL Server 與 pg_dump；缺少時顯示清單與用途，只有使用者輸入 Y 才會安裝。之後依序確認 NetBird、PostgreSQL Windows 服務、`100.64.0.0/10` 私人網段防火牆、專案資料庫、HTTPS 憑證、公開 CA 安裝頁與每日備份。啟動後請保持視窗開啟。
 
-```text
-start_home_server_vpn.bat
-```
-
-家中主機平常只需要開啟這一個檔案。它會依序確認 NetBird、PostgreSQL Windows 服務、私人 VPN 防火牆、專案資料庫連線、HTTPS 憑證與每日備份；只有首次缺少系統設定時才會要求管理員授權或 PostgreSQL 管理員密碼。啟動後請保持該視窗開啟。
-
-iPhone 行動版：
-
-```text
-start_mobile_server_https.bat
-```
-
-iPhone 第一次設定請依 `iPhone連線說明.txt` 安裝本機 CA；之後用 Safari 開啟啟動視窗顯示的 `https://192.168.x.x:8732/mobile/`，即可加入主畫面。手機熱點首次使用前仍須以系統管理員身分重新執行防火牆設定檔。
-
-外出或不同網路使用時，家中主機仍只需執行：
-
-```text
-start_home_server_vpn.bat
-```
-
-啟動器會在需要時自動安裝／登入 NetBird、要求一次 UAC 並補齊防火牆。iPhone 安裝官方 NetBird App，與 Windows 使用同一帳號登入並 Connect，再開啟啟動視窗顯示的 `https://100.x.x.x:8732/mobile/`。完整步驟見 `私人VPN連線說明.txt`。
+iPhone 登入相同 NetBird 帳號後，第一次先開啟視窗顯示的 `http://100.x.x.x:8733/` 安裝公開 CA，再使用 `https://100.x.x.x:8732/mobile/`。完整步驟見 `伺服器使用說明.txt`。
 
 公司筆電使用獨立的 `LandCustomerSystem-CompanyLaptopClient-v1.4.0-*.zip`。解壓縮後平常只需執行 `start_company_laptop_desktop.bat`；它會自動確認 NetBird，並在開啟介面前驗證家中主機 TCP、HTTPS 憑證、PostgreSQL API 與資料結構。失敗時會在 `%LOCALAPPDATA%\LandCustomerSystem\client-network-diagnostics.json` 留下不含帳密的診斷報告。完整步驟見 `公司筆電遠端使用說明.txt`。公司客戶端包不含 PostgreSQL、FastAPI Server、正式資料庫、帳密、備份或私鑰。
 
@@ -143,19 +124,19 @@ python start_api_server.py --postgres
 
 檢視者只能讀取資料且身分證會遮罩；管理員與編輯者才能新增、修改、刪除資料、新增聯絡紀錄或修改追蹤。登入工作階段只存在伺服器記憶體，重新啟動 API 後必須重新登入；連續登入失敗會暫時鎖定。
 
-正式區網手機連線使用 `start_mobile_server_https.bat`；外出連線使用 `start_mobile_server_vpn.bat` 與 NetBird。未加密 LAN 參數只保留開發測試，不可用於正式帳密或地主資料。不要在路由器開放 API 或 PostgreSQL。
+正式手機與公司筆電連線一律由 `啟動家中伺服器.bat` 啟動，並透過 NetBird 使用 HTTPS。未加密 LAN 參數只保留開發測試，不可用於正式帳密或地主資料。不要在路由器開放 API 或 PostgreSQL。
 
 ### PostgreSQL 初次設定
 
 正規化結構位於 `postgres/schema.sql`。版本 2 除了 `owners`、`lands`、`ownerships`、`contact_logs`、`projects` 與 `users`，也完整建立案件成員、任務、標籤、自訂欄位、附件、位置、重複審查、異動紀錄、通知、範本、回收筒、復原、觀察名單及操作紀錄。敏感地主欄位仍使用現有 `enc:v1:` 加密格式，不會因換資料庫而改存明文。
 
-Windows 首次安裝完成後，執行一次：
+Windows 首次安裝完成後，直接執行：
 
 ```powershell
-setup_local_postgresql.bat
+啟動家中伺服器.bat
 ```
 
-只需在小型密碼視窗輸入安裝 PostgreSQL 時設定的管理密碼。工具會建立 `land_customer` 資料庫與最低範圍的 `land_customer_app` 應用程式帳號；管理密碼不會儲存，應用程式連線資料會由 Windows DPAPI 加密保存在目前 Windows 使用者的本機設定目錄。
+第一次需要時，流程會要求輸入安裝 PostgreSQL 時設定的管理密碼。工具會建立 `land_customer` 資料庫與最低範圍的 `land_customer_app` 應用程式帳號；管理密碼不會儲存，應用程式連線資料會由 Windows DPAPI 加密保存在目前 Windows 使用者的本機設定目錄。
 
 本專案目前已完成資料庫設定，正式工作流程不再執行 SQLite／PostgreSQL 比對或重複遷移。健康檢查：
 
@@ -163,7 +144,7 @@ setup_local_postgresql.bat
 python start_api_server.py --postgres --check
 ```
 
-完整操作請看 `API伺服器說明.md`。
+完整操作請看 `伺服器使用說明.txt`。
 
 ## 登入與加密
 
@@ -227,7 +208,7 @@ python start_api_server.py --postgres --check
 %LOCALAPPDATA%\LandCustomerSystem\postgres-backups
 ```
 
-`start_api_server_postgresql.bat` 與 `start_mobile_server_https.bat` 會在啟動前檢查最近 24 小時是否已有備份；沒有就自動建立。手動執行 `backup_postgresql_now.bat` 可立即備份。
+`啟動家中伺服器.bat` 會在啟動前檢查最近 24 小時是否已有備份；沒有就自動建立。備份失敗時會明確警告並寫入診斷檔，不會把密碼或 DSN 寫進記錄。
 
 每份 ZIP 包含經 `pg_restore --list` 驗證的 `database.dump`、`manifest.json` 與納管附件。預設保留 90 天、最多 30 份，且永遠至少保留最新 3 份。舊 SQLite 備份功能只供歷史相容版本使用，不是 PostgreSQL 正式版的還原來源。
 
@@ -247,9 +228,9 @@ python start_api_server.py --postgres --check
 - `install_iphone_certificate_server.py`：只提供公開 CA 的 iPhone 安裝頁。
 - `backup_postgresql.py`：PostgreSQL、manifest 與附件壓縮備份、驗證及保留清理。
 - `start_api_server.py`：預設只監聽本機的安全 API 啟動器。
-- `setup_local_postgresql.bat`：視窗式建立本機專案資料庫與專用帳號。
+- `home_server_runtime.ps1`：唯一伺服器入口背後的 NetBird、PostgreSQL、HTTPS、備份與診斷協調流程。
 - `migrate_sqlite_to_postgresql.py`：只保留給歷史資料一次性轉入使用；正式工作流程不再執行比對。
-- `start_api_server_postgresql.bat`：明確以 PostgreSQL 啟動本機 API。
+- `啟動家中伺服器.bat`：正式交付包唯一可執行的伺服器啟動檔。
 - `postgres/schema.sql`：地主、土地、持分正規化的 PostgreSQL schema。
 - `customer_search_controller.py`：分頁瀏覽、背景搜尋執行緒與搜尋結果套用流程。
 - `customer_search_presets.py`：進階搜尋條件、常用搜尋的保存、載入及清除。

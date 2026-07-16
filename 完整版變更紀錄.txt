@@ -1,6 +1,23 @@
 土地資料系統 完整版變更紀錄
 ================================
 
+2026-07-16 v1.4.2 必要軟體確認安裝
+----------------------------------
+1. 一鍵伺服器啟動前新增必要軟體盤點：NetBird、PostgreSQL Server、pg_dump 備份工具。
+2. 缺少項目會列出名稱及用途，只有使用者輸入 Y／Yes／是才開始安裝；拒絕時不修改系統並安全停止。
+3. NetBird 使用官方 `Netbird.Netbird` winget 套件；PostgreSQL 依序尋找官方 18、17、16 套件並使用互動安裝。
+4. PostgreSQL 管理密碼由使用者直接在官方安裝程式設定，土地資料系統不代填、不讀取也不保存。
+5. 找不到 winget 時會指示先安裝 Microsoft「應用程式安裝程式」，不從未知網址下載執行檔。
+6. 診斷 JSON 新增 software_check、missing_software、winget_available、install_decision 與 installed_software，仍不包含密碼、DSN 或權杖。
+
+2026-07-16 v1.4.1 單一伺服器入口與 NetBird 修正
+--------------------------------------------------
+1. 新增「啟動家中伺服器.bat」作為伺服器包唯一頂層啟動檔。
+2. 整合 NetBird 安裝／登入、PostgreSQL 服務與資料庫設定、防火牆、HTTPS、公開 CA 頁、備份及正式 API 啟動。
+3. 修正 NetBird 防火牆來源為 `100.64.0.0/10`；舊 `/16` 會誤擋其他 NetBird 位址區段。
+4. 新增 `%LOCALAPPDATA%\LandCustomerSystem\home-server-diagnostics.json`，不記錄密碼、DSN 或權杖。
+5. 伺服器交付包移除桌面客戶端及所有舊版啟動檔，並加入資料、備份、附件、DSN 與私鑰封裝阻擋檢查。
+
 2026-07-14 v1.4.0 家中伺服器／公司桌面客戶端
 ------------------------------------------------
 1. 正式部署架構固定為家中主機唯一伺服器；PostgreSQL、FastAPI、附件、備份與私鑰不移到公司筆電。

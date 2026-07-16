@@ -19,30 +19,17 @@ from customer_version import APP_VERSION, BUILD_DATE
 ROOT = Path(__file__).resolve().parent
 DIST = ROOT / "dist"
 RELEASES = ROOT / "releases"
-DESKTOP_DIST = DIST / "LandCustomerSystem"
 SERVER_DIST = DIST / "LandCustomerServer"
 
-LAUNCHERS = (
-    "setup_local_postgresql.bat",
-    "start_land_customer_system_postgresql.bat",
-    "start_mobile_server_https.bat",
-    "start_api_server_postgresql.bat",
-    "setup_local_https.bat",
-    "install_iphone_certificate.bat",
-    "allow_private_network_firewall.bat",
-    "allow_netbird_vpn_firewall.bat",
+PRIMARY_LAUNCHER = "啟動家中伺服器.bat"
+SUPPORT_FILES = (
+    "home_server_runtime.ps1",
     "configure_netbird_firewall.ps1",
     "home_server_preflight.ps1",
-    "start_mobile_server_vpn.bat",
-    "start_home_server_vpn.bat",
-    "setup_netbird_vpn.bat",
-    "backup_postgresql_now.bat",
 )
 DOCUMENTS = (
-    "iPhone連線說明.txt",
-    "私人VPN連線說明.txt",
+    "伺服器使用說明.txt",
     "公司筆電遠端使用說明.txt",
-    "API伺服器說明.md",
     "交付說明.txt",
     "簡短版變更紀錄.txt",
     "完整版變更紀錄.txt",
@@ -94,15 +81,54 @@ def build_server(python_executable: str) -> None:
         raise RuntimeError("LandCustomerServer.exe was not created")
 
 
-def _copy_desktop(destination: Path) -> None:
-    if not DESKTOP_DIST.is_dir():
-        raise FileNotFoundError("請先執行 build_exe.bat 建立桌面程式")
+def audit_server_bundle(bundle: Path) -> None:
+    """Refuse ambiguous launchers, customer data, or server secrets."""
+    root_launchers = sorted(path.name for path in bundle.glob("*.bat"))
+    if root_launchers != [PRIMARY_LAUNCHER]:
+        raise RuntimeError(f"伺服器封裝只能有一個啟動檔：{root_launchers}")
 
-    def ignore(_directory, names):
-        device_data = {"customers.db", "backups", "attachments", "logs", ".build-preserved-data"}
-        return [name for name in names if name in device_data]
+    required = [
+        bundle / PRIMARY_LAUNCHER,
+        bundle / "LandCustomerServer" / "LandCustomerServer.exe",
+        *(bundle / "_server_support" / name for name in SUPPORT_FILES),
+    ]
+    missing = [str(path.relative_to(bundle)) for path in required if not path.is_file()]
+    if missing:
+        raise RuntimeError(f"伺服器封裝缺少必要檔案：{missing}")
 
-    shutil.copytree(DESKTOP_DIST, destination, ignore=ignore)
+    forbidden = []
+    forbidden_directories = {"backups", "attachments", "landcustomersystem", ".build-preserved-data"}
+    forbidden_names = {
+        "customers.db",
+        "desktop-client-settings.db",
+        "postgres-dsn.dpapi",
+        "postgresql-dsn.bin",
+        "land-customer-server-key.pem",
+    }
+    for path in bundle.rglob("*"):
+        relative_parts = {part.lower() for part in path.relative_to(bundle).parts}
+        if relative_parts & forbidden_directories or path.name.lower() in forbidden_names:
+            forbidden.append(str(path.relative_to(bundle)))
+            continue
+        if path.is_file() and path.suffix.lower() in {".db", ".sqlite", ".sqlite3"}:
+            forbidden.append(str(path.relative_to(bundle)))
+            continue
+        text_or_key_extensions = {
+            ".pem", ".key", ".txt", ".json", ".env", ".ini", ".cfg",
+            ".py", ".ps1", ".bat", ".md",
+        }
+        if (
+            path.is_file()
+            and path.suffix.lower() in text_or_key_extensions
+            and path.stat().st_size <= 2 * 1024 * 1024
+        ):
+            try:
+                if b"PRIVATE KEY" in path.read_bytes():
+                    forbidden.append(str(path.relative_to(bundle)))
+            except OSError:
+                forbidden.append(str(path.relative_to(bundle)))
+    if forbidden:
+        raise RuntimeError(f"伺服器封裝包含禁止內容：{sorted(set(forbidden))}")
 
 
 def package_release() -> tuple[Path, Path]:
@@ -114,9 +140,13 @@ def package_release() -> tuple[Path, Path]:
     with tempfile.TemporaryDirectory(prefix="land-customer-package-", dir=RELEASES) as temporary:
         bundle = Path(temporary) / release_name
         bundle.mkdir()
-        _copy_desktop(bundle / "LandCustomerSystem")
         shutil.copytree(SERVER_DIST, bundle / "LandCustomerServer")
-        for name in (*LAUNCHERS, *DOCUMENTS):
+        shutil.copy2(ROOT / PRIMARY_LAUNCHER, bundle / PRIMARY_LAUNCHER)
+        support = bundle / "_server_support"
+        support.mkdir()
+        for name in SUPPORT_FILES:
+            shutil.copy2(ROOT / name, support / name)
+        for name in DOCUMENTS:
             source = ROOT / name
             if source.exists():
                 shutil.copy2(source, bundle / name)
@@ -127,8 +157,14 @@ def package_release() -> tuple[Path, Path]:
             "build_date": BUILD_DATE,
             "packaged_at": datetime.now().astimezone().isoformat(),
             "official_data_source": "postgresql",
-            "desktop_executable": "LandCustomerSystem/LandCustomerSystem.exe",
             "server_executable": "LandCustomerServer/LandCustomerServer.exe",
+            "primary_launcher": PRIMARY_LAUNCHER,
+            "root_launcher_count": 1,
+            "prerequisite_check": ["NetBird", "PostgreSQL Server", "pg_dump"],
+            "prerequisite_install_requires_confirmation": True,
+            "package_source": "winget",
+            "netbird_allowed_range": "100.64.0.0/10",
+            "diagnostics_file": "%LOCALAPPDATA%/LandCustomerSystem/home-server-diagnostics.json",
             "database_included": False,
             "protected_dsn_included": False,
             "private_keys_included": False,
@@ -137,6 +173,7 @@ def package_release() -> tuple[Path, Path]:
             json.dumps(manifest, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        audit_server_bundle(bundle)
         permanent_directory = RELEASES / release_name
         shutil.copytree(bundle, permanent_directory)
         zip_path = RELEASES / f"{release_name}.zip"

@@ -116,58 +116,49 @@ class PostgreSQLBackupMaintenanceTests(unittest.TestCase):
 
 
 class ProductionLauncherTests(unittest.TestCase):
-    def test_official_launchers_use_postgresql_and_https(self):
+    def test_official_home_server_launcher_uses_postgresql_https_and_netbird(self):
         root = Path(__file__).resolve().parent.parent
-        desktop = (root / "start_land_customer_system_postgresql.bat").read_text(encoding="utf-8")
-        mobile = (root / "start_mobile_server_https.bat").read_text(encoding="utf-8")
-        api = (root / "start_api_server_postgresql.bat").read_text(encoding="utf-8")
-
-        self.assertIn("LAND_CUSTOMER_DESKTOP_BACKEND=postgresql", desktop)
-        self.assertIn("LAND_CUSTOMER_API_URL=https://127.0.0.1:8732", desktop)
-        self.assertIn("start_mobile_server_https.bat", desktop)
-        self.assertIn("start_api_server.py --postgres --lan", mobile)
-        self.assertIn("--ssl-certfile", mobile)
-        self.assertIn("backup_postgresql.py --label auto --if-due-hours 24", mobile)
-        self.assertIn("backup_postgresql.py --label auto --if-due-hours 24", api)
-
-        firewall = (root / "allow_private_network_firewall.bat").read_text(encoding="utf-8")
-        self.assertIn("profile=any", firewall)
-        self.assertIn("remoteip=localsubnet", firewall)
-        self.assertNotIn("localport=5432", firewall)
-
-        vpn_firewall = (root / "allow_netbird_vpn_firewall.bat").read_text(encoding="utf-8")
+        launcher = (root / "啟動家中伺服器.bat").read_text(encoding="utf-8-sig")
+        runtime = (root / "home_server_runtime.ps1").read_text(encoding="utf-8-sig")
         vpn_firewall_script = (root / "configure_netbird_firewall.ps1").read_text(encoding="utf-8")
-        self.assertIn("configure_netbird_firewall.ps1", vpn_firewall)
+
+        self.assertIn("home_server_runtime.ps1", launcher)
+        self.assertIn("--postgres', '--check", runtime)
+        self.assertIn("--setup-https', '--prefer-vpn", runtime)
+        self.assertIn("--backup-if-due-hours', '24", runtime)
+        self.assertIn("--postgres', '--lan', '--prefer-vpn", runtime)
+        self.assertIn("home-server-diagnostics.json", runtime)
+        self.assertIn("Netbird.Netbird", runtime)
+        self.assertIn("PostgreSQL.PostgreSQL.18", runtime)
+        self.assertIn("Get-PrerequisiteState", runtime)
+        self.assertIn("Confirm-PrerequisiteInstallation", runtime)
+        self.assertIn("Read-Host '是否現在由系統協助安裝以上軟體？請輸入 Y 或 N'", runtime)
+        self.assertIn("install_decision = 'not_required'", runtime)
+        self.assertIn("missing_software = @()", runtime)
+        self.assertIn("--interactive", runtime)
+        self.assertIn("--accept-package-agreements", runtime)
+        self.assertIn("使用者選擇不安裝必要軟體", runtime)
+        self.assertLess(
+            runtime.index("Confirm-PrerequisiteInstallation -Missing"),
+            runtime.index("Install-MissingPrerequisites" , runtime.index("try {")),
+        )
+        self.assertIn("status --ipv4", runtime)
+        self.assertIn("100.64.0.0/10", runtime)
+        self.assertNotIn("5432', '--lan", runtime)
+
         self.assertIn("NetBird\\netbird.exe", vpn_firewall_script)
         self.assertIn("-LocalPort $rule.Port", vpn_firewall_script)
         self.assertIn("Port = 8732", vpn_firewall_script)
+        self.assertIn("100.64.0.0/10", vpn_firewall_script)
         self.assertNotIn("Port = 5432", vpn_firewall_script)
-
-        vpn_launcher = (root / "start_mobile_server_vpn.bat").read_text(encoding="utf-8")
-        self.assertIn("netbird.exe", vpn_launcher)
-        self.assertIn("--prefer-vpn", vpn_launcher)
-        self.assertIn("--postgres --lan", vpn_launcher)
-
-        home_launcher = (root / "start_home_server_vpn.bat").read_text(encoding="utf-8-sig")
-        self.assertIn("start_mobile_server_vpn.bat", home_launcher)
-        self.assertIn("setup_netbird_vpn.bat", home_launcher)
-        self.assertIn("home_server_preflight.ps1", home_launcher)
-        self.assertIn("setup_local_postgresql.bat", home_launcher)
-        self.assertIn("--prepared", home_launcher)
 
         home_preflight = (root / "home_server_preflight.ps1").read_text(encoding="utf-8")
         self.assertIn("Get-Service -Name 'postgresql*'", home_preflight)
         self.assertIn("configure_netbird_firewall.ps1", home_preflight)
         self.assertIn("-Verb RunAs", home_preflight)
         self.assertIn("Port = 8732", home_preflight)
+        self.assertIn("100.64.0.0/10", home_preflight)
         self.assertNotIn("Port = 5432", home_preflight)
-
-        postgres_setup = (root / "setup_local_postgresql.bat").read_text(
-            encoding="utf-8-sig"
-        )
-        self.assertIn("LandCustomerServer\\LandCustomerServer.exe", postgres_setup)
-        self.assertIn("--setup-postgresql", postgres_setup)
-        self.assertIn("--no-pause", postgres_setup)
 
         company_launcher = (root / "start_company_laptop_desktop.bat").read_text(
             encoding="utf-8-sig"

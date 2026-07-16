@@ -41,7 +41,7 @@ function Get-NetBirdContext {
 
     return [PSCustomObject]@{
         Ip = $vpnIpText
-        Range = "100.$($bytes[1]).0.0/16"
+        Range = '100.64.0.0/10'
     }
 }
 
@@ -75,7 +75,7 @@ function Test-FirewallRule {
                 [string]$_.Protocol -eq 'TCP' -and
                 @([string[]]$_.LocalPort) -contains [string]$Port
             }
-            $remoteRangeWithMask = $RemoteRange -replace '/16$', '/255.255.0.0'
+            $remoteRangeWithMask = $RemoteRange -replace '/10$', '/255.192.0.0'
             $hasRange = $addressFilters | Where-Object {
                 $remoteAddresses = @([string[]]$_.RemoteAddress)
                 $remoteAddresses -contains $RemoteRange -or

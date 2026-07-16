@@ -1,0 +1,47 @@
+土地資料系統－家中主機伺服器 v1.4.2
+========================================
+
+唯一正式啟動方式
+----------------
+只執行「啟動家中伺服器.bat」。
+
+新版伺服器包的最外層只會有這一個 .bat 啟動檔；不要進入 _server_support 或 LandCustomerServer 資料夾開啟內部檔案。
+
+一鍵啟動會依序完成
+------------------
+1. 判斷 NetBird、PostgreSQL Server 與 pg_dump 是否已安裝。
+2. 若有缺少，顯示軟體名稱與用途，詢問是否由系統協助安裝。
+3. 只有輸入 Y／Yes／是才會透過 Windows winget 安裝；輸入 N 或其他內容會安全停止。
+4. PostgreSQL 使用官方互動安裝程式，管理密碼由使用者自行設定，系統不會代填或保存。
+5. 登入或確認 NetBird，並啟動 PostgreSQL Windows 服務。
+6. 建立只允許 NetBird 100.64.0.0/10 的 8732、8733 防火牆規則。
+7. 檢查 PostgreSQL 專案資料庫、HTTPS 憑證、公開 CA 頁與每日備份，再啟動正式伺服器。
+
+如果缺少軟體且 Windows 找不到 winget，請先從 Microsoft Store 安裝「應用程式安裝程式」，再重新執行唯一啟動檔。
+
+視窗顯示「HTTPS 伺服器執行中」後請保持開啟。關閉視窗即停止手機與公司筆電連線。
+
+iPhone
+------
+1. 安裝官方 NetBird App，使用與家中主機相同的帳號登入並 Connect。
+2. 第一次使用時，以 Safari 開啟伺服器視窗顯示的 http://100.x.x.x:8733/。
+3. 下載公開 CA 憑證並完成描述檔安裝。
+4. 到「設定 → 一般 → 關於本機 → 憑證信任設定」，開啟完整信任。
+5. 再開啟伺服器視窗顯示的 https://100.x.x.x:8732/mobile/。
+
+公司筆電
+--------
+使用獨立的 CompanyLaptopClient ZIP，執行 start_company_laptop_desktop.bat。公司筆電不安裝 PostgreSQL，也不執行家中伺服器檔案。
+
+故障診斷
+--------
+若啟動失敗，請傳回：
+%LOCALAPPDATA%\LandCustomerSystem\home-server-diagnostics.json
+
+診斷檔只記錄檢查階段、狀態、NetBird IP、服務狀態與網址，不包含 PostgreSQL 密碼、DSN、登入密碼或存取權杖。
+
+安全提醒
+--------
+- 不要在路由器開放 8732、8733 或 5432。
+- PostgreSQL 5432 只供家中主機本機使用。
+- 伺服器包不含正式資料庫、備份、附件、DPAPI 連線設定或 HTTPS 私鑰。

@@ -10,7 +10,7 @@ iPhone 只使用 Safari／主畫面瀏覽器版。
 家中主機
 --------
 1. 保持 Windows、PostgreSQL 與 NetBird 開機連線，停用自動休眠。
-2. 只需執行 start_home_server_vpn.bat；程式會自動完成 NetBird、PostgreSQL 服務、防火牆、資料庫、HTTPS 與備份檢查。
+2. 只需執行「啟動家中伺服器.bat」；程式會自動完成 NetBird、PostgreSQL 服務、防火牆、資料庫、HTTPS 與備份檢查。
 3. 首次設定可能會要求 NetBird 瀏覽器登入、Windows 管理員授權或 PostgreSQL 管理員密碼。
 4. 視窗不可關閉；畫面會顯示手機網址與家中 NetBird IP。
 

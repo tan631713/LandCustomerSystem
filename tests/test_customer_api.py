@@ -777,28 +777,30 @@ class LocalPostgreSQLConfigurationTests(unittest.TestCase):
             self.assertEqual(settings.backend, "sqlite")
 
 
-class PostgreSQLBatchLauncherTests(unittest.TestCase):
-    def test_launcher_uses_crlf_fixed_python_and_keeps_exit_message_visible(self):
-        launcher = Path(__file__).resolve().parents[1] / "start_api_server_postgresql.bat"
+class HomeServerLauncherTests(unittest.TestCase):
+    def test_only_official_server_launcher_uses_crlf_and_keeps_failure_visible(self):
+        root = Path(__file__).resolve().parents[1]
+        launcher = root / "啟動家中伺服器.bat"
         content = launcher.read_bytes()
         self.assertTrue(content)
         self.assertEqual(content.count(b"\r\n"), content.count(b"\n"))
-        text = content.decode("utf-8")
-        self.assertIn("Python314\\python.exe", text)
-        self.assertIn("--postgres --check", text)
+        text = content.decode("utf-8-sig")
+        self.assertIn("home_server_runtime.ps1", text)
+        self.assertIn("home-server-diagnostics.json", text)
         self.assertIn("pause >nul", text)
 
-    def test_legacy_preview_launcher_redirects_to_official_postgresql_launcher(self):
-        launcher = (
-            Path(__file__).resolve().parents[1]
-            / "start_desktop_postgresql_preview.bat"
-        )
-        content = launcher.read_bytes()
-        self.assertTrue(content)
-        self.assertEqual(content.count(b"\r\n"), content.count(b"\n"))
-        text = content.decode("utf-8")
-        self.assertIn("start_land_customer_system_postgresql.bat", text)
-        self.assertNotIn("preview exited", text)
+    def test_obsolete_server_launchers_are_removed(self):
+        root = Path(__file__).resolve().parents[1]
+        for name in (
+            "start_api_server.bat",
+            "start_api_server_postgresql.bat",
+            "start_desktop_postgresql_preview.bat",
+            "start_home_server_vpn.bat",
+            "start_land_customer_system_postgresql.bat",
+            "start_mobile_server_https.bat",
+            "start_mobile_server_vpn.bat",
+        ):
+            self.assertFalse((root / name).exists(), name)
 
 
 if __name__ == "__main__":
