@@ -20,12 +20,17 @@ graphify-out/
 
 # Customer data, attachments, backups, and logs
 customers.db
+*.db
 *.sqlite
 *.sqlite3
 backups/
 attachments/
 logs/
 .build-preserved-data/
+.test-runtime/
+
+# Local GitHub staging checkout
+LandCustomerSystem/
 
 # Machine-specific reports and acceptance output
 local-postgres-setup-report.json

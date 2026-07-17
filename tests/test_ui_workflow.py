@@ -1539,6 +1539,12 @@ class UiWorkflowTests(unittest.TestCase):
             self.assertIn("智慧重複資料檢查", supported_tool_labels)
             self.assertIn("地圖與地號視覺化", supported_tool_labels)
             self.assertIn("刪除已勾選資料", supported_tool_labels)
+            self.assertIn("通知中心", supported_tool_labels)
+            self.assertIn("案件工作流程與任務看板", supported_tool_labels)
+            self.assertIn("回收桶", supported_tool_labels)
+            self.assertIn("復原批次操作", supported_tool_labels)
+            self.assertIn("合併勾選兩筆資料", supported_tool_labels)
+            self.assertIn("加密既有資料", supported_tool_labels)
             self.assertTrue(
                 all(action.isEnabled() for action in window.api_supported_tool_actions)
             )
@@ -1551,11 +1557,20 @@ class UiWorkflowTests(unittest.TestCase):
             self.assertEqual(
                 supported_setting_labels,
                 {
+                    "伺服器連線設定",
                     "注意名單管理",
                     "操作記錄",
+                    "使用者與權限",
                     "字體大小",
                     "欄位顯示",
                     "唯讀模式",
+                    "修改密碼",
+                    "備份狀態",
+                    "備份管理",
+                    "立即備份",
+                    "開啟備份資料夾",
+                    "異地完整備份",
+                    "還原備份",
                     "檢查納管附件",
                     "使用說明",
                     "關於系統",

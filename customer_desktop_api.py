@@ -9,6 +9,7 @@ import socket
 import ssl
 import time
 import uuid
+from base64 import urlsafe_b64encode
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
@@ -157,6 +158,7 @@ class DesktopApiClient:
         authenticated=True,
         raw_body=None,
         content_type=None,
+        timeout_seconds=None,
     ):
         query = urlencode(
             {
@@ -188,7 +190,11 @@ class DesktopApiClient:
         attempts = 1 + (self.read_retry_count if request_method == "GET" else 0)
         for attempt in range(attempts):
             try:
-                urlopen_options = {"timeout": self.timeout_seconds}
+                urlopen_options = {
+                    "timeout": self.timeout_seconds
+                    if timeout_seconds is None
+                    else max(1, int(timeout_seconds))
+                }
                 if self._ssl_context is not None:
                     urlopen_options["context"] = self._ssl_context
                 with self._urlopen(request, **urlopen_options) as response:
@@ -351,11 +357,18 @@ class DesktopApiClient:
         result = self._request("GET", "/api/v1/projects")
         return list(result.get("items") or [])
 
-    def save_project(self, title, status="進行中", note="", project_id=None):
+    def save_project(
+        self, title, status="進行中", note="", project_id=None, **options
+    ):
         payload = {
             "title": str(title or "").strip(),
             "status": str(status or "進行中").strip() or "進行中",
             "note": str(note or "").strip(),
+            "assigned_to": str(options.get("assigned_to") or "").strip() or None,
+            "due_date": str(options.get("due_date") or "").strip() or None,
+            "priority": str(options.get("priority") or "一般").strip() or "一般",
+            "next_action": str(options.get("next_action") or "").strip() or None,
+            "archived": bool(options.get("archived", False)),
         }
         if project_id is None:
             result = self._request("POST", "/api/v1/projects", payload=payload)
@@ -364,6 +377,46 @@ class DesktopApiClient:
                 "PUT", f"/api/v1/projects/{int(project_id)}", payload=payload
             )
         return int(result["id"])
+
+    def archive_project(self, project_id, archived=True):
+        result = self._request(
+            "PUT",
+            f"/api/v1/projects/{int(project_id)}/archive",
+            params={"archived": bool(archived)},
+        )
+        return int(result["id"])
+
+    def list_project_tasks(self, project_id=None, include_completed=True):
+        result = self._request(
+            "GET", "/api/v1/project-tasks",
+            params={
+                "project_id": project_id,
+                "include_completed": bool(include_completed),
+            },
+        )
+        return list(result.get("items") or [])
+
+    def save_project_task(self, project_id, title, task_id=None, **options):
+        payload = {
+            "project_id": int(project_id),
+            "title": str(title or "").strip(),
+            "assignee": str(options.get("assignee") or "").strip() or None,
+            "due_date": str(options.get("due_date") or "").strip() or None,
+            "status": str(options.get("status") or "待處理"),
+            "priority": str(options.get("priority") or "一般"),
+            "checklist": str(options.get("checklist") or "").strip() or None,
+        }
+        if task_id is None:
+            result = self._request("POST", "/api/v1/project-tasks", payload=payload)
+        else:
+            result = self._request(
+                "PUT", f"/api/v1/project-tasks/{int(task_id)}", payload=payload
+            )
+        return int(result["id"])
+
+    def delete_project_task(self, task_id):
+        self._request("DELETE", f"/api/v1/project-tasks/{int(task_id)}")
+        return True
 
     def delete_project(self, project_id):
         self._request("DELETE", f"/api/v1/projects/{int(project_id)}")
@@ -644,6 +697,200 @@ class DesktopApiClient:
         result = self._request("POST", "/api/v1/attachments/verify", payload={})
         return list(result.get("items") or [])
 
+    def list_recycle_bin(self, limit=1000):
+        result = self._request(
+            "GET", "/api/v1/recycle-bin", params={"limit": int(limit)}
+        )
+        return list(result.get("items") or [])
+
+    def restore_recycle_items(self, ids):
+        result = self._request(
+            "POST", "/api/v1/recycle-bin/restore", payload={"ids": list(ids)}
+        )
+        return [int(value) for value in result.get("record_ids") or []]
+
+    def purge_recycle_items(self, ids=None):
+        result = self._request(
+            "POST", "/api/v1/recycle-bin/purge",
+            params={"purge_all": ids is None},
+            payload={"ids": [] if ids is None else list(ids)},
+        )
+        return int(result.get("count") or 0)
+
+    def record_customer_undo(self, operation_type, ids, summary):
+        result = self._request(
+            "POST", "/api/v1/undo-operations/snapshot",
+            payload={"operation_type": operation_type, "ids": list(ids), "summary": summary},
+        )
+        return result.get("id")
+
+    def record_insert_undo(self, operation_type, ids, summary):
+        result = self._request(
+            "POST", "/api/v1/undo-operations/insert",
+            payload={"operation_type": operation_type, "ids": list(ids), "summary": summary},
+        )
+        return result.get("id")
+
+    def list_undo_operations(self, limit=100):
+        result = self._request(
+            "GET", "/api/v1/undo-operations", params={"limit": int(limit)}
+        )
+        return list(result.get("items") or [])
+
+    def undo_operation(self, operation_id):
+        return self._request(
+            "POST", f"/api/v1/undo-operations/{int(operation_id)}/apply",
+            payload={},
+        )
+
+    def merge_records(self, primary_id, secondary_id, values):
+        result = self._request(
+            "POST", "/api/v1/records/merge",
+            payload={
+                "primary_id": int(primary_id),
+                "secondary_id": int(secondary_id),
+                "values": dict(values),
+            },
+        )
+        return int(result["id"])
+
+    def refresh_notifications(self):
+        result = self._request("POST", "/api/v1/notifications/refresh", payload={})
+        return int(result.get("count") or 0)
+
+    def list_notifications(self, include_read=False, limit=500):
+        result = self._request(
+            "GET", "/api/v1/notifications",
+            params={"include_read": bool(include_read), "limit": int(limit)},
+        )
+        return list(result.get("items") or [])
+
+    def mark_notifications(self, notification_ids, action="read"):
+        result = self._request(
+            "PUT", "/api/v1/notifications",
+            payload={"notification_ids": list(notification_ids), "action": action},
+        )
+        return int(result.get("count") or 0)
+
+    def list_users(self):
+        result = self._request("GET", "/api/v1/users")
+        return list(result.get("items") or [])
+
+    def create_user(self, username, password, role, display_name=None):
+        result = self._request(
+            "POST", "/api/v1/users",
+            payload={
+                "username": username, "password": password, "role": role,
+                "display_name": display_name,
+            },
+        )
+        return int(result["id"])
+
+    def update_user(self, user_id, **values):
+        result = self._request(
+            "PUT", f"/api/v1/users/{int(user_id)}", payload=dict(values)
+        )
+        return int(result["id"])
+
+    def reset_user_password(self, user_id, new_password):
+        result = self._request(
+            "PUT", f"/api/v1/users/{int(user_id)}/password",
+            payload={"new_password": new_password},
+        )
+        return int(result["id"])
+
+    def change_password(self, current_password, new_password):
+        result = self._request(
+            "PUT", "/api/v1/auth/password",
+            payload={"current_password": current_password, "new_password": new_password},
+        )
+        return bool(result.get("changed"))
+
+    def encrypt_existing_records(self):
+        return self._request(
+            "POST",
+            "/api/v1/maintenance/encrypt-existing-records",
+            payload={},
+            timeout_seconds=30 * 60,
+        )
+
+    def server_backup_status(self):
+        return self._request("GET", "/api/v1/server-backups/status")
+
+    def list_server_backups(self):
+        result = self._request("GET", "/api/v1/server-backups")
+        return list(result.get("items") or [])
+
+    def create_server_backup(self, label="manual", retention_days=90, max_count=30):
+        return self._request(
+            "POST", "/api/v1/server-backups",
+            payload={
+                "label": label,
+                "retention_days": int(retention_days),
+                "max_count": int(max_count),
+            },
+            timeout_seconds=30 * 60,
+        )
+
+    def maintain_server_backups(self, retention_days=90, max_count=30):
+        return self._request(
+            "POST", "/api/v1/server-backups/maintenance",
+            payload={
+                "retention_days": int(retention_days),
+                "max_count": int(max_count),
+            },
+            timeout_seconds=5 * 60,
+        )
+
+    def restore_server_backup(self, backup_name, confirmation):
+        return self._request(
+            "POST",
+            "/api/v1/server-backups/restore",
+            payload={"backup_name": backup_name, "confirmation": confirmation},
+            timeout_seconds=30 * 60,
+        )
+
+    def list_server_backup_targets(self):
+        result = self._request("GET", "/api/v1/server-backup-targets")
+        return list(result.get("items") or [])
+
+    def save_server_backup_target(
+        self, name, directory_path, *, enabled=True, target_id=None
+    ):
+        method = "POST" if target_id is None else "PUT"
+        path = (
+            "/api/v1/server-backup-targets"
+            if target_id is None
+            else f"/api/v1/server-backup-targets/{int(target_id)}"
+        )
+        result = self._request(
+            method,
+            path,
+            payload={
+                "name": name,
+                "directory_path": directory_path,
+                "enabled": bool(enabled),
+            },
+        )
+        return int(result["id"])
+
+    def delete_server_backup_target(self, target_id):
+        result = self._request(
+            "DELETE", f"/api/v1/server-backup-targets/{int(target_id)}"
+        )
+        return bool(result.get("deleted"))
+
+    def sync_server_backup_targets(self, retention_days=90, max_count=30):
+        return self._request(
+            "POST",
+            "/api/v1/server-backup-targets/sync",
+            payload={
+                "retention_days": int(retention_days),
+                "max_count": int(max_count),
+            },
+            timeout_seconds=30 * 60,
+        )
+
 
 class DesktopApiRecordRepository:
     """Core record subset consumed by the desktop search and edit workflow."""
@@ -880,8 +1127,8 @@ class DesktopApiRecordRepository:
     def list_cases(self):
         return [dict(row) for row in self.client.list_projects()]
 
-    def save_case(self, title, status="進行中", note="", case_id=None, **_unused):
-        saved_id = self.client.save_project(title, status, note, case_id)
+    def save_case(self, title, status="進行中", note="", case_id=None, **options):
+        saved_id = self.client.save_project(title, status, note, case_id, **options)
         self._invalidate()
         return int(saved_id)
 
@@ -889,6 +1136,24 @@ class DesktopApiRecordRepository:
         deleted = self.client.delete_project(int(case_id))
         self._invalidate()
         return int(bool(deleted))
+
+    def archive_case(self, case_id, archived=True):
+        return self.client.archive_project(case_id, archived)
+
+    def list_case_tasks(self, case_id=None, include_completed=True):
+        return [
+            dict(row) for row in self.client.list_project_tasks(
+                case_id, include_completed
+            )
+        ]
+
+    def save_case_task(self, case_id, title, task_id=None, **options):
+        return self.client.save_project_task(
+            case_id, title, task_id=task_id, **options
+        )
+
+    def delete_case_task(self, task_id):
+        return int(bool(self.client.delete_project_task(task_id)))
 
     def add_customers_to_case(self, case_id, customer_ids):
         processed = self.client.update_project_records(
@@ -1057,3 +1322,116 @@ class DesktopApiRecordRepository:
 
     def verify_managed_attachments(self):
         return [dict(row) for row in self.client.verify_managed_attachments()]
+
+    def list_recycle_bin(self, limit=1000):
+        return [dict(row) for row in self.client.list_recycle_bin(limit)]
+
+    def restore_recycle_items(self, ids):
+        restored = self.client.restore_recycle_items(ids)
+        self._invalidate()
+        return restored
+
+    def purge_recycle_items(self, ids=None, _storage_root=None):
+        return self.client.purge_recycle_items(ids)
+
+    def record_customer_undo(self, operation_type, ids, summary):
+        return self.client.record_customer_undo(operation_type, ids, summary)
+
+    def record_insert_undo(self, operation_type, ids, summary):
+        return self.client.record_insert_undo(operation_type, ids, summary)
+
+    def list_undo_operations(self, limit=100):
+        return [dict(row) for row in self.client.list_undo_operations(limit)]
+
+    def undo_operation(self, operation_id=None):
+        if operation_id is None:
+            rows = [row for row in self.list_undo_operations() if row.get("status") == "available"]
+            if not rows:
+                return None
+            operation_id = rows[0]["id"]
+        result = self.client.undo_operation(operation_id)
+        self._invalidate()
+        return result
+
+    def merge_customers(self, primary_id, secondary_id, merged_record):
+        result = self.client.merge_records(
+            primary_id, secondary_id, self._plain_values(merged_record)
+        )
+        self._invalidate()
+        return result
+
+    def refresh_notifications(self, _today_text=None):
+        return self.client.refresh_notifications()
+
+    def list_notifications(self, include_read=False, limit=500):
+        return [dict(row) for row in self.client.list_notifications(include_read, limit)]
+
+    def mark_notifications(self, notification_ids, action="read"):
+        return self.client.mark_notifications(notification_ids, action)
+
+    def list_users(self):
+        return [dict(row) for row in self.client.list_users()]
+
+    def create_user(self, username, password, role, _data_key=None, display_name=None):
+        return self.client.create_user(username, password, role, display_name)
+
+    def update_user(self, user_id, **values):
+        return self.client.update_user(user_id, **values)
+
+    def reset_user_password(self, user_id, new_password, _data_key=None):
+        return self.client.reset_user_password(user_id, new_password)
+
+    def change_user_password(self, _username, current_password, new_password, _data_key=None):
+        self.client.change_password(current_password, new_password)
+        data_key = urlsafe_b64encode(
+            self.fernet._signing_key + self.fernet._encryption_key
+        )
+        return data_key, None
+
+    def change_admin_password(self, current_password, new_password):
+        return self.change_user_password("admin", current_password, new_password)
+
+    def encrypt_existing_customers(self, _fernet=None):
+        result = dict(self.client.encrypt_existing_records())
+        self._invalidate()
+        return int(result.get("updated_records") or 0)
+
+    def server_backup_status(self):
+        return dict(self.client.server_backup_status())
+
+    def list_server_backups(self):
+        return [dict(row) for row in self.client.list_server_backups()]
+
+    def create_server_backup(self, label="manual", retention_days=90, max_count=30):
+        return dict(
+            self.client.create_server_backup(label, retention_days, max_count)
+        )
+
+    def maintain_server_backups(self, retention_days=90, max_count=30):
+        return dict(
+            self.client.maintain_server_backups(retention_days, max_count)
+        )
+
+    def restore_server_backup(self, backup_name, confirmation):
+        return dict(self.client.restore_server_backup(backup_name, confirmation))
+
+    def list_server_backup_targets(self):
+        return [dict(row) for row in self.client.list_server_backup_targets()]
+
+    def save_server_backup_target(
+        self, name, directory_path, *, enabled=True, target_id=None
+    ):
+        return self.client.save_server_backup_target(
+            name,
+            directory_path,
+            enabled=enabled,
+            target_id=target_id,
+        )
+
+    def delete_server_backup_target(self, target_id):
+        return self.client.delete_server_backup_target(target_id)
+
+    def sync_server_backup_targets(self, retention_days=90, max_count=30):
+        return dict(
+            self.client.sync_server_backup_targets(retention_days, max_count)
+        )

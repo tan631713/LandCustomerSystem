@@ -336,11 +336,11 @@ class RecordWorkflowMixin:
             return
         if not self.api_mode:
             self.create_safety_backup("batch-edit")
-            self.repository.record_customer_undo(
-                "批次修改",
-                ids,
-                f"批次修改 {len(ids)} 筆「{dialog.field_combo.currentText()}」",
-            )
+        repository.record_customer_undo(
+            "批次修改",
+            ids,
+            f"批次修改 {len(ids)} 筆「{dialog.field_combo.currentText()}」",
+        )
         updates = []
         change_logs = []
         for row in rows:
@@ -422,12 +422,13 @@ class RecordWorkflowMixin:
             return
 
         try:
+            repository = self.active_record_repository()
             if self.current_user.get("username") == self.admin_username:
-                new_encryption_key, backup_path = self.repository.change_admin_password(
+                new_encryption_key, backup_path = repository.change_admin_password(
                     current_password, new_password
                 )
             else:
-                new_encryption_key, backup_path = self.repository.change_user_password(
+                new_encryption_key, backup_path = repository.change_user_password(
                     self.current_user.get("username"),
                     current_password,
                     new_password,
@@ -516,8 +517,9 @@ class RecordWorkflowMixin:
         if reply != self._app_component("QMessageBox").Yes:
             return
 
-        self.create_safety_backup("encrypt")
-        updated = self.repository.encrypt_existing_customers(self.fernet)
+        if not self.api_mode:
+            self.create_safety_backup("encrypt")
+        updated = self.active_record_repository().encrypt_existing_customers(self.fernet)
 
         self.refresh_records(self.selected_record_id)
         self._log_operation("加密資料", f"處理 {updated} 筆", "")

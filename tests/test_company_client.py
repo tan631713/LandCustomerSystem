@@ -13,6 +13,41 @@ from customer_repository import CustomerRepository
 
 
 class CompanyClientConfigurationTests(unittest.TestCase):
+    def test_prompt_accepts_plain_ip_and_returns_https_url(self):
+        with patch.object(
+            desktop_app.QInputDialog,
+            "getText",
+            return_value=("100.101.102.103", True),
+        ):
+            self.assertEqual(
+                desktop_app.prompt_server_api_url(),
+                "https://100.101.102.103:8732",
+            )
+
+    def test_connect_desktop_api_persists_working_address(self):
+        healthy_client = object()
+        with (
+            patch.object(
+                desktop_app,
+                "get_setting",
+                return_value="100.101.102.103",
+            ),
+            patch.object(
+                desktop_app,
+                "create_healthy_desktop_api_client",
+                return_value=healthy_client,
+            ) as health_check,
+            patch.object(desktop_app, "set_setting") as save_setting,
+            patch.dict(os.environ, {}, clear=False),
+        ):
+            result = desktop_app.connect_desktop_api()
+        self.assertIs(result, healthy_client)
+        health_check.assert_called_once_with("https://100.101.102.103:8732")
+        save_setting.assert_called_once_with(
+            desktop_app.SERVER_API_URL_SETTING_KEY,
+            "https://100.101.102.103:8732",
+        )
+
     def test_remote_mode_creates_only_device_settings_table(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -67,6 +102,32 @@ class CompanyClientConfigurationTests(unittest.TestCase):
                 self.assertEqual(os.environ["LAND_CUSTOMER_DESKTOP_BACKEND"], "postgresql")
                 self.assertEqual(Path(result["ca_certificate"]), ca_path)
 
+    def test_company_bundle_can_require_user_entered_server_ip(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = Path(directory)
+            runtime = bundle / "LandCustomerSystem"
+            runtime.mkdir()
+            ca_path = bundle / "land-customer-local-ca.pem"
+            ca_path.write_text("PUBLIC CA", encoding="ascii")
+            (runtime / "company-client-config.json").write_text(
+                json.dumps(
+                    {
+                        "ca_certificate": "../land-customer-local-ca.pem",
+                        "server_ip_user_configurable": True,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with (
+                patch.object(customer_ui, "get_runtime_directory", return_value=runtime),
+                patch.dict(os.environ, {}, clear=True),
+            ):
+                result = customer_ui.apply_company_client_config()
+                self.assertNotIn("LAND_CUSTOMER_API_URL", os.environ)
+                self.assertEqual(os.environ["LAND_CUSTOMER_DESKTOP_BACKEND"], "postgresql")
+                self.assertTrue(result["requires_server_ip_input"])
+                self.assertEqual(Path(result["ca_certificate"]), ca_path)
+
     def test_company_bundle_rejects_plain_http(self):
         with tempfile.TemporaryDirectory() as directory:
             runtime = Path(directory) / "LandCustomerSystem"
@@ -94,7 +155,7 @@ class CompanyClientConfigurationTests(unittest.TestCase):
                     "status": "ok",
                     "backend": "postgresql",
                     "version": "1.4.0",
-                    "schema_version": 2,
+                    "schema_version": 3,
                     "record_count": 267,
                 }
 
@@ -112,7 +173,7 @@ class CompanyClientConfigurationTests(unittest.TestCase):
             report = json.loads(report_path.read_text(encoding="utf-8"))
         self.assertEqual(exit_code, 0)
         self.assertEqual(report["status"], "ok")
-        self.assertEqual(report["schema_version"], 2)
+        self.assertEqual(report["schema_version"], 3)
         self.assertEqual(report["record_count"], 267)
         self.assertNotIn("password", json.dumps(report).casefold())
         self.assertNotIn("token", json.dumps(report).casefold())
@@ -137,21 +198,18 @@ class CompanyClientConfigurationTests(unittest.TestCase):
             self.assertFalse((destination / "company-client-config.json").exists())
             self.assertFalse((destination / "backups").exists())
 
-    def test_company_launcher_runs_https_api_preflight(self):
+    def test_company_launcher_lets_desktop_prompt_for_server_ip(self):
         root = Path(__file__).resolve().parent.parent
         launcher = (root / "start_company_laptop_desktop.bat").read_text(
             encoding="utf-8-sig"
         )
-        preflight = (root / "company_client_preflight.ps1").read_text(
-            encoding="utf-8-sig"
-        )
         self.assertIn("setup_netbird_client.bat", launcher)
-        self.assertIn("-DesktopExe", launcher)
-        self.assertIn("client-network-diagnostics.json", launcher)
-        self.assertIn("ConnectAsync", preflight)
-        self.assertIn("--client-health-report", preflight)
-        self.assertIn("-WindowStyle Hidden", preflight)
-        self.assertNotIn("5432", preflight)
+        self.assertIn("LAND_CUSTOMER_DESKTOP_BACKEND=postgresql", launcher)
+        self.assertIn("LAND_CUSTOMER_API_CA_CERT=%CA_CERT%", launcher)
+        self.assertIn("程式會要求輸入家中伺服器的 NetBird IP", launcher)
+        self.assertNotIn("home_server_ip.txt", launcher)
+        self.assertNotIn("LAND_CUSTOMER_API_URL=", launcher)
+        self.assertNotIn("company_client_preflight.ps1", launcher)
 
     def test_api_mode_operation_log_never_writes_device_customer_tables(self):
         with (

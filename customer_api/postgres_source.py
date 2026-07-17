@@ -6,6 +6,8 @@ from customer_api.postgres_collaboration import PostgreSQLCollaborationMixin
 from customer_api.postgres_desktop_features import PostgreSQLDesktopFeatureMixin
 from customer_api.postgres_projects import PostgreSQLProjectMixin
 from customer_api.postgres_records import PostgreSQLRecordMixin
+from customer_api.postgres_remote_operations import PostgreSQLRemoteOperationMixin
+from customer_api.postgres_schema import ensure_postgres_schema
 from customer_api.postgres_tags import PostgreSQLTagMixin
 from customer_api.types import AuthenticatedUser
 from customer_security import derive_encryption_key, make_fernet, verify_password
@@ -18,6 +20,7 @@ class PostgreSQLCustomerDataSource(
     PostgreSQLTagMixin,
     PostgreSQLAttachmentMixin,
     PostgreSQLDesktopFeatureMixin,
+    PostgreSQLRemoteOperationMixin,
 ):
     backend_name = "postgresql"
     CONNECT_TIMEOUT_SECONDS = 5
@@ -106,6 +109,7 @@ class PostgreSQLCustomerDataSource(
         self.dsn = settings.postgres_dsn
         self._psycopg = psycopg
         self._dict_row = dict_row
+        ensure_postgres_schema(self.dsn)
 
     def _connect(self):
         return self._psycopg.connect(

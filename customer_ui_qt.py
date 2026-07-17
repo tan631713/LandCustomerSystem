@@ -9,7 +9,18 @@ from pathlib import Path
 from cryptography.fernet import Fernet
 from customer_analytics import build_dashboard_stats
 from customer_auth import AuthDialog, configure_auth_dialog, validate_new_password
-from customer_backup_status import BackupManagementDialog, BackupStatusMixin, format_storage_size
+from customer_backup_status import (
+    BackupManagementDialog,
+    BackupStatusMixin,
+    ServerBackupRestoreDialog,
+    ServerBackupTargetsDialog,
+    format_storage_size,
+)
+from customer_client_connection import (
+    SERVER_API_URL_SETTING_KEY,
+    normalize_server_api_url,
+    server_ip_from_api_url,
+)
 from customer_database import (
     AUTO_BACKUP_LIMIT,
     DEFAULT_BACKUP_MAX_COUNT,
@@ -71,7 +82,6 @@ from customer_desktop_support import DesktopSupportMixin
 from customer_desktop_state import DesktopStateMixin
 from customer_display import attachment_display_name, compact_summary_text, format_attachment_summary
 from customer_desktop_api import (
-    DEFAULT_API_URL,
     DesktopApiClient,
     DesktopApiError,
     DesktopApiRecordRepository,
@@ -142,6 +152,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QHeaderView,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -775,6 +786,97 @@ def desktop_api_requested():
     }
 
 
+def prompt_server_api_url(parent=None, current_url=""):
+    """Ask for a NetBird server IP until it is valid or the user cancels."""
+
+    current_ip = ""
+    if current_url:
+        try:
+            current_ip = server_ip_from_api_url(current_url)
+        except ValueError:
+            current_ip = ""
+    while True:
+        value, accepted = QInputDialog.getText(
+            parent,
+            "伺服器連線設定",
+            "請輸入家中伺服器的 NetBird IP：\n例如：100.107.252.170",
+            QLineEdit.Normal,
+            current_ip,
+        )
+        if not accepted:
+            return None
+        try:
+            return normalize_server_api_url(value)
+        except ValueError as exc:
+            QMessageBox.warning(parent, "IP 格式不正確", str(exc))
+            current_ip = str(value or "").strip()
+
+
+def create_healthy_desktop_api_client(api_url):
+    client = DesktopApiClient(api_url)
+    health = client.health()
+    if health.get("backend") != "postgresql":
+        raise DesktopApiError("連線目標不是 PostgreSQL 正式伺服器。")
+    if int(health.get("schema_version") or 0) < 2:
+        raise DesktopApiError("家中伺服器資料結構版本過舊，請先更新伺服器。")
+    return client
+
+
+def connect_desktop_api(parent=None):
+    """Resolve, validate, test, and persist the user-selected server address."""
+
+    saved_url = str(get_setting(SERVER_API_URL_SETTING_KEY, "") or "").strip()
+    environment_url = str(os.environ.get(DESKTOP_API_URL_ENV, "") or "").strip()
+    candidate = saved_url or environment_url
+    while True:
+        if candidate:
+            try:
+                candidate = normalize_server_api_url(candidate)
+                client = create_healthy_desktop_api_client(candidate)
+            except (DesktopApiError, ValueError) as exc:
+                QMessageBox.warning(
+                    parent,
+                    "無法連線到家中伺服器",
+                    f"目前設定：{candidate}\n\n{exc}\n\n請重新輸入家中伺服器 IP。",
+                )
+                candidate = ""
+                continue
+            set_setting(SERVER_API_URL_SETTING_KEY, candidate)
+            os.environ[DESKTOP_API_URL_ENV] = candidate
+            return client
+
+        candidate = prompt_server_api_url(parent, saved_url or environment_url)
+        if not candidate:
+            return None
+
+
+def change_server_connection(parent):
+    """Test and store a new server address selected from the Settings menu."""
+
+    repository = parent.active_record_repository()
+    current_url = getattr(getattr(repository, "client", None), "base_url", "")
+    selected_url = prompt_server_api_url(parent, current_url)
+    if not selected_url:
+        return None
+    try:
+        create_healthy_desktop_api_client(selected_url)
+    except (DesktopApiError, ValueError) as exc:
+        QMessageBox.critical(
+            parent,
+            "伺服器設定未儲存",
+            f"無法使用 {selected_url}：\n\n{exc}",
+        )
+        return False
+    set_setting(SERVER_API_URL_SETTING_KEY, selected_url)
+    os.environ[DESKTOP_API_URL_ENV] = selected_url
+    QMessageBox.information(
+        parent,
+        "伺服器設定已儲存",
+        f"已儲存：{selected_url}\n\n請關閉並重新開啟桌面程式後使用新連線。",
+    )
+    return True
+
+
 def configure_api_authentication(api_client):
     def authenticate_api_user(username, password):
         try:
@@ -904,6 +1006,8 @@ class LandApp(
         self.create_layout()
         if self.api_mode:
             self.configure_api_mode_ui()
+            self.setup_notification_status()
+            self.setup_backup_status()
         else:
             self.setup_backup_status()
             self.setup_notification_status()
@@ -938,20 +1042,9 @@ def main():
     apply_app_style(app)
     api_client = None
     if api_mode:
-        try:
-            api_client = DesktopApiClient(
-                os.environ.get(DESKTOP_API_URL_ENV, DEFAULT_API_URL)
-            )
-            health = api_client.health()
-            if health.get("backend") != "postgresql":
-                raise DesktopApiError("API 目前不是 PostgreSQL 模式")
-        except (DesktopApiError, ValueError) as exc:
-            QMessageBox.critical(
-                None,
-                "PostgreSQL API 無法使用",
-                f"無法啟動 PostgreSQL 正式版。\n\n{exc}",
-            )
-            return 1
+        api_client = connect_desktop_api()
+        if api_client is None:
+            return 0
         configure_api_authentication(api_client)
     encryption_key = require_login(setup_mode=False if api_mode else None)
     if not encryption_key:

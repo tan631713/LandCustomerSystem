@@ -513,7 +513,8 @@ class ManagementWorkflowMixin:
         if len(ids) != 2:
             self._app_component("QMessageBox").warning(self, "勾選數量不正確", "請剛好勾選兩筆資料再合併。")
             return
-        rows = self.repository.fetch_customers_by_ids(ids)
+        repository = self.active_record_repository()
+        rows = repository.fetch_customers_by_ids(ids)
         if len(rows) != 2:
             self._app_component("QMessageBox").warning(self, "資料不存在", "勾選資料已不存在，請重新整理後再試。")
             return
@@ -538,25 +539,26 @@ class ManagementWorkflowMixin:
         )
         if dialog.exec() != QDialog.Accepted:
             return
-        self.create_safety_backup("merge")
-        self.repository.record_customer_undo(
-            "合併資料",
-            ids,
-            f"合併 ID {primary_row['id']} 與 {secondary_row['id']}",
-        )
+        if not self.api_mode:
+            self.create_safety_backup("merge")
+            repository.record_customer_undo(
+                "合併資料",
+                ids,
+                f"合併 ID {primary_row['id']} 與 {secondary_row['id']}",
+            )
         change_logs = self.build_record_change_logs(
             primary_row["id"],
             primary_plain,
             merged_plain,
             "合併資料",
         )
-        self.repository.merge_customers(
+        repository.merge_customers(
             primary_row["id"],
             secondary_row["id"],
             encrypt_record(self.fernet, merged_plain),
         )
         if change_logs:
-            self.repository.add_record_change_logs(change_logs)
+            repository.add_record_change_logs(change_logs)
         self.checked_record_ids.discard(secondary_row["id"])
         self.checked_record_ids.add(primary_row["id"])
         self._log_operation("合併資料", f"保留 ID {primary_row['id']}", f"刪除 ID {secondary_row['id']}")

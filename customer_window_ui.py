@@ -116,7 +116,10 @@ class DesktopWindowMixin:
         )
 
     def configure_api_mode_ui(self):
-        unavailable_text = "這項本機資料庫功能尚未提供遠端版本"
+        unavailable_text = (
+            "這項操作會直接取代或搬移整套伺服器資料，為避免遠端誤操作，"
+            "只允許在家中主機執行"
+        )
         self.data_button.setEnabled(True)
         self.data_button.setToolTip("遠端資料可批量新增、匯入與匯出")
         for button in (self.tools_button, self.settings_button):
@@ -141,7 +144,7 @@ class DesktopWindowMixin:
             action.setEnabled(False)
             action.setStatusTip(unavailable_text)
         self.statusBar().showMessage(
-            "PostgreSQL 正式版：查詢、編輯、匯入、批次操作、案件、標籤、附件、自訂欄位、歷史、注意名單與追蹤均已連線。"
+            "PostgreSQL 正式版：通知、工作流程、回收桶、復原、合併、帳號密碼與伺服器備份均已連線。"
         )
 
     # Keep the old method name for extensions created during the preview stage.

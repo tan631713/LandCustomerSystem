@@ -152,6 +152,269 @@ class CustomerApiTests(unittest.TestCase):
         self.assertIn('url.pathname.startsWith("/api/")', service_worker.text)
         self.assertIn("no-store", service_worker.headers["cache-control"])
 
+    def test_full_desktop_remote_workflow_end_to_end(self):
+        headers = self.login()
+
+        project = self.client.post(
+            "/api/v1/projects",
+            headers=headers,
+            json={
+                "title": "中正段開發案",
+                "status": "進行中",
+                "note": "測試",
+                "assigned_to": "王業務",
+                "due_date": "2026-07-17",
+                "priority": "高",
+                "next_action": "電話聯絡",
+                "archived": False,
+            },
+        )
+        self.assertEqual(project.status_code, 201, project.text)
+        project_id = project.json()["id"]
+        task = self.client.post(
+            "/api/v1/project-tasks",
+            headers=headers,
+            json={
+                "project_id": project_id,
+                "title": "確認持分",
+                "assignee": "王業務",
+                "due_date": "2026-07-17",
+                "status": "待處理",
+                "priority": "緊急",
+                "checklist": "核對謄本",
+            },
+        )
+        self.assertEqual(task.status_code, 201, task.text)
+        tasks = self.client.get("/api/v1/project-tasks", headers=headers)
+        self.assertEqual(tasks.json()["items"][0]["title"], "確認持分")
+
+        refreshed = self.client.post(
+            "/api/v1/notifications/refresh", headers=headers, json={}
+        )
+        self.assertEqual(refreshed.status_code, 200, refreshed.text)
+        notifications = self.client.get("/api/v1/notifications", headers=headers)
+        self.assertGreaterEqual(len(notifications.json()["items"]), 1)
+        notification_id = notifications.json()["items"][0]["id"]
+        marked = self.client.put(
+            "/api/v1/notifications",
+            headers=headers,
+            json={"notification_ids": [notification_id], "action": "read"},
+        )
+        self.assertEqual(marked.json()["count"], 1)
+
+        created_user = self.client.post(
+            "/api/v1/users",
+            headers=headers,
+            json={
+                "username": "editor2",
+                "password": "editor2-password",
+                "role": "editor",
+                "display_name": "第二位編輯者",
+            },
+        )
+        self.assertEqual(created_user.status_code, 201, created_user.text)
+        user_id = created_user.json()["id"]
+        updated_user = self.client.put(
+            f"/api/v1/users/{user_id}",
+            headers=headers,
+            json={"display_name": "編輯者二號", "role": "viewer", "active": True},
+        )
+        self.assertEqual(updated_user.status_code, 200, updated_user.text)
+        reset = self.client.put(
+            f"/api/v1/users/{user_id}/password",
+            headers=headers,
+            json={"new_password": "editor2-new-password"},
+        )
+        self.assertEqual(reset.status_code, 200, reset.text)
+
+        undo = self.client.post(
+            "/api/v1/undo-operations/snapshot",
+            headers=headers,
+            json={
+                "operation_type": "批次修改",
+                "ids": [self.record_id],
+                "summary": "修改前快照",
+            },
+        )
+        self.assertEqual(undo.status_code, 201, undo.text)
+        original = self.client.get(
+            f"/api/v1/records/{self.record_id}", headers=headers
+        ).json()
+        changed = dict(original)
+        changed["district"] = "中壢區"
+        for key in list(changed):
+            if key not in {field_key for field_key, _label in LAND_FIELDS}:
+                changed.pop(key)
+        self.assertEqual(
+            self.client.put(
+                f"/api/v1/records/{self.record_id}", headers=headers, json=changed
+            ).status_code,
+            200,
+        )
+        applied = self.client.post(
+            f"/api/v1/undo-operations/{undo.json()['id']}/apply",
+            headers=headers,
+            json={},
+        )
+        self.assertEqual(applied.status_code, 200, applied.text)
+        restored = self.client.get(
+            f"/api/v1/records/{self.record_id}", headers=headers
+        ).json()
+        self.assertEqual(restored["district"], "桃園區")
+
+        self.assertEqual(
+            self.client.delete(
+                f"/api/v1/records/{self.record_id}", headers=headers
+            ).status_code,
+            204,
+        )
+        recycled = self.client.get("/api/v1/recycle-bin", headers=headers).json()
+        recycle_id = recycled["items"][0]["id"]
+        recycle_restore = self.client.post(
+            "/api/v1/recycle-bin/restore",
+            headers=headers,
+            json={"ids": [recycle_id]},
+        )
+        self.assertEqual(recycle_restore.status_code, 200, recycle_restore.text)
+        self.assertIn(self.record_id, recycle_restore.json()["record_ids"])
+
+        password_change = self.client.put(
+            "/api/v1/auth/password",
+            headers=headers,
+            json={
+                "current_password": "admin-password",
+                "new_password": "admin-new-password",
+            },
+        )
+        self.assertEqual(password_change.status_code, 200, password_change.text)
+        self.login("admin", "admin-new-password")
+
+    def test_server_backup_controls_are_admin_only_and_use_server_backup_module(self):
+        headers = self.login()
+        with patch(
+            "backup_postgresql.backup_status",
+            return_value={
+                "status": "ok",
+                "backup_directory": "C:/server-backups",
+                "backup_count": 2,
+                "latest_backup": "C:/server-backups/latest.zip",
+                "latest_backup_at": "2026-07-17T08:00:00+00:00",
+                "total_bytes": 1234,
+            },
+        ), patch(
+            "backup_postgresql.create_backup",
+            return_value={"status": "ok", "backup_path": "C:/server-backups/new.zip"},
+        ) as create_backup, patch(
+            "backup_postgresql.prune_backups", return_value=[]
+        ):
+            status = self.client.get(
+                "/api/v1/server-backups/status", headers=headers
+            )
+            self.assertEqual(status.status_code, 200, status.text)
+            self.assertEqual(status.json()["backup_count"], 2)
+            created = self.client.post(
+                "/api/v1/server-backups",
+                headers=headers,
+                json={"label": "manual", "retention_days": 60, "max_count": 20},
+            )
+            self.assertEqual(created.status_code, 201, created.text)
+            create_backup.assert_called_once_with(
+                label="manual", retention_days=60, max_count=20
+            )
+            maintained = self.client.post(
+                "/api/v1/server-backups/maintenance",
+                headers=headers,
+                json={"retention_days": 60, "max_count": 20},
+            )
+            self.assertEqual(maintained.status_code, 200, maintained.text)
+
+        viewer_headers = self.login("viewer", "viewer-password")
+        forbidden = self.client.get(
+            "/api/v1/server-backups/status", headers=viewer_headers
+        )
+        self.assertEqual(forbidden.status_code, 403)
+
+    def test_remote_encrypt_existing_records_encrypts_plaintext_and_is_admin_only(self):
+        plaintext_id = self.source.repository.save_customer(
+            self.record(
+                district="中壢區",
+                section="青埔段",
+                land_number="200-1",
+                owner_name="尚未加密地主",
+                external_id="A123456789",
+                address="測試地址",
+                note="明文備註",
+            )
+        )
+        headers = self.login()
+        response = self.client.post(
+            "/api/v1/maintenance/encrypt-existing-records",
+            headers=headers,
+            json={},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["updated_records"], 1)
+        with self.source.database.connect() as conn:
+            stored = conn.execute(
+                "SELECT owner_name, external_id, address, note FROM customers WHERE id=?",
+                (plaintext_id,),
+            ).fetchone()
+        self.assertTrue(all(str(value).startswith("enc:v1:") for value in stored))
+
+        viewer_headers = self.login("viewer", "viewer-password")
+        denied = self.client.post(
+            "/api/v1/maintenance/encrypt-existing-records",
+            headers=viewer_headers,
+            json={},
+        )
+        self.assertEqual(denied.status_code, 403)
+
+    def test_server_backup_target_crud_uses_paths_on_the_server(self):
+        headers = self.login()
+        destination = self.root / "offsite"
+        destination.mkdir()
+        created = self.client.post(
+            "/api/v1/server-backup-targets",
+            headers=headers,
+            json={
+                "name": "測試外接碟",
+                "directory_path": str(destination),
+                "enabled": True,
+            },
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        target_id = created.json()["id"]
+        listed = self.client.get(
+            "/api/v1/server-backup-targets", headers=headers
+        ).json()["items"]
+        self.assertEqual(listed[0]["directory_path"], str(destination.resolve()))
+
+        updated = self.client.put(
+            f"/api/v1/server-backup-targets/{target_id}",
+            headers=headers,
+            json={
+                "name": "測試 NAS",
+                "directory_path": str(destination),
+                "enabled": False,
+            },
+        )
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertFalse(
+            self.client.get(
+                "/api/v1/server-backup-targets", headers=headers
+            ).json()["items"][0]["enabled"]
+        )
+        sync = self.client.post(
+            "/api/v1/server-backup-targets/sync",
+            headers=headers,
+            json={"retention_days": 90, "max_count": 30},
+        )
+        self.assertEqual(sync.status_code, 409)
+        deleted = self.client.delete(
+            f"/api/v1/server-backup-targets/{target_id}", headers=headers
+        )
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+
     def test_editor_can_write_contact_and_follow_up_but_viewer_cannot(self):
         admin_headers = self.login()
         created = self.client.post(

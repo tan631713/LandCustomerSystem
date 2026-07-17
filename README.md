@@ -1,6 +1,6 @@
 # 土地資料系統
 
-目前正式版：`v1.5.0`（建置日期：2026-07-16）
+目前正式版：`v1.7.0`（建置日期：2026-07-17）
 
 正式共用資料儲存在自架 `PostgreSQL`；Windows 桌面程式與 iPhone 行動版都透過 `FastAPI` 讀寫同一份資料。舊 `customers.db` 只保留為歷史安全備份與單機相容資料，不再作為手機同步來源。
 
@@ -8,9 +8,14 @@
 
 ## 最新功能
 
+- 公司筆電已接通通知中心、案件工作流程與任務看板、回收桶、批次復原及兩筆資料合併；操作全部由家中 PostgreSQL 交易處理
+- 管理員可由公司筆電新增帳號、調整角色／啟用狀態與重設密碼；每位使用者也可修改自己的登入密碼，共用資料金鑰不會離開登入工作階段
+- 公司筆電可查看家中備份狀態、立即建立 PostgreSQL＋附件 ZIP、設定保留期限／數量及清理舊備份
+- 遠端整庫還原、異地備份目的地與既有資料重新加密仍限定在家中主機，避免公司端誤操作取代正式資料
+- 公司筆電首次啟動時直接輸入家中伺服器 NetBird IP，驗證成功後自動保存；IP 改變時可由「設定 ＞ 伺服器連線設定」修改，不必編輯檔案或重新打包
 - 公司筆電桌面程式補齊 PostgreSQL 遠端工作流程：修改歷史、自訂欄位、快速範本、注意名單、操作記錄、座標、重複資料忽略與納管附件完整性檢查都會寫回家中伺服器
 - API 模式開放批次修改、批次自訂欄位、匯入設定檔、報表範本、智慧重複檢查、地圖、勾選刪除與全部刪除；公司筆電不再因功能灰色而必須回家操作
-- 伺服器維護型操作仍只留在家中主機：備份還原、帳號／密碼管理與既有資料加密不會從公司端遠端執行
+- 高風險伺服器維護仍只留在家中主機：整庫還原、異地目的地與既有資料重新加密不會從公司端遠端執行
 - 正式架構固定為「家中主機唯一伺服器」：PostgreSQL、FastAPI、附件與備份只放家中
 - 新增公司筆電完整 Windows 桌面客戶端包，透過 NetBird HTTPS 直接讀寫家中 API，不安裝 PostgreSQL、不啟動本機 Server
 - 公司客戶端即使直接點 EXE 也會由封裝設定強制使用家中 API；只在 LocalAppData 保存不含地主資料的介面偏好
@@ -76,9 +81,9 @@
 
 iPhone 登入相同 NetBird 帳號後，第一次先開啟視窗顯示的 `http://100.x.x.x:8733/` 安裝公開 CA，再使用 `https://100.x.x.x:8732/mobile/`。完整步驟見 `伺服器使用說明.txt`。
 
-公司筆電使用獨立的 `LandCustomerSystem-CompanyLaptopClient-v1.4.0-*.zip`。解壓縮後平常只需執行 `start_company_laptop_desktop.bat`；它會自動確認 NetBird，並在開啟介面前驗證家中主機 TCP、HTTPS 憑證、PostgreSQL API 與資料結構。失敗時會在 `%LOCALAPPDATA%\LandCustomerSystem\client-network-diagnostics.json` 留下不含帳密的診斷報告。完整步驟見 `公司筆電遠端使用說明.txt`。公司客戶端包不含 PostgreSQL、FastAPI Server、正式資料庫、帳密、備份或私鑰。
+公司筆電使用獨立的 `LandCustomerSystem-CompanyLaptopClient-v1.7.0-*.zip`。解壓縮後平常只需執行 `start_company_laptop_desktop.bat`；首次啟動直接輸入家中伺服器畫面顯示的 NetBird IP，程式會驗證 HTTPS、PostgreSQL API 與資料結構後自動保存。IP 改變時可由「設定 ＞ 伺服器連線設定」修改，不需編輯 `home_server_ip.txt`。完整步驟見 `公司筆電遠端使用說明.txt`。公司客戶端包不含 PostgreSQL、FastAPI Server、正式資料庫、帳密、備份或私鑰。
 
-公司桌面版已開放遠端安全功能：同地號批量新增、Excel 匯入／匯出、進階搜尋、資料品質、儀表板、案件、標籤、附件、聯絡紀錄與追蹤提醒。仍依賴本機 SQLite 的回收桶、備份還原、使用者管理等項目會保持灰色，避免誤寫公司筆電的裝置偏好資料庫。
+公司桌面版已開放完整遠端工作流，包含同地號批量新增、Excel 匯入／匯出、進階搜尋、資料品質、儀表板、案件、任務、通知、標籤、附件、聯絡紀錄、追蹤、回收桶、批次復原、合併、帳號密碼、重新加密、異地備份與伺服器還原。三項高風險維護都只操作家中主機，且需要管理員、還原前安全備份與二次確認；公司筆電不會建立第二份正式資料。
 
 ## PostgreSQL API 與手機同步
 
@@ -131,7 +136,7 @@ python start_api_server.py --postgres
 
 ### PostgreSQL 初次設定
 
-正規化結構位於 `postgres/schema.sql`。版本 2 除了 `owners`、`lands`、`ownerships`、`contact_logs`、`projects` 與 `users`，也完整建立案件成員、任務、標籤、自訂欄位、附件、位置、重複審查、異動紀錄、通知、範本、回收筒、復原、觀察名單及操作紀錄。敏感地主欄位仍使用現有 `enc:v1:` 加密格式，不會因換資料庫而改存明文。
+正規化結構位於 `postgres/schema.sql`。版本 3 除了 `owners`、`lands`、`ownerships`、`contact_logs`、`projects` 與 `users`，也完整建立案件成員、任務、標籤、自訂欄位、附件、位置、重複審查、異動紀錄、通知、範本、回收筒、復原、觀察名單、操作紀錄及家中伺服器異地備份目的地。敏感地主欄位仍使用現有 `enc:v1:` 加密格式，不會因換資料庫而改存明文。
 
 Windows 首次安裝完成後，直接執行：
 
@@ -276,7 +281,7 @@ python -m pip install -r requirements.txt
 python -m unittest discover -s tests -v
 ```
 
-目前共有 153 項自動測試，涵蓋 PostgreSQL 正式登入、API 權限與 CRUD、iPhone PWA、安全標頭、私人 CA／HTTPS、NetBird VPN IP 偵測與防火牆安全範圍、公司桌面包強制遠端 HTTPS、只建立介面偏好資料庫、桌面 HTTPS CA 驗證、PostgreSQL 壓縮備份與保留清理、Excel 匯入、案件、標籤、附件、聯絡、追蹤，以及既有 SQLite 相容、回收桶、批次復原、工作流、通知、報表、地圖、小螢幕對話框與完整 UI 流程。
+目前共有 187 項自動測試，涵蓋 PostgreSQL 正式登入、API 權限與 CRUD、iPhone PWA、安全標頭、私人 CA／HTTPS、NetBird VPN IP 偵測與防火牆安全範圍、公司桌面包強制遠端 HTTPS、只建立介面偏好資料庫、桌面 HTTPS CA 驗證、PostgreSQL 壓縮備份、異地同步、交易式還原、既有資料加密、Excel 匯入、案件、標籤、附件、聯絡、追蹤，以及既有 SQLite 相容、回收桶、批次復原、工作流、通知、報表、地圖、小螢幕對話框與完整 UI 流程。
 
 ## 打包成 EXE
 

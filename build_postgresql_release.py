@@ -73,6 +73,8 @@ def build_server(python_executable: str) -> None:
         f"{ROOT / 'schema.sql'};.",
         "--add-data",
         f"{ROOT / 'seed.sql'};.",
+        "--add-data",
+        f"{ROOT / 'postgres' / 'schema.sql'};postgres",
         str(ROOT / "start_api_server.py"),
     ]
     subprocess.run(command, cwd=ROOT, check=True)
@@ -90,6 +92,7 @@ def audit_server_bundle(bundle: Path) -> None:
     required = [
         bundle / PRIMARY_LAUNCHER,
         bundle / "LandCustomerServer" / "LandCustomerServer.exe",
+        bundle / "LandCustomerServer" / "_internal" / "postgres" / "schema.sql",
         *(bundle / "_server_support" / name for name in SUPPORT_FILES),
     ]
     missing = [str(path.relative_to(bundle)) for path in required if not path.is_file()]
