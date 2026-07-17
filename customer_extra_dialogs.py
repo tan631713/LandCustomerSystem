@@ -83,10 +83,10 @@ class CaseManagementDialog(QDialog):
         layout.addLayout(form)
 
         buttons = QHBoxLayout()
-        new_button = QPushButton("清空")
+        new_button = QPushButton("新增案件模式")
         new_button.clicked.connect(self.clear_form)
-        save_button = QPushButton("新增/更新")
-        save_button.clicked.connect(self.request_save)
+        self.save_button = QPushButton("新增案件")
+        self.save_button.clicked.connect(self.request_save)
         delete_button = QPushButton("刪除選取案件")
         delete_button.clicked.connect(self.request_delete)
         view_button = QPushButton("顯示案件資料")
@@ -98,7 +98,7 @@ class CaseManagementDialog(QDialog):
         buttons.addStretch(1)
         buttons.addWidget(delete_button)
         buttons.addWidget(close_button)
-        buttons.addWidget(save_button)
+        buttons.addWidget(self.save_button)
         layout.addLayout(buttons)
         self.load_rows()
 
@@ -119,9 +119,10 @@ class CaseManagementDialog(QDialog):
             )
 
     def selected_case_id(self):
-        row_number = self.table.currentRow()
-        if row_number < 0:
+        selected_rows = self.table.selectionModel().selectedRows()
+        if not selected_rows:
             return None
+        row_number = selected_rows[0].row()
         return _row_id(self.table, row_number)
 
     def load_current_case(self):
@@ -133,13 +134,17 @@ class CaseManagementDialog(QDialog):
                 self.title_edit.setText(case.get("title") or "")
                 self.status_edit.setText(case.get("status") or "進行中")
                 self.note_edit.setPlainText(case.get("note") or "")
+                self.save_button.setText("更新選取案件")
                 return
 
     def clear_form(self):
         self.table.clearSelection()
+        self.table.setCurrentItem(None)
         self.title_edit.clear()
         self.status_edit.setText("進行中")
         self.note_edit.clear()
+        self.save_button.setText("新增案件")
+        self.title_edit.setFocus()
 
     def values(self):
         return {

@@ -1,6 +1,6 @@
 # 土地資料系統
 
-目前正式版：`v1.7.0`（建置日期：2026-07-17）
+目前正式版：`v1.7.1`（建置日期：2026-07-17）
 
 正式共用資料儲存在自架 `PostgreSQL`；Windows 桌面程式與 iPhone 行動版都透過 `FastAPI` 讀寫同一份資料。舊 `customers.db` 只保留為歷史安全備份與單機相容資料，不再作為手機同步來源。
 
@@ -81,7 +81,7 @@
 
 iPhone 登入相同 NetBird 帳號後，第一次先開啟視窗顯示的 `http://100.x.x.x:8733/` 安裝公開 CA，再使用 `https://100.x.x.x:8732/mobile/`。完整步驟見 `伺服器使用說明.txt`。
 
-公司筆電使用獨立的 `LandCustomerSystem-CompanyLaptopClient-v1.7.0-*.zip`。解壓縮後平常只需執行 `start_company_laptop_desktop.bat`；首次啟動直接輸入家中伺服器畫面顯示的 NetBird IP，程式會驗證 HTTPS、PostgreSQL API 與資料結構後自動保存。IP 改變時可由「設定 ＞ 伺服器連線設定」修改，不需編輯 `home_server_ip.txt`。完整步驟見 `公司筆電遠端使用說明.txt`。公司客戶端包不含 PostgreSQL、FastAPI Server、正式資料庫、帳密、備份或私鑰。
+公司筆電使用獨立的 `LandCustomerSystem-CompanyLaptopClient-v1.7.1-*.zip`。解壓縮後平常只需執行 `start_company_laptop_desktop.bat`；首次啟動直接輸入家中伺服器畫面顯示的 NetBird IP，程式會驗證 HTTPS、PostgreSQL API 與資料結構後自動保存。IP 改變時可由「設定 ＞ 伺服器連線設定」修改，不需編輯 `home_server_ip.txt`。完整步驟見 `公司筆電遠端使用說明.txt`。公司客戶端包不含 PostgreSQL、FastAPI Server、正式資料庫、帳密、備份或私鑰。
 
 公司桌面版已開放完整遠端工作流，包含同地號批量新增、Excel 匯入／匯出、進階搜尋、資料品質、儀表板、案件、任務、通知、標籤、附件、聯絡紀錄、追蹤、回收桶、批次復原、合併、帳號密碼、重新加密、異地備份與伺服器還原。三項高風險維護都只操作家中主機，且需要管理員、還原前安全備份與二次確認；公司筆電不會建立第二份正式資料。
 
@@ -281,7 +281,7 @@ python -m pip install -r requirements.txt
 python -m unittest discover -s tests -v
 ```
 
-目前共有 187 項自動測試，涵蓋 PostgreSQL 正式登入、API 權限與 CRUD、iPhone PWA、安全標頭、私人 CA／HTTPS、NetBird VPN IP 偵測與防火牆安全範圍、公司桌面包強制遠端 HTTPS、只建立介面偏好資料庫、桌面 HTTPS CA 驗證、PostgreSQL 壓縮備份、異地同步、交易式還原、既有資料加密、Excel 匯入、案件、標籤、附件、聯絡、追蹤，以及既有 SQLite 相容、回收桶、批次復原、工作流、通知、報表、地圖、小螢幕對話框與完整 UI 流程。
+目前共有 188 項自動測試，涵蓋 PostgreSQL 正式登入、API 權限與 CRUD、iPhone PWA、安全標頭、私人 CA／HTTPS、NetBird VPN IP 偵測與防火牆安全範圍、公司桌面包強制遠端 HTTPS、只建立介面偏好資料庫、桌面 HTTPS CA 驗證、PostgreSQL 壓縮備份、異地同步、交易式還原、既有資料加密、Excel 匯入、案件新增模式、標籤、附件、聯絡、追蹤，以及既有 SQLite 相容、回收桶、批次復原、工作流、通知、報表、地圖、小螢幕對話框與完整 UI 流程。
 
 ## 打包成 EXE
 

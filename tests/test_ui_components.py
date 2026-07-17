@@ -436,6 +436,34 @@ class UiComponentTests(unittest.TestCase):
             self.assertIn("Owner", xml)
             self.assertIn("地號", xml)
 
+    def test_case_management_new_mode_does_not_reuse_selected_case_id(self):
+        dialog = CaseManagementDialog(
+            [
+                {
+                    "id": 1,
+                    "title": "第一個案件",
+                    "status": "進行中",
+                    "note": "",
+                    "customer_count": 0,
+                }
+            ]
+        )
+        try:
+            dialog.table.selectRow(0)
+            self.application.processEvents()
+            self.assertEqual(dialog.selected_case_id(), 1)
+            self.assertEqual(dialog.save_button.text(), "更新選取案件")
+
+            dialog.clear_form()
+            self.application.processEvents()
+            dialog.title_edit.setText("第二個案件")
+
+            self.assertIsNone(dialog.selected_case_id())
+            self.assertIsNone(dialog.values()["case_id"])
+            self.assertEqual(dialog.save_button.text(), "新增案件")
+        finally:
+            dialog.close()
+
     def test_import_preview_dialog_update_existing_mode(self):
         dialog = ImportPreviewDialog(
             [{"district": "中正區", "_duplicate_reason": "資料庫已存在"}],
