@@ -487,6 +487,163 @@ class DesktopApiClient:
         )
         return True
 
+    def list_record_change_logs(self, record_id, limit=300):
+        result = self._request(
+            "GET",
+            f"/api/v1/records/{int(record_id)}/change-logs",
+            params={"limit": int(limit)},
+        )
+        return list(result.get("items") or [])
+
+    def add_record_change_logs(self, items):
+        result = self._request(
+            "POST",
+            "/api/v1/record-change-logs",
+            payload={"items": list(items)},
+        )
+        return int(result.get("count") or 0)
+
+    def list_custom_fields(self):
+        result = self._request("GET", "/api/v1/custom-fields")
+        return list(result.get("items") or [])
+
+    def save_custom_field(self, label, field_key=None, field_id=None):
+        payload = {"label": str(label or "").strip(), "field_key": field_key or None}
+        if field_id is None:
+            result = self._request("POST", "/api/v1/custom-fields", payload=payload)
+        else:
+            result = self._request(
+                "PUT", f"/api/v1/custom-fields/{int(field_id)}", payload=payload
+            )
+        return int(result["id"])
+
+    def delete_custom_field(self, field_id):
+        self._request("DELETE", f"/api/v1/custom-fields/{int(field_id)}")
+        return True
+
+    def get_record_custom_values(self, record_id):
+        result = self._request(
+            "GET", f"/api/v1/records/{int(record_id)}/custom-values"
+        )
+        return {
+            int(field_id): value
+            for field_id, value in dict(result.get("values") or {}).items()
+        }
+
+    def set_record_custom_values(self, record_id, values):
+        result = self._request(
+            "PUT",
+            f"/api/v1/records/{int(record_id)}/custom-values",
+            payload={"values": dict(values or {})},
+        )
+        return int(result.get("count") or 0)
+
+    def set_records_custom_values(self, record_ids, values):
+        result = self._request(
+            "PUT",
+            "/api/v1/custom-values/assignments",
+            payload={
+                "record_ids": sorted({int(value) for value in record_ids}),
+                "values": dict(values or {}),
+            },
+        )
+        return int(result.get("processed") or 0)
+
+    def list_text_templates(self, template_type=None):
+        params = {"template_type": template_type} if template_type else None
+        result = self._request("GET", "/api/v1/text-templates", params=params)
+        return list(result.get("items") or [])
+
+    def save_text_template(
+        self, title, content, template_type="note", template_id=None
+    ):
+        payload = {
+            "title": str(title or "").strip(),
+            "content": str(content or "").strip(),
+            "template_type": str(template_type or "note").strip() or "note",
+        }
+        if template_id is None:
+            result = self._request("POST", "/api/v1/text-templates", payload=payload)
+        else:
+            result = self._request(
+                "PUT",
+                f"/api/v1/text-templates/{int(template_id)}",
+                payload=payload,
+            )
+        return int(result["id"])
+
+    def delete_text_template(self, template_id):
+        self._request("DELETE", f"/api/v1/text-templates/{int(template_id)}")
+        return True
+
+    def list_watchlist(self):
+        result = self._request("GET", "/api/v1/watchlist")
+        return list(result.get("items") or [])
+
+    def replace_watchlist(self, items):
+        result = self._request(
+            "PUT", "/api/v1/watchlist", payload={"items": list(items)}
+        )
+        return int(result.get("count") or 0)
+
+    def list_operation_logs(self, limit=300):
+        result = self._request(
+            "GET", "/api/v1/operation-logs", params={"limit": int(limit)}
+        )
+        return list(result.get("items") or [])
+
+    def add_operation_log(self, action_type, summary, detail=""):
+        result = self._request(
+            "POST",
+            "/api/v1/operation-logs",
+            payload={
+                "action_type": str(action_type or "").strip(),
+                "summary": str(summary or "").strip(),
+                "detail": str(detail or ""),
+            },
+        )
+        return int(result["id"])
+
+    def list_record_locations(self):
+        result = self._request("GET", "/api/v1/record-locations")
+        return list(result.get("items") or [])
+
+    def set_record_location(
+        self, record_id, latitude, longitude, source="manual"
+    ):
+        result = self._request(
+            "PUT",
+            f"/api/v1/records/{int(record_id)}/location",
+            payload={
+                "latitude": float(latitude),
+                "longitude": float(longitude),
+                "source": str(source or "manual"),
+            },
+        )
+        return int(result["id"])
+
+    def ignored_duplicate_pairs(self):
+        result = self._request("GET", "/api/v1/duplicate-reviews")
+        return {
+            (int(item["left_record_id"]), int(item["right_record_id"]))
+            for item in result.get("items") or []
+        }
+
+    def ignore_duplicate_pair(self, left_record_id, right_record_id):
+        self._request(
+            "POST",
+            "/api/v1/duplicate-reviews",
+            payload={
+                "left_record_id": int(left_record_id),
+                "right_record_id": int(right_record_id),
+            },
+        )
+        return True
+
+    def verify_managed_attachments(self):
+        result = self._request("POST", "/api/v1/attachments/verify", payload={})
+        return list(result.get("items") or [])
+
 
 class DesktopApiRecordRepository:
     """Core record subset consumed by the desktop search and edit workflow."""
@@ -524,12 +681,11 @@ class DesktopApiRecordRepository:
     def fetch_all_customer_rows(self):
         return list(self._all_rows())
 
+    def fetch_customer_ids(self):
+        return {int(row["id"]) for row in self._all_rows()}
+
     def fetch_duplicate_candidates(self):
         return list(self._all_rows())
-
-    def find_watchlist_match(self, _name):
-        # 注意名單尚未搬到共用 API；預覽匯入不可回頭查本機 SQLite。
-        return None
 
     def get_customer(self, record_id):
         record_id = int(record_id)
@@ -582,6 +738,32 @@ class DesktopApiRecordRepository:
         if deleted:
             self._invalidate()
         return deleted
+
+    def delete_all_customers(self):
+        return self.delete_customers(self.fetch_customer_ids())
+
+    def get_record_change_logs(self, record_id, limit=300):
+        return [
+            dict(row)
+            for row in self.client.list_record_change_logs(record_id, limit=limit)
+        ]
+
+    def add_record_change_logs(self, logs):
+        items = []
+        for log in logs:
+            items.append(
+                {
+                    "record_id": int(log.get("record_id") or log.get("customer_id")),
+                    "action_type": str(log.get("action_type") or "修改資料"),
+                    "field_key": str(log.get("field_key") or ""),
+                    "field_label": str(
+                        log.get("field_label") or log.get("field_key") or ""
+                    ),
+                    "old_value": log.get("old_value"),
+                    "new_value": log.get("new_value"),
+                }
+            )
+        return self.client.add_record_change_logs(items) if items else 0
 
     def import_records(
         self,
@@ -788,3 +970,90 @@ class DesktopApiRecordRepository:
         self._attachment_record_ids.pop(attachment_id, None)
         self._invalidate()
         return int(bool(deleted))
+
+    def list_custom_fields(self):
+        return [dict(row) for row in self.client.list_custom_fields()]
+
+    def save_custom_field(self, label, field_key=None, field_id=None):
+        saved_id = self.client.save_custom_field(label, field_key, field_id)
+        self._invalidate()
+        return int(saved_id)
+
+    def delete_custom_field(self, field_id):
+        deleted = self.client.delete_custom_field(field_id)
+        self._invalidate()
+        return int(bool(deleted))
+
+    def get_customer_custom_values(self, customer_id):
+        return self.client.get_record_custom_values(customer_id)
+
+    def set_customer_custom_values(self, customer_id, values_by_field_id):
+        count = self.client.set_record_custom_values(customer_id, values_by_field_id)
+        self._invalidate()
+        return int(count)
+
+    def set_customers_custom_values(self, customer_ids, values_by_field_id):
+        count = self.client.set_records_custom_values(customer_ids, values_by_field_id)
+        self._invalidate()
+        return int(count)
+
+    def list_text_templates(self, template_type=None):
+        return [
+            dict(row)
+            for row in self.client.list_text_templates(template_type=template_type)
+        ]
+
+    def save_text_template(
+        self, title, content, template_type="note", template_id=None
+    ):
+        return int(
+            self.client.save_text_template(
+                title, content, template_type, template_id
+            )
+        )
+
+    def delete_text_template(self, template_id):
+        return int(bool(self.client.delete_text_template(template_id)))
+
+    def get_watchlist_entries(self):
+        return [dict(row) for row in self.client.list_watchlist()]
+
+    def replace_watchlist_entries(self, entries):
+        return int(self.client.replace_watchlist(entries))
+
+    def find_watchlist_match(self, name):
+        target = "".join(str(name or "").split()).casefold()
+        if not target:
+            return None
+        for row in self.get_watchlist_entries():
+            normalized = "".join(str(row.get("name") or "").split()).casefold()
+            if normalized == target:
+                return row
+        return None
+
+    def get_operation_logs(self, limit=300):
+        return [dict(row) for row in self.client.list_operation_logs(limit)]
+
+    def log_operation(self, action_type, summary, detail=None):
+        return int(
+            self.client.add_operation_log(action_type, summary, detail or "")
+        )
+
+    def list_customer_locations(self):
+        return [dict(row) for row in self.client.list_record_locations()]
+
+    def set_customer_location(self, customer_id, latitude, longitude, source="manual"):
+        return int(
+            self.client.set_record_location(
+                customer_id, latitude, longitude, source
+            )
+        )
+
+    def ignored_duplicate_pairs(self):
+        return set(self.client.ignored_duplicate_pairs())
+
+    def ignore_duplicate_pair(self, left_id, right_id):
+        return int(bool(self.client.ignore_duplicate_pair(left_id, right_id)))
+
+    def verify_managed_attachments(self):
+        return [dict(row) for row in self.client.verify_managed_attachments()]

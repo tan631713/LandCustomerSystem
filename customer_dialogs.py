@@ -1690,8 +1690,9 @@ class SavedSearchDialog(QDialog):
 
 
 class OperationLogDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, rows=None):
         super().__init__(parent)
+        self.rows = rows
         self.setWindowTitle("操作記錄")
         self.setModal(True)
         self.resize(860, 520)
@@ -1719,7 +1720,7 @@ class OperationLogDialog(QDialog):
         self.load_logs()
 
     def load_logs(self):
-        rows = get_operation_logs()
+        rows = self.rows if self.rows is not None else get_operation_logs()
         self.table.setRowCount(0)
         for row in rows:
             row_number = self.table.rowCount()
@@ -1731,8 +1732,9 @@ class OperationLogDialog(QDialog):
 
 
 class WatchlistDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, repository=None):
         super().__init__(parent)
+        self.repository = repository
         self.setWindowTitle("注意名單管理")
         self.setModal(True)
         self.resize(560, 420)
@@ -1771,7 +1773,11 @@ class WatchlistDialog(QDialog):
         layout.addLayout(button_row)
 
     def load_entries(self):
-        rows = get_watchlist_entries()
+        rows = (
+            self.repository.get_watchlist_entries()
+            if self.repository is not None
+            else get_watchlist_entries()
+        )
         self.table.setRowCount(0)
         for row in rows:
             self.add_row(row["name"], row["note"] or "")
@@ -1801,5 +1807,9 @@ class WatchlistDialog(QDialog):
         return entries
 
     def save_entries(self):
-        replace_watchlist_entries(self.collect_entries())
+        entries = self.collect_entries()
+        if self.repository is not None:
+            self.repository.replace_watchlist_entries(entries)
+        else:
+            replace_watchlist_entries(entries)
         self.accept()

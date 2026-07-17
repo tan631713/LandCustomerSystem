@@ -23,6 +23,9 @@ def configure_search_controller(**dependencies):
 
 class SearchControllerMixin:
     def active_record_repository(self):
+        data_access = getattr(self, "data_access", None)
+        if data_access is not None:
+            return data_access.records
         return getattr(self, "record_repository", self.repository)
 
     def create_record_processor(

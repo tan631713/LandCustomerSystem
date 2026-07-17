@@ -1,6 +1,6 @@
 # 土地資料系統
 
-目前正式版：`v1.4.2`（建置日期：2026-07-16）
+目前正式版：`v1.5.0`（建置日期：2026-07-16）
 
 正式共用資料儲存在自架 `PostgreSQL`；Windows 桌面程式與 iPhone 行動版都透過 `FastAPI` 讀寫同一份資料。舊 `customers.db` 只保留為歷史安全備份與單機相容資料，不再作為手機同步來源。
 
@@ -8,6 +8,9 @@
 
 ## 最新功能
 
+- 公司筆電桌面程式補齊 PostgreSQL 遠端工作流程：修改歷史、自訂欄位、快速範本、注意名單、操作記錄、座標、重複資料忽略與納管附件完整性檢查都會寫回家中伺服器
+- API 模式開放批次修改、批次自訂欄位、匯入設定檔、報表範本、智慧重複檢查、地圖、勾選刪除與全部刪除；公司筆電不再因功能灰色而必須回家操作
+- 伺服器維護型操作仍只留在家中主機：備份還原、帳號／密碼管理與既有資料加密不會從公司端遠端執行
 - 正式架構固定為「家中主機唯一伺服器」：PostgreSQL、FastAPI、附件與備份只放家中
 - 新增公司筆電完整 Windows 桌面客戶端包，透過 NetBird HTTPS 直接讀寫家中 API，不安裝 PostgreSQL、不啟動本機 Server
 - 公司客戶端即使直接點 EXE 也會由封裝設定強制使用家中 API；只在 LocalAppData 保存不含地主資料的介面偏好
@@ -216,12 +219,24 @@ python start_api_server.py --postgres --check
 
 ### 程式模組
 
-- `customer_ui_qt.py`：主視窗、登入流程與應用程式協調。
+- `customer_ui_qt.py`：桌面應用程式組合根、登入流程、相容介面與啟動協調。
+- `customer_window_ui.py`、`customer_table_ui.py`：主視窗、表單、表格及分組功能選單建構。
+- `customer_desktop_state.py`、`customer_selection_workflows.py`：權限／健康狀態、視窗生命週期與表格選取狀態。
+- `customer_record_workflows.py`：客戶資料新增、修改、批次操作、刪除及密碼更新流程。
+- `customer_management_workflows.py`：案件、標籤、附件、自訂欄位、聯絡紀錄與資料合併流程。
+- `customer_productivity_workflows.py`、`customer_settings_workflows.py`：品質檢查、追蹤、報表、備份與桌面偏好設定。
+- `customer_desktop_data.py`：集中切換 SQLite 本機儲存與 PostgreSQL API 記錄儲存。
+- `customer_health.py`、`customer_analytics.py`：不依賴 Qt 的健康檢查與儀表板彙總服務。
 - `customer_dialogs.py`：搜尋、匯入、批次修改、設定與管理對話框。
 - `customer_models.py`：客戶清單的 Qt 資料模型與分批載入。
 - `customer_auth.py`：首次設定密碼與登入對話框。
 - `customer_mobile_share.py`：手機 QR Code、區域網路臨時分享與安全標頭。
-- `customer_api/`：FastAPI、短期登入工作階段、角色權限與 SQLite／PostgreSQL 資料來源介面。
+- `customer_api/app.py`：FastAPI 組合根，只負責設定、依賴、中介層、路由及手機靜態網站掛載。
+- `customer_api/routes_*.py`：依記錄、聯絡、追蹤、專案、標籤、附件及彙總檢視拆分的 API 路由。
+- `customer_api/schemas.py`、`customer_api/dependencies.py`：請求驗證模型與 Bearer 工作階段／角色權限依賴。
+- `customer_api/middleware.py`、`customer_api/aggregates.py`：手機安全標頭與地主／土地讀取模型彙總。
+- `customer_api/data_sources.py`、`customer_api/data_source_base.py`：穩定資料來源入口、共用協定與記錄轉換。
+- `customer_api/sqlite_*.py`、`customer_api/postgres_*.py`：依記錄、協作、專案、標籤及附件拆分的後端實作。
 - `customer_api/local_postgres.py`：使用 Windows DPAPI 保護本機 PostgreSQL 專案連線資料。
 - `customer_mobile_web/`：可加入 iPhone 主畫面的地主開發助手。
 - `setup_local_https.py`：建立私人本機 CA 與區網 HTTPS 憑證。

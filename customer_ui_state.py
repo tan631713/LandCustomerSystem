@@ -22,7 +22,7 @@ def configure_ui_state(**dependencies):
 
 class UiStateMixin:
     def restore_selection_state(self):
-        existing_ids = self.repository.fetch_customer_ids()
+        existing_ids = self.data_access.fetch_record_ids()
         saved_checked = DECODE_PREFERENCES(
             GET_SETTING(CHECKED_RECORDS_SETTING_KEY, "[]")
         )

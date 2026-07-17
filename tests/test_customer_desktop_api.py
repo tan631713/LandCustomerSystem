@@ -364,6 +364,16 @@ class FakeRecordClient:
         self.project_deleted = []
         self.project_record_updates = []
         self.imported_batches = []
+        self.change_logs = []
+        self.custom_fields = [{"id": 3, "field_key": "stage", "label": "開發階段"}]
+        self.custom_values = {2: {3: "初談"}}
+        self.text_templates = [
+            {"id": 10, "template_type": "note", "title": "電話", "content": "已電話聯絡"}
+        ]
+        self.watchlist = [{"id": 1, "name": "王大明", "note": "先電話聯絡"}]
+        self.operation_logs = []
+        self.locations = []
+        self.duplicate_pairs = set()
 
     @staticmethod
     def record(record_id, owner_name):
@@ -555,6 +565,121 @@ class FakeRecordClient:
         ]
         return True
 
+    def list_record_change_logs(self, record_id, limit=300):
+        return [
+            dict(row)
+            for row in self.change_logs
+            if int(row["record_id"]) == int(record_id)
+        ][:limit]
+
+    def add_record_change_logs(self, items):
+        self.change_logs.extend(dict(item) for item in items)
+        return len(items)
+
+    def list_custom_fields(self):
+        return [dict(row) for row in self.custom_fields]
+
+    def save_custom_field(self, label, field_key=None, field_id=None):
+        saved_id = int(field_id or 4)
+        self.custom_fields.append(
+            {"id": saved_id, "field_key": field_key or "field", "label": label}
+        )
+        return saved_id
+
+    def delete_custom_field(self, field_id):
+        self.custom_fields = [
+            row for row in self.custom_fields if int(row["id"]) != int(field_id)
+        ]
+        return True
+
+    def get_record_custom_values(self, record_id):
+        return dict(self.custom_values.get(int(record_id), {}))
+
+    def set_record_custom_values(self, record_id, values):
+        self.custom_values[int(record_id)] = {
+            int(field_id): value for field_id, value in dict(values).items()
+        }
+        return len(values)
+
+    def set_records_custom_values(self, record_ids, values):
+        for record_id in record_ids:
+            self.set_record_custom_values(record_id, values)
+        return len(set(record_ids))
+
+    def list_text_templates(self, template_type=None):
+        return [
+            dict(row)
+            for row in self.text_templates
+            if template_type is None or row["template_type"] == template_type
+        ]
+
+    def save_text_template(self, title, content, template_type="note", template_id=None):
+        saved_id = int(template_id or 11)
+        self.text_templates.append(
+            {
+                "id": saved_id,
+                "template_type": template_type,
+                "title": title,
+                "content": content,
+            }
+        )
+        return saved_id
+
+    def delete_text_template(self, template_id):
+        self.text_templates = [
+            row for row in self.text_templates if int(row["id"]) != int(template_id)
+        ]
+        return True
+
+    def list_watchlist(self):
+        return [dict(row) for row in self.watchlist]
+
+    def replace_watchlist(self, items):
+        self.watchlist = [dict(item) for item in items]
+        return len(self.watchlist)
+
+    def list_operation_logs(self, limit=300):
+        return [dict(row) for row in self.operation_logs[:limit]]
+
+    def add_operation_log(self, action_type, summary, detail=""):
+        self.operation_logs.insert(
+            0,
+            {
+                "id": len(self.operation_logs) + 1,
+                "action_type": action_type,
+                "summary": summary,
+                "detail": detail,
+            },
+        )
+        return self.operation_logs[0]["id"]
+
+    def list_record_locations(self):
+        return [dict(row) for row in self.locations]
+
+    def set_record_location(self, record_id, latitude, longitude, source="manual"):
+        self.locations.append(
+            {
+                "id": len(self.locations) + 1,
+                "customer_id": int(record_id),
+                "latitude": float(latitude),
+                "longitude": float(longitude),
+                "source": source,
+            }
+        )
+        return self.locations[-1]["id"]
+
+    def ignored_duplicate_pairs(self):
+        return set(self.duplicate_pairs)
+
+    def ignore_duplicate_pair(self, left_record_id, right_record_id):
+        self.duplicate_pairs.add(
+            tuple(sorted((int(left_record_id), int(right_record_id))))
+        )
+        return True
+
+    def verify_managed_attachments(self):
+        return [{"id": 7, "status": "managed", "integrity_status": "正常"}]
+
 
 class DesktopApiRecordRepositoryTests(unittest.TestCase):
     def test_record_adapter_pages_decrypts_writes_and_invalidates(self):
@@ -562,6 +687,7 @@ class DesktopApiRecordRepositoryTests(unittest.TestCase):
         fernet = make_fernet(Fernet.generate_key())
         repository = DesktopApiRecordRepository(client, fernet)
         self.assertEqual(repository.count_customers(), 2)
+        self.assertEqual(repository.fetch_customer_ids(), {1, 2})
         self.assertEqual(repository.fetch_customer_page(1)[0]["id"], 2)
         self.assertEqual(repository.fetch_customer_page(2, before_id=2)[0]["id"], 1)
 
@@ -671,6 +797,49 @@ class DesktopApiRecordRepositoryTests(unittest.TestCase):
         self.assertEqual(repository.delete_customer_attachment(7), 1)
         self.assertEqual(client.deleted_attachments, [(2, 7)])
         self.assertEqual(repository.data_revision, 19)
+
+    def test_record_adapter_supports_remote_desktop_productivity_features(self):
+        client = FakeRecordClient()
+        repository = DesktopApiRecordRepository(
+            client, make_fernet(Fernet.generate_key())
+        )
+
+        self.assertEqual(repository.list_custom_fields()[0]["label"], "開發階段")
+        self.assertEqual(repository.save_custom_field("意願", "intent"), 4)
+        self.assertEqual(repository.get_customer_custom_values(2), {3: "初談"})
+        self.assertEqual(repository.set_customer_custom_values(2, {3: "有意願"}), 1)
+        self.assertEqual(repository.set_customers_custom_values([1, 2], {3: "追蹤"}), 2)
+        self.assertEqual(repository.list_text_templates("note")[0]["id"], 10)
+        self.assertEqual(repository.save_text_template("拜訪", "已拜訪"), 11)
+        self.assertEqual(repository.get_watchlist_entries()[0]["name"], "王大明")
+        self.assertEqual(repository.replace_watchlist_entries([{"name": "李小華", "note": ""}]), 1)
+        self.assertEqual(repository.find_watchlist_match(" 李 小 華 ")["name"], "李小華")
+
+        self.assertEqual(
+            repository.add_record_change_logs(
+                [
+                    {
+                        "record_id": 2,
+                        "action_type": "修改資料",
+                        "field_key": "note",
+                        "field_label": "備註",
+                        "old_value": "",
+                        "new_value": "完成",
+                    }
+                ]
+            ),
+            1,
+        )
+        self.assertEqual(repository.get_record_change_logs(2)[0]["new_value"], "完成")
+        self.assertEqual(repository.log_operation("測試", "完成", "桌面 API"), 1)
+        self.assertEqual(repository.get_operation_logs()[0]["summary"], "完成")
+        self.assertEqual(repository.set_customer_location(2, 24.99, 121.31), 1)
+        self.assertEqual(repository.list_customer_locations()[0]["customer_id"], 2)
+        self.assertEqual(repository.ignore_duplicate_pair(2, 1), 1)
+        self.assertEqual(repository.ignored_duplicate_pairs(), {(1, 2)})
+        self.assertEqual(repository.verify_managed_attachments()[0]["integrity_status"], "正常")
+        self.assertEqual(repository.delete_custom_field(4), 1)
+        self.assertEqual(repository.delete_text_template(11), 1)
 
 
 if __name__ == "__main__":
