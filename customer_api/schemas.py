@@ -49,6 +49,132 @@ class ProjectWrite(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     status: str = Field(default="進行中", min_length=1, max_length=100)
     note: str = Field(default="", max_length=5000)
+    assigned_to: str | None = Field(default=None, max_length=200)
+    due_date: date | None = None
+    priority: str = Field(default="一般", min_length=1, max_length=40)
+    next_action: str | None = Field(default=None, max_length=1000)
+    archived: bool = False
+
+
+class ProjectTaskWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    project_id: int = Field(ge=1)
+    title: str = Field(min_length=1, max_length=300)
+    assignee: str | None = Field(default=None, max_length=200)
+    due_date: date | None = None
+    status: str = Field(default="待處理", min_length=1, max_length=80)
+    priority: str = Field(default="一般", min_length=1, max_length=40)
+    checklist: str | None = Field(default=None, max_length=10000)
+
+
+class NotificationMark(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    notification_ids: list[int] = Field(min_length=1, max_length=1000)
+    action: Literal["read", "dismiss"] = "read"
+
+    @field_validator("notification_ids")
+    @classmethod
+    def normalize_notification_ids(cls, values):
+        return sorted({int(value) for value in values})
+
+
+class IdList(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ids: list[int] = Field(default_factory=list, max_length=5000)
+
+    @field_validator("ids")
+    @classmethod
+    def normalize_ids(cls, values):
+        return sorted({int(value) for value in values})
+
+
+class RecordUndoCreate(IdList):
+    operation_type: str = Field(min_length=1, max_length=100)
+    summary: str = Field(min_length=1, max_length=1000)
+
+
+class InsertUndoCreate(IdList):
+    operation_type: str = Field(min_length=1, max_length=100)
+    summary: str = Field(min_length=1, max_length=1000)
+
+
+class CompositeUndoCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operation_type: str = Field(min_length=1, max_length=100)
+    snapshots: list[dict] = Field(default_factory=list, max_length=5000)
+    inserted_ids: list[int] = Field(default_factory=list, max_length=5000)
+    summary: str = Field(min_length=1, max_length=1000)
+
+
+class UserCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    username: str = Field(min_length=1, max_length=80)
+    password: str = Field(min_length=10, max_length=256)
+    role: Literal["admin", "editor", "viewer"] = "editor"
+    display_name: str | None = Field(default=None, max_length=200)
+
+
+class UserUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    display_name: str | None = Field(default=None, max_length=200)
+    role: Literal["admin", "editor", "viewer"] | None = None
+    active: bool | None = None
+
+
+class PasswordReset(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    new_password: str = Field(min_length=10, max_length=256)
+
+
+class PasswordChange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    current_password: str = Field(min_length=1, max_length=256)
+    new_password: str = Field(min_length=10, max_length=256)
+
+
+class ServerBackupRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    label: str = Field(default="manual", min_length=1, max_length=40)
+    retention_days: int = Field(default=90, ge=0, le=3650)
+    max_count: int = Field(default=30, ge=3, le=9999)
+
+
+class ServerBackupMaintenance(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    retention_days: int = Field(default=90, ge=0, le=3650)
+    max_count: int = Field(default=30, ge=3, le=9999)
+
+
+class ServerBackupRestore(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    backup_name: str = Field(min_length=1, max_length=260)
+    confirmation: str = Field(min_length=1, max_length=100)
+
+
+class ServerBackupTargetWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=120)
+    directory_path: str = Field(min_length=1, max_length=4096)
+    enabled: bool = True
+
+
+class ServerBackupTargetSync(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    retention_days: int = Field(default=90, ge=0, le=3650)
+    max_count: int = Field(default=30, ge=3, le=9999)
 
 
 class ProjectRecordsUpdate(BaseModel):
@@ -170,6 +296,20 @@ class RecordWrite(BaseModel):
             or None
         )
         return values
+
+
+class MergeRecordsWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    primary_id: int = Field(ge=1)
+    secondary_id: int = Field(ge=1)
+    values: RecordWrite
+
+    @model_validator(mode="after")
+    def validate_distinct_records(self):
+        if self.primary_id == self.secondary_id:
+            raise ValueError("merge requires two different records")
+        return self
 
 
 class ImportRecordItem(BaseModel):

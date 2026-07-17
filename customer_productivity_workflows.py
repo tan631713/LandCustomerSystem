@@ -32,8 +32,9 @@ class ProductivityWorkflowMixin:
 
     def refresh_notification_status(self):
         try:
-            self.repository.refresh_notifications(date.today().isoformat())
-            count = len(self.repository.list_notifications())
+            repository = self.active_record_repository()
+            repository.refresh_notifications(date.today().isoformat())
+            count = len(repository.list_notifications())
         except Exception:
             count = 0
         if getattr(self, "notification_status_button", None) is not None:
@@ -43,6 +44,9 @@ class ProductivityWorkflowMixin:
         return count
 
     def setup_offsite_backup(self):
+        if getattr(self, "api_mode", False):
+            self.offsite_backup_timer = None
+            return
         self.offsite_backup_timer = QTimer(self)
         self.offsite_backup_timer.setInterval(6 * 60 * 60 * 1000)
         self.offsite_backup_timer.timeout.connect(self.run_scheduled_offsite_backup)
@@ -123,15 +127,16 @@ class ProductivityWorkflowMixin:
         return False
 
     def show_recycle_bin(self):
+        repository = self.active_record_repository()
         while True:
-            dialog = self._app_component("RecycleBinDialog")(self.repository.list_recycle_bin(), self)
+            dialog = self._app_component("RecycleBinDialog")(repository.list_recycle_bin(), self)
             if dialog.exec() != QDialog.Accepted:
                 return
             if dialog.action == "restore":
                 if not self.ensure_can_modify("還原回收桶資料"):
                     return
-                restored = self.repository.restore_recycle_items(dialog.selected_ids())
-                self.repository.log_operation("回收桶還原", f"還原 {len(restored)} 筆", "")
+                restored = repository.restore_recycle_items(dialog.selected_ids())
+                self._log_operation("回收桶還原", f"還原 {len(restored)} 筆", "")
                 self.refresh_records(restored[0] if restored else None)
             elif dialog.action in {"purge", "purge_all"}:
                 if not self.ensure_admin("永久清除回收桶"):
@@ -144,13 +149,14 @@ class ProductivityWorkflowMixin:
                 if reply != self._app_component("QMessageBox").Yes:
                     continue
                 ids = None if dialog.action == "purge_all" else dialog.selected_ids()
-                count = self.repository.purge_recycle_items(ids, self.attachments_dir)
-                self.repository.log_operation("清理回收桶", f"永久刪除 {count} 筆", "")
+                count = repository.purge_recycle_items(ids, self.attachments_dir)
+                self._log_operation("清理回收桶", f"永久刪除 {count} 筆", "")
 
     def show_undo_operations(self):
         if not self.ensure_can_modify("復原批次操作"):
             return
-        dialog = self._app_component("UndoOperationsDialog")(self.repository.list_undo_operations(), self)
+        repository = self.active_record_repository()
+        dialog = self._app_component("UndoOperationsDialog")(repository.list_undo_operations(), self)
         if dialog.exec() != QDialog.Accepted:
             return
         if self._app_component("QMessageBox").question(
@@ -159,9 +165,9 @@ class ProductivityWorkflowMixin:
             "系統會把所選操作涉及的資料恢復到操作前，確定繼續嗎？",
         ) != self._app_component("QMessageBox").Yes:
             return
-        result = self.repository.undo_operation(dialog.operation_id)
+        result = repository.undo_operation(dialog.operation_id)
         if result:
-            self.repository.log_operation("復原批次操作", result["summary"], "")
+            self._log_operation("復原批次操作", result["summary"], "")
             self.checked_record_ids.clear()
             self.new_record()
             self.refresh_records()
@@ -170,11 +176,23 @@ class ProductivityWorkflowMixin:
     def manage_users(self):
         if not self.ensure_admin("使用者與權限管理"):
             return
-        self._app_component("UserManagementDialog")(self.repository, self.encryption_key, self).exec()
-        self.repository.log_operation("使用者管理", "檢視或更新帳號與權限", "")
+        repository = self.active_record_repository()
+        self._app_component("UserManagementDialog")(repository, self.encryption_key, self).exec()
+        self._log_operation("使用者管理", "檢視或更新帳號與權限", "")
 
     def manage_external_backups(self):
         if not self.ensure_admin("異地完整備份"):
+            return
+        if self.api_mode:
+            policy = self._app_component("load_backup_policy")()
+            dialog = self._app_component("ServerBackupTargetsDialog")(
+                self.active_record_repository(),
+                retention_days=policy["retention_days"],
+                max_count=policy["max_count"],
+                parent=self,
+            )
+            dialog.exec()
+            self.refresh_backup_status()
             return
         dialog = self._app_component("BackupTargetsDialog")(self.repository, self.productivity, self)
         dialog.exec()
@@ -187,13 +205,14 @@ class ProductivityWorkflowMixin:
     def show_workflow_board(self):
         if not self.ensure_can_modify("案件工作流程"):
             return
-        self._app_component("WorkflowDialog")(self.repository, self).exec()
-        self.repository.log_operation("案件工作流程", "更新案件或任務", "")
+        repository = self.active_record_repository()
+        self._app_component("WorkflowDialog")(repository, self).exec()
+        self._log_operation("案件工作流程", "更新案件或任務", "")
         self.refresh_records(self.selected_record_id)
         self.refresh_notification_status()
 
     def show_notification_center(self):
-        self._app_component("NotificationCenterDialog")(self.repository, self).exec()
+        self._app_component("NotificationCenterDialog")(self.active_record_repository(), self).exec()
         self.refresh_notification_status()
 
     def manage_import_profiles(self):

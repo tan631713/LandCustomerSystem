@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import ipaddress
 import json
 import shutil
 import tempfile
@@ -13,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from customer_version import APP_VERSION, BUILD_DATE
-from setup_local_https import NETBIRD_IPV4_NETWORK, certificate_paths, netbird_ipv4_addresses
+from setup_local_https import certificate_paths
 
 
 ROOT = Path(__file__).resolve().parent
@@ -23,7 +22,6 @@ DESKTOP_DIST = DIST / "LandCustomerSystem"
 CLIENT_FILES = (
     "start_company_laptop_desktop.bat",
     "setup_netbird_client.bat",
-    "company_client_preflight.ps1",
     "公司筆電遠端使用說明.txt",
 )
 
@@ -34,22 +32,6 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest().upper()
-
-
-def validate_server_ip(value: str) -> str:
-    address = ipaddress.ip_address(str(value).strip())
-    if address.version != 4 or address not in NETBIRD_IPV4_NETWORK:
-        raise ValueError("Home server IP must be a NetBird IPv4 address in 100.64.0.0/10")
-    return str(address)
-
-
-def resolve_server_ip(explicit: str | None) -> str:
-    if explicit:
-        return validate_server_ip(explicit)
-    addresses = netbird_ipv4_addresses()
-    if not addresses:
-        raise RuntimeError("NetBird is not connected; provide --server-ip explicitly")
-    return validate_server_ip(addresses[0])
 
 
 def copy_desktop_client(destination: Path) -> None:
@@ -80,6 +62,7 @@ def audit_client_bundle(bundle: Path) -> None:
         "postgresql-dsn.bin",
         "land-customer-server-key.pem",
         "landcustomerserver.exe",
+        "home_server_ip.txt",
     }
     forbidden_parts = {"backups", "attachments", ".build-preserved-data"}
     violations = []
@@ -95,8 +78,7 @@ def audit_client_bundle(bundle: Path) -> None:
         )
 
 
-def package_remote_client(server_ip: str) -> tuple[Path, Path]:
-    server_ip = validate_server_ip(server_ip)
+def package_remote_client() -> tuple[Path, Path]:
     if not DESKTOP_DIST.is_dir():
         raise FileNotFoundError("Build the desktop EXE before packaging the remote client")
     for name in CLIENT_FILES:
@@ -118,13 +100,12 @@ def package_remote_client(server_ip: str) -> tuple[Path, Path]:
         copy_desktop_client(bundle / "LandCustomerSystem")
         for name in CLIENT_FILES:
             shutil.copy2(ROOT / name, bundle / name)
-        (bundle / "home_server_ip.txt").write_text(server_ip + "\n", encoding="ascii")
         (bundle / "land-customer-local-ca.pem").write_bytes(ca_bytes)
         (bundle / "LandCustomerSystem" / "company-client-config.json").write_text(
             json.dumps(
                 {
-                    "api_url": f"https://{server_ip}:8732",
                     "ca_certificate": "../land-customer-local-ca.pem",
+                    "server_ip_user_configurable": True,
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -136,8 +117,8 @@ def package_remote_client(server_ip: str) -> tuple[Path, Path]:
             "version": APP_VERSION,
             "build_date": BUILD_DATE,
             "packaged_at": datetime.now().astimezone().isoformat(),
-            "home_server_ip": server_ip,
-            "api_url": f"https://{server_ip}:8732",
+            "server_ip_user_configurable": True,
+            "server_ip_storage": "%LOCALAPPDATA%/LandCustomerSystem/desktop-client/desktop-client-settings.db",
             "desktop_executable": "LandCustomerSystem/LandCustomerSystem.exe",
             "database_included": False,
             "postgresql_credentials_included": False,
@@ -168,18 +149,16 @@ def package_remote_client(server_ip: str) -> tuple[Path, Path]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Build the NetBird company-laptop client")
-    parser.add_argument("--server-ip")
     return parser
 
 
 def main(argv=None) -> int:
-    args = build_parser().parse_args(argv)
-    server_ip = resolve_server_ip(args.server_ip)
-    directory, zip_path = package_remote_client(server_ip)
+    build_parser().parse_args(argv)
+    directory, zip_path = package_remote_client()
     print(
         json.dumps(
             {
-                "server_ip": server_ip,
+                "server_ip_user_configurable": True,
                 "release_directory": str(directory),
                 "release_zip": str(zip_path),
             },

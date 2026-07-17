@@ -6,6 +6,7 @@ from customer_api.sqlite_collaboration import SQLiteCollaborationMixin
 from customer_api.sqlite_desktop_features import SQLiteDesktopFeatureMixin
 from customer_api.sqlite_projects import SQLiteProjectMixin
 from customer_api.sqlite_records import SQLiteRecordMixin
+from customer_api.sqlite_remote_operations import SQLiteRemoteOperationMixin
 from customer_api.sqlite_tags import SQLiteTagMixin
 from customer_api.types import AuthenticatedUser
 from customer_database import CustomerDatabase
@@ -20,6 +21,7 @@ class SQLiteCustomerDataSource(
     SQLiteTagMixin,
     SQLiteAttachmentMixin,
     SQLiteDesktopFeatureMixin,
+    SQLiteRemoteOperationMixin,
 ):
     backend_name = "sqlite"
 

@@ -1,11 +1,10 @@
-import ipaddress
 import json
 import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlparse
 
+from customer_client_connection import normalize_server_api_url
 from customer_error_handler import install_exception_handler
 
 
@@ -23,13 +22,11 @@ def apply_company_client_config():
     if not config_path.is_file():
         return None
     payload = json.loads(config_path.read_text(encoding="utf-8"))
-    api_url = str(payload.get("api_url") or "").strip().rstrip("/")
-    parsed = urlparse(api_url)
-    if parsed.scheme != "https" or not parsed.hostname or parsed.port != 8732:
-        raise ValueError("Company client API URL must use HTTPS port 8732")
-    address = ipaddress.ip_address(parsed.hostname)
-    if address.version != 4 or address not in ipaddress.ip_network("100.64.0.0/10"):
-        raise ValueError("Company client API host must be a NetBird IPv4 address")
+    configured_api_url = str(os.environ.get("LAND_CUSTOMER_API_URL") or "").strip()
+    packaged_api_url = str(payload.get("api_url") or "").strip()
+    api_url = normalize_server_api_url(configured_api_url or packaged_api_url) if (
+        configured_api_url or packaged_api_url
+    ) else ""
 
     bundle_directory = runtime_directory.parent.resolve()
     ca_path = (runtime_directory / str(payload.get("ca_certificate") or "")).resolve()
@@ -41,9 +38,16 @@ def apply_company_client_config():
         raise ValueError(f"Company client CA certificate does not exist: {ca_path}")
 
     os.environ["LAND_CUSTOMER_DESKTOP_BACKEND"] = "postgresql"
-    os.environ["LAND_CUSTOMER_API_URL"] = api_url
+    if api_url:
+        os.environ["LAND_CUSTOMER_API_URL"] = api_url
+    else:
+        os.environ.pop("LAND_CUSTOMER_API_URL", None)
     os.environ["LAND_CUSTOMER_API_CA_CERT"] = str(ca_path)
-    return {"api_url": api_url, "ca_certificate": str(ca_path)}
+    return {
+        "api_url": api_url,
+        "ca_certificate": str(ca_path),
+        "requires_server_ip_input": not bool(api_url),
+    }
 
 
 def run_company_client_health_check(report_path):
@@ -70,7 +74,7 @@ def run_company_client_health_check(report_path):
             raise DesktopApiError("家中 API 健康檢查未回傳正常狀態。")
         if health.get("backend") != "postgresql":
             raise DesktopApiError("連線目標不是 PostgreSQL 正式伺服器。")
-        if int(health.get("schema_version") or 0) < 2:
+        if int(health.get("schema_version") or 0) < 3:
             raise DesktopApiError("家中伺服器資料結構版本過舊，請先更新伺服器端。")
         report.update(
             {

@@ -1,11 +1,12 @@
-const CACHE_NAME = "land-customer-mobile-v1";
+const CACHE_NAME = "land-customer-mobile-v2";
 const APP_SHELL = [
   "/mobile/",
   "/mobile/index.html",
   "/mobile/styles.css",
   "/mobile/app.js",
   "/mobile/manifest.webmanifest",
-  "/mobile/app-icon.png"
+  "/mobile/app-icon.png",
+  "/mobile/og.png"
 ];
 
 self.addEventListener("install", event => {

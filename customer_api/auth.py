@@ -45,6 +45,12 @@ class SessionStore:
         with self._lock:
             return self._sessions.pop(self._digest(token), None) is not None
 
+    def revoke_all(self):
+        with self._lock:
+            count = len(self._sessions)
+            self._sessions.clear()
+        return count
+
     def _purge_locked(self):
         now = self.clock()
         expired = [key for key, session in self._sessions.items() if session.expires_at <= now]

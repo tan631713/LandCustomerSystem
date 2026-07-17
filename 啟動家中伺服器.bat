@@ -4,7 +4,7 @@ chcp 65001 >nul
 title 土地資料系統 - 家中主機伺服器
 cd /d "%~dp0"
 
-set "PACKAGE_ROOT=%~dp0"
+for %%I in ("%~dp0.") do set "PACKAGE_ROOT=%%~fI"
 set "SUPPORT_ROOT=%~dp0_server_support"
 if not exist "%SUPPORT_ROOT%\home_server_runtime.ps1" set "SUPPORT_ROOT=%~dp0"
 

@@ -114,6 +114,56 @@ class PostgreSQLBackupMaintenanceTests(unittest.TestCase):
         self.assertNotIn("secret-password", command)
         self.assertIn("--no-password", command)
 
+    def test_pg_restore_command_does_not_expose_password_and_is_transactional(self):
+        command = backup_postgresql._pg_restore_command(
+            Path("pg_restore.exe"),
+            {
+                "host": "127.0.0.1",
+                "port": "5432",
+                "user": "land_app",
+                "password": "secret-password",
+                "dbname": "land_customer",
+            },
+            Path("database.dump"),
+        )
+        self.assertNotIn("secret-password", command)
+        self.assertIn("--single-transaction", command)
+        self.assertIn("--exit-on-error", command)
+
+    def test_backup_file_resolution_rejects_path_escape(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(ValueError):
+                backup_postgresql.resolve_backup_file("../outside.zip", directory)
+
+    def test_sync_backup_targets_copies_and_verifies_server_archive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_root = root / "source"
+            target_root = root / "target"
+            source_root.mkdir()
+            target_root.mkdir()
+            archive = source_root / f"{backup_postgresql.BACKUP_PREFIX}offsite.zip"
+            archive.write_bytes(b"verified-backup")
+            with patch.object(
+                backup_postgresql,
+                "create_backup",
+                return_value={"status": "ok", "backup_path": str(archive)},
+            ):
+                result = backup_postgresql.sync_backup_targets(
+                    [
+                        {
+                            "id": 7,
+                            "name": "USB",
+                            "directory_path": str(target_root),
+                            "enabled": True,
+                        }
+                    ],
+                    directory=source_root,
+                )
+            copied = target_root / archive.name
+            self.assertEqual(copied.read_bytes(), b"verified-backup")
+            self.assertEqual(result["results"][0]["status"], "success")
+
 
 class ProductionLauncherTests(unittest.TestCase):
     def test_official_home_server_launcher_uses_postgresql_https_and_netbird(self):
@@ -146,6 +196,9 @@ class ProductionLauncherTests(unittest.TestCase):
         self.assertIn("100.64.0.0/10", runtime)
         self.assertNotIn("5432', '--lan", runtime)
 
+        packager = (root / "build_postgresql_release.py").read_text(encoding="utf-8")
+        self.assertIn("'postgres' / 'schema.sql'", packager)
+
         self.assertIn("NetBird\\netbird.exe", vpn_firewall_script)
         self.assertIn("-LocalPort $rule.Port", vpn_firewall_script)
         self.assertIn("Port = 8732", vpn_firewall_script)
@@ -164,8 +217,11 @@ class ProductionLauncherTests(unittest.TestCase):
             encoding="utf-8-sig"
         )
         self.assertIn("LAND_CUSTOMER_DESKTOP_BACKEND=postgresql", company_launcher)
-        self.assertIn("LAND_CUSTOMER_API_URL=https://%HOME_SERVER_IP%:8732", company_launcher)
         self.assertIn("LAND_CUSTOMER_API_CA_CERT=%CA_CERT%", company_launcher)
+        self.assertIn("程式會要求輸入家中伺服器的 NetBird IP", company_launcher)
+        self.assertNotIn("home_server_ip.txt", company_launcher)
+        self.assertNotIn("LAND_CUSTOMER_API_URL=", company_launcher)
+        self.assertNotIn("company_client_preflight.ps1", company_launcher)
         self.assertIn("LandCustomerSystem\\LandCustomerSystem.exe", company_launcher)
         self.assertNotIn("LandCustomerServer", company_launcher)
         self.assertNotIn("--postgres", company_launcher)

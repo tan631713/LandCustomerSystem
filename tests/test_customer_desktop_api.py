@@ -335,6 +335,56 @@ class DesktopApiClientTests(unittest.TestCase):
         self.assertEqual(len(attempts), 1)
         self.assertIn("最新公司筆電客戶端包", str(caught.exception))
 
+    def test_remote_maintenance_client_uses_server_endpoints(self):
+        requests = []
+
+        def remote_maintenance(request, timeout):
+            requests.append((request.method, urlparse(request.full_url).path, timeout))
+            path = urlparse(request.full_url).path
+            if path == "/api/v1/maintenance/encrypt-existing-records":
+                return FakeResponse({"updated_records": 2})
+            if path == "/api/v1/server-backups":
+                return FakeResponse({"items": [{"name": "server.zip", "status": "ok"}]})
+            if path == "/api/v1/server-backups/restore":
+                return FakeResponse({"status": "ok", "restored_backup": "server.zip"})
+            if path == "/api/v1/server-backup-targets":
+                if request.method == "GET":
+                    return FakeResponse({"items": [{"id": 4, "name": "NAS"}]})
+                return FakeResponse({"id": 4})
+            if path == "/api/v1/server-backup-targets/4":
+                if request.method == "DELETE":
+                    return FakeResponse({"deleted": True})
+                return FakeResponse({"id": 4})
+            if path == "/api/v1/server-backup-targets/sync":
+                return FakeResponse({"status": "ok", "results": []})
+            raise AssertionError((request.method, request.full_url))
+
+        client = DesktopApiClient(urlopen_fn=remote_maintenance)
+        client.access_token = "test-token"
+        self.assertEqual(client.encrypt_existing_records()["updated_records"], 2)
+        self.assertEqual(client.list_server_backups()[0]["name"], "server.zip")
+        self.assertEqual(
+            client.restore_server_backup("server.zip", "還原家中伺服器")[
+                "restored_backup"
+            ],
+            "server.zip",
+        )
+        self.assertEqual(client.list_server_backup_targets()[0]["id"], 4)
+        self.assertEqual(
+            client.save_server_backup_target("NAS", r"\\NAS\backup"), 4
+        )
+        self.assertEqual(
+            client.save_server_backup_target(
+                "NAS", r"\\NAS\backup", target_id=4
+            ),
+            4,
+        )
+        self.assertTrue(client.delete_server_backup_target(4))
+        self.assertEqual(client.sync_server_backup_targets()["status"], "ok")
+        self.assertIn(
+            ("POST", "/api/v1/server-backups/restore", 30 * 60), requests
+        )
+
 
 class FakeRecordClient:
     def __init__(self):

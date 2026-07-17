@@ -1,7 +1,7 @@
 """Application release metadata."""
 
-APP_VERSION = "1.5.0"
-BUILD_DATE = "2026-07-16"
+APP_VERSION = "1.7.0"
+BUILD_DATE = "2026-07-17"
 
 
 def version_label():

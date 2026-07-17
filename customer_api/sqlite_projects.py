@@ -8,14 +8,14 @@ class SQLiteProjectMixin:
         del user
         return [_row_dict(row) for row in self.repository.list_cases()]
 
-    def save_project(self, user, title, status="進行中", note="", project_id=None):
+    def save_project(self, user, title, status="進行中", note="", project_id=None, **options):
         if project_id is not None and not any(
             int(row["id"]) == int(project_id) for row in self.repository.list_cases()
         ):
             raise KeyError(project_id)
         self.repository.current_actor = user.username
         saved_id = int(
-            self.repository.save_case(title, status, note, project_id)
+            self.repository.save_case(title, status, note, project_id, **options)
         )
         self.repository.log_operation(
             "API儲存案件", f"案件 ID {saved_id}", str(title or "")
@@ -30,6 +30,28 @@ class SQLiteProjectMixin:
                 "API刪除案件", f"案件 ID {int(project_id)}"
             )
         return deleted
+
+    def archive_project(self, user, project_id, archived=True):
+        self.repository.current_actor = user.username
+        if not self.repository.archive_case(project_id, archived):
+            raise KeyError(project_id)
+        return int(project_id)
+
+    def list_project_tasks(self, user, project_id=None, include_completed=True):
+        del user
+        return [
+            _row_dict(row) for row in self.repository.list_case_tasks(
+                project_id, include_completed
+            )
+        ]
+
+    def save_project_task(self, user, project_id, title, **options):
+        self.repository.current_actor = user.username
+        return int(self.repository.save_case_task(project_id, title, **options))
+
+    def delete_project_task(self, user, task_id):
+        self.repository.current_actor = user.username
+        return bool(self.repository.delete_case_task(task_id))
 
     def _require_sqlite_project_records(self, project_id, record_ids):
         project_id = int(project_id)

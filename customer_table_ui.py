@@ -358,6 +358,11 @@ def _build_tools_menu(self):
 
 def _build_settings_menu(self):
     self.settings_menu = QMenu(self)
+    server_connection_action = QAction("伺服器連線設定", self)
+    server_connection_action.triggered.connect(self.configure_server_connection)
+    if self.api_mode:
+        self.settings_menu.addAction(server_connection_action)
+        self.settings_menu.addSeparator()
     watchlist_action = QAction("注意名單管理", self)
     watchlist_action.triggered.connect(self.manage_watchlist)
     self.settings_menu.addAction(watchlist_action)
@@ -451,8 +456,6 @@ def _configure_api_action_groups(self, actions):
         actions["map_action"],
         actions["delete_checked_action"],
         actions["delete_all_action"],
-    )
-    self.api_unavailable_tool_actions = (
         actions["notification_action"],
         actions["workflow_action"],
         actions["recycle_action"],
@@ -460,7 +463,9 @@ def _configure_api_action_groups(self, actions):
         actions["merge_action"],
         actions["encrypt_action"],
     )
+    self.api_unavailable_tool_actions = ()
     self.api_supported_settings_actions = (
+        actions["server_connection_action"],
         actions["watchlist_action"],
         actions["operation_log_action"],
         actions["font_size_action"],
@@ -469,17 +474,16 @@ def _configure_api_action_groups(self, actions):
         actions["attachment_check_action"],
         actions["help_action"],
         actions["about_action"],
-    )
-    self.api_unavailable_settings_actions = (
         actions["user_management_action"],
         actions["change_password_action"],
         actions["backup_status_action"],
         actions["backup_management_action"],
-        actions["external_backup_action"],
         actions["backup_now_action"],
-        actions["restore_backup_action"],
         actions["open_backup_action"],
+        actions["external_backup_action"],
+        actions["restore_backup_action"],
     )
+    self.api_unavailable_settings_actions = ()
 
 
 def build_customer_table_ui(self, parent_layout, TABLE_COLUMNS, TABLE_WIDTHS):

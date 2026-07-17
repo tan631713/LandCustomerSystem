@@ -162,6 +162,10 @@ class PostgreSQLRecordMixin:
                 }
             )
             self._require_ids(conn, "ownerships", update_ids)
+            update_snapshots = [
+                snapshot for record_id in update_ids
+                if (snapshot := self._capture_record_snapshot(conn, record_id))
+            ]
             batch_row = conn.execute(
                 """
                 INSERT INTO import_batches (
@@ -216,6 +220,18 @@ class PostgreSQLRecordMixin:
                 """,
                 (len(items), batch_id),
             )
+            undo_payload = {
+                "mode": "composite",
+                "snapshots": update_snapshots,
+                "inserted_record_ids": inserted_ids,
+            }
+            self._record_undo_with_conn(
+                conn,
+                user,
+                "Excel 匯入" if source_file_name != "desktop-batch.xlsx" else "同地號批量新增",
+                f"新增 {len(inserted_ids)} 筆，更新 {len(updated_ids)} 筆",
+                undo_payload,
+            )
             conn.execute(
                 """
                 INSERT INTO audit_logs (
@@ -255,23 +271,7 @@ class PostgreSQLRecordMixin:
             ).fetchone()
             if row is None:
                 raise KeyError(record_id)
-            snapshot = {
-                "record": _row_dict(row),
-                "contact_logs": [
-                    _row_dict(item)
-                    for item in conn.execute(
-                        "SELECT * FROM contact_logs WHERE ownership_id = %s ORDER BY id",
-                        (record_id,),
-                    ).fetchall()
-                ],
-                "follow_up": _row_dict(
-                    conn.execute(
-                        "SELECT * FROM follow_up_reminders WHERE ownership_id = %s",
-                        (record_id,),
-                    ).fetchone()
-                    or {}
-                ),
-            }
+            snapshot = self._capture_record_snapshot(conn, record_id)
             label = " / ".join(
                 str(row.get(key) or "")
                 for key in ("district", "section", "land_number")
