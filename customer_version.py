@@ -1,6 +1,6 @@
 """Application release metadata."""
 
-APP_VERSION = "1.7.0"
+APP_VERSION = "1.7.1"
 BUILD_DATE = "2026-07-17"
 
 
