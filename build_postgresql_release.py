@@ -47,6 +47,16 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest().upper()
 
 
+def copy_primary_launcher(destination: Path) -> None:
+    """Write a CMD-safe launcher regardless of the source checkout line endings."""
+
+    launcher_bytes = (ROOT / PRIMARY_LAUNCHER).read_bytes()
+    if launcher_bytes.startswith(b"\xef\xbb\xbf") or not launcher_bytes.isascii():
+        raise RuntimeError("伺服器啟動批次檔必須是無 BOM 的 ASCII，避免 CMD 拆壞指令")
+    text = launcher_bytes.decode("ascii").replace("\r\n", "\n").replace("\r", "\n")
+    destination.write_bytes(text.replace("\n", "\r\n").encode("ascii"))
+
+
 def build_server(python_executable: str) -> None:
     command = [
         python_executable,
@@ -88,6 +98,12 @@ def audit_server_bundle(bundle: Path) -> None:
     root_launchers = sorted(path.name for path in bundle.glob("*.bat"))
     if root_launchers != [PRIMARY_LAUNCHER]:
         raise RuntimeError(f"伺服器封裝只能有一個啟動檔：{root_launchers}")
+
+    launcher_bytes = (bundle / PRIMARY_LAUNCHER).read_bytes()
+    if launcher_bytes.startswith(b"\xef\xbb\xbf") or not launcher_bytes.isascii():
+        raise RuntimeError("伺服器啟動批次檔必須是無 BOM 的 ASCII，避免 CMD 拆壞指令")
+    if launcher_bytes.count(b"\r\n") != launcher_bytes.count(b"\n"):
+        raise RuntimeError("伺服器啟動批次檔必須使用 Windows CRLF 換行")
 
     required = [
         bundle / PRIMARY_LAUNCHER,
@@ -144,7 +160,7 @@ def package_release() -> tuple[Path, Path]:
         bundle = Path(temporary) / release_name
         bundle.mkdir()
         shutil.copytree(SERVER_DIST, bundle / "LandCustomerServer")
-        shutil.copy2(ROOT / PRIMARY_LAUNCHER, bundle / PRIMARY_LAUNCHER)
+        copy_primary_launcher(bundle / PRIMARY_LAUNCHER)
         support = bundle / "_server_support"
         support.mkdir()
         for name in SUPPORT_FILES:

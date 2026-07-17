@@ -1,4 +1,5 @@
 import os
+import subprocess
 import tempfile
 import time
 import unittest
@@ -11,6 +12,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 
 import backup_postgresql
+import build_postgresql_release
 import setup_local_https
 
 
@@ -166,9 +168,46 @@ class PostgreSQLBackupMaintenanceTests(unittest.TestCase):
 
 
 class ProductionLauncherTests(unittest.TestCase):
+    def test_server_packager_normalizes_launcher_to_ascii_crlf(self):
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "launcher.bat"
+            build_postgresql_release.copy_primary_launcher(destination)
+            content = destination.read_bytes()
+
+        self.assertFalse(content.startswith(b"\xef\xbb\xbf"))
+        self.assertTrue(content.isascii())
+        self.assertGreater(content.count(b"\r\n"), 0)
+        self.assertEqual(content.count(b"\r\n"), content.count(b"\n"))
+
+    def test_packaged_server_launcher_executes_cleanly_in_cmd(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            support = root / "_server_support"
+            support.mkdir()
+            (support / "home_server_runtime.ps1").write_text(
+                "exit 0\n", encoding="ascii"
+            )
+            launcher = root / "start-home-server.bat"
+            build_postgresql_release.copy_primary_launcher(launcher)
+            result = subprocess.run(
+                ["cmd.exe", "/d", "/c", "call", str(launcher)],
+                input=b"x\r\n",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+
+        output = result.stdout.decode("ascii", errors="replace")
+        self.assertEqual(result.returncode, 0, output)
+        self.assertNotIn("is not recognized", output)
+        self.assertIn("Home server stopped normally.", output)
+
     def test_official_home_server_launcher_uses_postgresql_https_and_netbird(self):
         root = Path(__file__).resolve().parent.parent
-        launcher = (root / "啟動家中伺服器.bat").read_text(encoding="utf-8-sig")
+        launcher_bytes = (root / "啟動家中伺服器.bat").read_bytes()
+        self.assertFalse(launcher_bytes.startswith(b"\xef\xbb\xbf"))
+        self.assertTrue(launcher_bytes.isascii())
+        launcher = launcher_bytes.decode("ascii")
         runtime = (root / "home_server_runtime.ps1").read_text(encoding="utf-8-sig")
         vpn_firewall_script = (root / "configure_netbird_firewall.ps1").read_text(encoding="utf-8")
 
