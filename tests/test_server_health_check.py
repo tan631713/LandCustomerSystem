@@ -54,6 +54,42 @@ class PostgreSQLHealthCheckTests(unittest.TestCase):
         self.assertNotIn("secret", output)
         self.assertNotIn("private-host", output)
 
+    def test_explicit_postgres_mode_ignores_stale_environment_dsn(self):
+        parser = start_api_server.build_parser()
+        args = parser.parse_args(["--postgres", "--check"])
+
+        with patch.dict(
+            start_api_server.os.environ,
+            {
+                "CUSTOMER_API_BACKEND": "sqlite",
+                "CUSTOMER_API_DATABASE_URL": "postgresql://stale-user:secret@old-host/db",
+            },
+            clear=False,
+        ):
+            ignored = start_api_server.select_protected_postgres_configuration(args)
+
+            self.assertTrue(ignored)
+            self.assertEqual(
+                start_api_server.os.environ["CUSTOMER_API_BACKEND"], "postgresql"
+            )
+            self.assertNotIn("CUSTOMER_API_DATABASE_URL", start_api_server.os.environ)
+
+    def test_backup_in_explicit_postgres_mode_also_ignores_stale_dsn(self):
+        with (
+            patch.dict(
+                start_api_server.os.environ,
+                {"CUSTOMER_API_DATABASE_URL": "postgresql://stale@old-host/db"},
+                clear=False,
+            ),
+            patch("backup_postgresql.main", return_value=0) as backup_main,
+        ):
+            exit_code = start_api_server.main(["--postgres", "--backup"])
+
+            self.assertNotIn("CUSTOMER_API_DATABASE_URL", start_api_server.os.environ)
+
+        self.assertEqual(exit_code, 0)
+        backup_main.assert_called_once_with(["--label", "manual"])
+
     def test_connection_timeout_message_explains_the_recovery_steps(self):
         connection_timeout = type("ConnectionTimeout", (Exception,), {})
         result = start_api_server.database_check_failure(connection_timeout())

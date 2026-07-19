@@ -15,6 +15,23 @@ from customer_api.data_sources import create_data_source
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
+def select_protected_postgres_configuration(args):
+    """Make explicit PostgreSQL mode use the DPAPI-protected local DSN.
+
+    Older releases and manual testing may leave CUSTOMER_API_DATABASE_URL in
+    the user environment.  The --postgres flag promises to use the protected
+    local configuration, so a stale process/user value must not override it.
+    """
+
+    if not args.postgres:
+        return False
+    os.environ["CUSTOMER_API_BACKEND"] = "postgresql"
+    stale_dsn_was_ignored = bool(os.environ.pop("CUSTOMER_API_DATABASE_URL", None))
+    if stale_dsn_was_ignored:
+        print("偵測到舊的 PostgreSQL 環境設定，已忽略並改用 Windows 保護的本機設定。")
+    return stale_dsn_was_ignored
+
+
 def database_check_failure(exc):
     """Return a useful message without exposing the protected connection string."""
     error_type = type(exc).__name__
@@ -114,9 +131,6 @@ def run_maintenance_action(args):
 
 
 def run_database_check(args):
-    if args.postgres:
-        os.environ["CUSTOMER_API_BACKEND"] = "postgresql"
-
     if not args.check:
         return None
     try:
@@ -170,6 +184,7 @@ def show_lan_addresses(args, has_tls):
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
+    select_protected_postgres_configuration(args)
     handled, exit_code = run_maintenance_action(args)
     if handled:
         return exit_code

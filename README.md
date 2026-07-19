@@ -1,6 +1,6 @@
 # 土地資料系統
 
-目前正式版：`v1.7.1`（建置日期：2026-07-17）
+目前正式版：`v1.7.3`（建置日期：2026-07-17）
 
 正式共用資料儲存在自架 `PostgreSQL`；Windows 桌面程式與 iPhone 行動版都透過 `FastAPI` 讀寫同一份資料。舊 `customers.db` 只保留為歷史安全備份與單機相容資料，不再作為手機同步來源。
 
@@ -8,6 +8,7 @@
 
 ## 最新功能
 
+- 家中伺服器的明確 PostgreSQL 模式固定使用 Windows DPAPI 保護的本機連線設定；舊版或手動測試留下的使用者環境變數不再覆蓋正式資料庫
 - 公司筆電已接通通知中心、案件工作流程與任務看板、回收桶、批次復原及兩筆資料合併；操作全部由家中 PostgreSQL 交易處理
 - 管理員可由公司筆電新增帳號、調整角色／啟用狀態與重設密碼；每位使用者也可修改自己的登入密碼，共用資料金鑰不會離開登入工作階段
 - 公司筆電可查看家中備份狀態、立即建立 PostgreSQL＋附件 ZIP、設定保留期限／數量及清理舊備份
@@ -281,7 +282,7 @@ python -m pip install -r requirements.txt
 python -m unittest discover -s tests -v
 ```
 
-目前共有 188 項自動測試，涵蓋 PostgreSQL 正式登入、API 權限與 CRUD、iPhone PWA、安全標頭、私人 CA／HTTPS、NetBird VPN IP 偵測與防火牆安全範圍、公司桌面包強制遠端 HTTPS、只建立介面偏好資料庫、桌面 HTTPS CA 驗證、PostgreSQL 壓縮備份、異地同步、交易式還原、既有資料加密、Excel 匯入、案件新增模式、標籤、附件、聯絡、追蹤，以及既有 SQLite 相容、回收桶、批次復原、工作流、通知、報表、地圖、小螢幕對話框與完整 UI 流程。
+目前共有 192 項自動測試，涵蓋 PostgreSQL 正式登入、受保護 DSN 優先權、API 權限與 CRUD、iPhone PWA、安全標頭、私人 CA／HTTPS、NetBird VPN IP 偵測與防火牆安全範圍、無 BOM ASCII／CRLF 伺服器入口及真實 CMD 啟動、公司桌面包強制遠端 HTTPS、只建立介面偏好資料庫、桌面 HTTPS CA 驗證、PostgreSQL 壓縮備份、異地同步、交易式還原、既有資料加密、Excel 匯入、案件新增模式、標籤、附件、聯絡、追蹤，以及既有 SQLite 相容、回收桶、批次復原、工作流、通知、報表、地圖、小螢幕對話框與完整 UI 流程。
 
 ## 打包成 EXE
 

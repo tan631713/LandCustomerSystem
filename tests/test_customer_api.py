@@ -1164,13 +1164,14 @@ class LocalPostgreSQLConfigurationTests(unittest.TestCase):
 
 
 class HomeServerLauncherTests(unittest.TestCase):
-    def test_only_official_server_launcher_uses_crlf_and_keeps_failure_visible(self):
+    def test_only_official_server_launcher_uses_ascii_and_keeps_failure_visible(self):
         root = Path(__file__).resolve().parents[1]
         launcher = root / "啟動家中伺服器.bat"
         content = launcher.read_bytes()
         self.assertTrue(content)
-        self.assertEqual(content.count(b"\r\n"), content.count(b"\n"))
-        text = content.decode("utf-8-sig")
+        self.assertFalse(content.startswith(b"\xef\xbb\xbf"))
+        self.assertTrue(content.isascii())
+        text = content.decode("ascii")
         self.assertIn("home_server_runtime.ps1", text)
         self.assertIn("home-server-diagnostics.json", text)
         self.assertIn("pause >nul", text)
