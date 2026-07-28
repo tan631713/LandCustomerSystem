@@ -10,7 +10,15 @@ class SQLiteCollaborationMixin:
             _row_dict(row) for row in self.repository.list_contact_logs(int(record_id))
         ]
 
-    def add_contact_log(self, user, record_id, values):
+    def add_contact_log(
+        self,
+        user,
+        record_id,
+        values,
+        idempotency_key=None,
+        request_hash=None,
+    ):
+        del idempotency_key, request_hash
         if self.repository.get_customer(int(record_id)) is None:
             raise KeyError(record_id)
         self.repository.current_actor = user.username

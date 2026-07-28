@@ -1226,8 +1226,9 @@ class CustomerRepository:
         with self.database.connect() as conn:
             return conn.execute(
                 """
-                SELECT id, customer_id, file_path, description, storage_path,
-                       original_name, sha256, size_bytes, status, version, created_at
+                SELECT id, customer_id, file_path, description, category, storage_path,
+                       original_name, sha256, size_bytes, status, version, created_by,
+                       created_at
                 FROM customer_attachments
                 WHERE customer_id = ?
                 ORDER BY id DESC
@@ -1235,22 +1236,44 @@ class CustomerRepository:
                 (int(customer_id),),
             ).fetchall()
 
-    def add_customer_attachment(self, customer_id, file_path, description=""):
+    def add_customer_attachment(
+        self,
+        customer_id,
+        file_path,
+        description="",
+        category="",
+        created_by=None,
+    ):
         file_path = str(file_path or "").strip()
         if not file_path:
             raise ValueError("附件路徑不可空白")
         with self.database.connect() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO customer_attachments (customer_id, file_path, description)
-                VALUES (?, ?, ?)
+                INSERT INTO customer_attachments (
+                    customer_id, file_path, description, category, created_by
+                ) VALUES (?, ?, ?, ?, ?)
                 """,
-                (int(customer_id), file_path, str(description or "").strip() or None),
+                (
+                    int(customer_id),
+                    file_path,
+                    str(description or "").strip() or None,
+                    str(category or "").strip() or None,
+                    int(created_by) if created_by is not None else None,
+                ),
             )
         self.touch_customer_data()
         return cursor.lastrowid
 
-    def import_managed_attachment(self, customer_id, source_path, storage_root, description=""):
+    def import_managed_attachment(
+        self,
+        customer_id,
+        source_path,
+        storage_root,
+        description="",
+        category="",
+        created_by=None,
+    ):
         source = Path(source_path).expanduser().resolve()
         if not source.is_file():
             raise ValueError(f"找不到附件檔案：{source}")
@@ -1268,18 +1291,20 @@ class CustomerRepository:
                 cursor = conn.execute(
                     """
                     INSERT INTO customer_attachments (
-                        customer_id, file_path, description, storage_path,
-                        original_name, sha256, size_bytes, status, version
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'managed', 1)
+                        customer_id, file_path, description, category, storage_path,
+                        original_name, sha256, size_bytes, status, version, created_by
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'managed', 1, ?)
                     """,
                     (
                         int(customer_id),
                         str(destination),
                         str(description or "").strip() or None,
+                        str(category or "").strip() or None,
                         str(destination),
                         source.name,
                         digest.hexdigest(),
                         destination.stat().st_size,
+                        int(created_by) if created_by is not None else None,
                     ),
                 )
                 attachment_id = int(cursor.lastrowid)
@@ -1288,6 +1313,26 @@ class CustomerRepository:
             raise
         self.touch_customer_data()
         return attachment_id
+
+    def update_customer_attachment_metadata(
+        self, attachment_id, description="", category=""
+    ):
+        with self.database.connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE customer_attachments
+                SET description = ?, category = ?, version = version + 1
+                WHERE id = ?
+                """,
+                (
+                    str(description or "").strip() or None,
+                    str(category or "").strip() or None,
+                    int(attachment_id),
+                ),
+            )
+        if cursor.rowcount:
+            self.touch_customer_data()
+        return cursor.rowcount
 
     def verify_managed_attachments(self):
         results = []

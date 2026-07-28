@@ -12,11 +12,15 @@ from PySide6.QtWidgets import QApplication, QInputDialog, QLineEdit, QMessageBox
 from customer_api.local_postgres import load_postgres_dsn
 from migrate_sqlite_to_postgresql import (
     DEVICE_LOCAL_TABLES,
+    ORPHAN_QUERIES,
+    SOURCE_TARGET_COUNT_QUERIES,
+    TARGET_TABLES,
     analyze_records,
     apply_migration,
     build_source,
     collect_source_counts,
     read_plain_records,
+    verify_postgres,
 )
 
 
@@ -28,172 +32,6 @@ def write_report(payload):
     REPORT_PATH.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-
-
-TARGET_TABLES = (
-    "users",
-    "owners",
-    "lands",
-    "ownerships",
-    "contact_logs",
-    "follow_up_reminders",
-    "projects",
-    "project_ownerships",
-    "project_tasks",
-    "tags",
-    "ownership_tags",
-    "custom_fields",
-    "ownership_custom_values",
-    "attachments",
-    "ownership_locations",
-    "duplicate_reviews",
-    "record_change_logs",
-    "text_templates",
-    "recycle_bin",
-    "undo_operations",
-    "notifications",
-    "import_profiles",
-    "report_templates",
-    "watchlist",
-    "operation_logs",
-)
-
-SOURCE_TARGET_COUNT_QUERIES = {
-    "users": "SELECT COUNT(*) FROM users",
-    "customers": "SELECT COUNT(*) FROM ownerships",
-    "contact_logs": (
-        "SELECT COUNT(*) FROM contact_logs "
-        "WHERE legacy_contact_log_id IS NOT NULL"
-    ),
-    "follow_up_reminders": "SELECT COUNT(*) FROM follow_up_reminders",
-    "cases": "SELECT COUNT(*) FROM projects WHERE legacy_case_id IS NOT NULL",
-    "case_customers": "SELECT COUNT(*) FROM project_ownerships",
-    "case_tasks": (
-        "SELECT COUNT(*) FROM project_tasks WHERE legacy_task_id IS NOT NULL"
-    ),
-    "tags": "SELECT COUNT(*) FROM tags WHERE legacy_tag_id IS NOT NULL",
-    "customer_tags": "SELECT COUNT(*) FROM ownership_tags",
-    "custom_fields": (
-        "SELECT COUNT(*) FROM custom_fields WHERE legacy_field_id IS NOT NULL"
-    ),
-    "customer_custom_values": "SELECT COUNT(*) FROM ownership_custom_values",
-    "customer_attachments": (
-        "SELECT COUNT(*) FROM attachments WHERE legacy_attachment_id IS NOT NULL"
-    ),
-    "customer_locations": "SELECT COUNT(*) FROM ownership_locations",
-    "duplicate_reviews": "SELECT COUNT(*) FROM duplicate_reviews",
-    "record_change_logs": (
-        "SELECT COUNT(*) FROM record_change_logs "
-        "WHERE legacy_change_log_id IS NOT NULL"
-    ),
-    "text_templates": (
-        "SELECT COUNT(*) FROM text_templates WHERE legacy_template_id IS NOT NULL"
-    ),
-    "recycle_bin": (
-        "SELECT COUNT(*) FROM recycle_bin WHERE legacy_recycle_id IS NOT NULL"
-    ),
-    "undo_operations": (
-        "SELECT COUNT(*) FROM undo_operations WHERE legacy_undo_id IS NOT NULL"
-    ),
-    "notifications": (
-        "SELECT COUNT(*) FROM notifications WHERE legacy_notification_id IS NOT NULL"
-    ),
-    "import_profiles": (
-        "SELECT COUNT(*) FROM import_profiles WHERE legacy_profile_id IS NOT NULL"
-    ),
-    "report_templates": (
-        "SELECT COUNT(*) FROM report_templates "
-        "WHERE legacy_report_template_id IS NOT NULL"
-    ),
-    "watchlist": (
-        "SELECT COUNT(*) FROM watchlist WHERE legacy_watchlist_id IS NOT NULL"
-    ),
-    "operation_logs": (
-        "SELECT COUNT(*) FROM operation_logs "
-        "WHERE legacy_operation_log_id IS NOT NULL"
-    ),
-}
-
-ORPHAN_QUERIES = {
-    "project_ownerships_project": (
-        "SELECT COUNT(*) FROM project_ownerships x LEFT JOIN projects p "
-        "ON p.id=x.project_id WHERE p.id IS NULL"
-    ),
-    "project_ownerships_ownership": (
-        "SELECT COUNT(*) FROM project_ownerships x LEFT JOIN ownerships o "
-        "ON o.id=x.ownership_id WHERE o.id IS NULL"
-    ),
-    "project_tasks": (
-        "SELECT COUNT(*) FROM project_tasks x LEFT JOIN projects p "
-        "ON p.id=x.project_id WHERE p.id IS NULL"
-    ),
-    "ownership_tags_ownership": (
-        "SELECT COUNT(*) FROM ownership_tags x LEFT JOIN ownerships o "
-        "ON o.id=x.ownership_id WHERE o.id IS NULL"
-    ),
-    "ownership_tags_tag": (
-        "SELECT COUNT(*) FROM ownership_tags x LEFT JOIN tags t "
-        "ON t.id=x.tag_id WHERE t.id IS NULL"
-    ),
-    "ownership_custom_values_ownership": (
-        "SELECT COUNT(*) FROM ownership_custom_values x LEFT JOIN ownerships o "
-        "ON o.id=x.ownership_id WHERE o.id IS NULL"
-    ),
-    "ownership_custom_values_field": (
-        "SELECT COUNT(*) FROM ownership_custom_values x LEFT JOIN custom_fields f "
-        "ON f.id=x.field_id WHERE f.id IS NULL"
-    ),
-    "attachments": (
-        "SELECT COUNT(*) FROM attachments x LEFT JOIN ownerships o "
-        "ON o.id=x.ownership_id WHERE x.legacy_attachment_id IS NOT NULL "
-        "AND o.id IS NULL"
-    ),
-    "ownership_locations": (
-        "SELECT COUNT(*) FROM ownership_locations x LEFT JOIN ownerships o "
-        "ON o.id=x.ownership_id WHERE o.id IS NULL"
-    ),
-    "duplicate_reviews_left": (
-        "SELECT COUNT(*) FROM duplicate_reviews x LEFT JOIN ownerships o "
-        "ON o.id=x.left_ownership_id WHERE o.id IS NULL"
-    ),
-    "duplicate_reviews_right": (
-        "SELECT COUNT(*) FROM duplicate_reviews x LEFT JOIN ownerships o "
-        "ON o.id=x.right_ownership_id WHERE o.id IS NULL"
-    ),
-    "record_change_logs": (
-        "SELECT COUNT(*) FROM record_change_logs x LEFT JOIN ownerships o "
-        "ON o.id=x.ownership_id WHERE o.id IS NULL"
-    ),
-}
-
-
-def verify_postgres(dsn):
-    import psycopg
-
-    with psycopg.connect(dsn) as conn:
-        counts = {
-            table: int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
-            for table in TARGET_TABLES
-        }
-        mirrored_source_counts = {
-            source_table: int(conn.execute(query).fetchone()[0])
-            for source_table, query in SOURCE_TARGET_COUNT_QUERIES.items()
-        }
-        orphan_counts = {
-            name: int(conn.execute(query).fetchone()[0])
-            for name, query in ORPHAN_QUERIES.items()
-        }
-        schema_version = int(
-            conn.execute(
-                "SELECT COALESCE(MAX(version), 0) FROM schema_migrations"
-            ).fetchone()[0]
-        )
-    return {
-        "schema_version": schema_version,
-        "counts": counts,
-        "mirrored_source_counts": mirrored_source_counts,
-        "orphan_counts": orphan_counts,
-    }
 
 
 def audit_text(plan):

@@ -1,6 +1,7 @@
 """Safe launcher for the local FastAPI service."""
 
 import argparse
+import getpass
 import json
 import os
 import sys
@@ -26,6 +27,13 @@ def select_protected_postgres_configuration(args):
     if not args.postgres:
         return False
     os.environ["CUSTOMER_API_BACKEND"] = "postgresql"
+    local_app_data = os.environ.get("LOCALAPPDATA") or str(
+        os.path.join(os.path.expanduser("~"), "AppData", "Local")
+    )
+    os.environ.setdefault(
+        "CUSTOMER_API_ATTACHMENT_DIR",
+        os.path.join(local_app_data, "LandCustomerSystem", "attachments"),
+    )
     stale_dsn_was_ignored = bool(os.environ.pop("CUSTOMER_API_DATABASE_URL", None))
     if stale_dsn_was_ignored:
         print("偵測到舊的 PostgreSQL 環境設定，已忽略並改用 Windows 保護的本機設定。")
@@ -94,10 +102,123 @@ def build_parser():
     parser.add_argument("--backup", action="store_true", help="建立 PostgreSQL 與附件備份後結束")
     parser.add_argument("--backup-if-due-hours", type=int, default=0)
     parser.add_argument("--backup-label", default="manual")
+    parser.add_argument(
+        "--import-recovery-account",
+        metavar="PATH",
+        help="驗證並匯入單機版產生的 .lcs-account 帳號恢復檔後結束",
+    )
+    parser.add_argument(
+        "--import-migration-package",
+        metavar="PATH",
+        help="匯入單機版 .lcs-migration.zip，保留家中伺服器帳號與密碼",
+    )
+    parser.add_argument(
+        "--recover-admin-password",
+        action="store_true",
+        help="在家中主機本地驗證既有帳號後安全重設 admin 密碼",
+    )
     return parser
 
 
 def run_maintenance_action(args):
+    if args.import_migration_package:
+        from customer_api.local_postgres import load_postgres_dsn
+        from customer_migration_package import import_migration_package
+
+        try:
+            source_username = (
+                input("單機版登入帳號（直接按 Enter 使用 User）：").strip()
+                or "User"
+            )
+            source_password = getpass.getpass(
+                f"請輸入單機版 {source_username} 的密碼（畫面不會顯示）："
+            )
+            server_username = (
+                input("家中伺服器管理員帳號（直接按 Enter 使用 admin）：").strip()
+                or "admin"
+            )
+            server_password = getpass.getpass(
+                f"請輸入家中伺服器 {server_username} 的密碼（畫面不會顯示）："
+            )
+            result = import_migration_package(
+                args.import_migration_package,
+                load_postgres_dsn(),
+                source_username=source_username,
+                source_password=source_password,
+                server_username=server_username,
+                server_password=server_password,
+            )
+        except Exception as exc:
+            print(
+                json.dumps(
+                    {"status": "error", "message": str(exc)},
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                file=sys.stderr,
+            )
+            return True, 1
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return True, 0
+    if args.recover_admin_password:
+        from customer_api.local_postgres import load_postgres_dsn
+        from customer_recovery_account import recover_admin_password
+
+        try:
+            recovery_username = input("請輸入目前可登入的驗證帳號：").strip()
+            recovery_password = getpass.getpass(
+                f"請輸入 {recovery_username} 的密碼（畫面不會顯示）："
+            )
+            new_password = getpass.getpass(
+                "請輸入新的 admin 密碼，至少 10 個字元（畫面不會顯示）："
+            )
+            confirm_password = getpass.getpass("請再次輸入新的 admin 密碼：")
+            if new_password != confirm_password:
+                raise ValueError("兩次輸入的新 admin 密碼不一致，未進行修改。")
+            result = recover_admin_password(
+                load_postgres_dsn(),
+                recovery_username,
+                recovery_password,
+                new_password,
+            )
+        except Exception as exc:
+            print(
+                json.dumps(
+                    {"status": "error", "message": str(exc)},
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                file=sys.stderr,
+            )
+            return True, 1
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return True, 0
+    if args.import_recovery_account:
+        from customer_api.local_postgres import load_postgres_dsn
+        from customer_recovery_account import import_recovery_account, load_recovery_package
+
+        try:
+            account = load_recovery_package(args.import_recovery_account)
+            password = getpass.getpass(
+                f"請輸入新帳號 {account['username']} 的密碼（畫面不會顯示）："
+            )
+            result = import_recovery_account(
+                args.import_recovery_account,
+                password,
+                load_postgres_dsn(),
+            )
+        except Exception as exc:
+            print(
+                json.dumps(
+                    {"status": "error", "message": str(exc)},
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                file=sys.stderr,
+            )
+            return True, 1
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return True, 0
     if args.setup_postgresql:
         from setup_local_postgresql import main as setup_postgresql_main
 
@@ -126,7 +247,25 @@ def run_maintenance_action(args):
         backup_arguments = ["--label", args.backup_label]
         if args.backup_if_due_hours:
             backup_arguments.extend(["--if-due-hours", str(args.backup_if_due_hours)])
-        return True, backup_main(backup_arguments)
+        try:
+            return True, backup_main(backup_arguments)
+        except Exception as exc:
+            print(
+                json.dumps(
+                    {
+                        "status": "error",
+                        "message": (
+                            "PostgreSQL 備份目前無法完成；啟動器將嘗試修復"
+                            "這台 Windows 使用者的資料庫連線設定。"
+                        ),
+                        "error_type": type(exc).__name__,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                file=sys.stderr,
+            )
+            return True, 1
     return False, None
 
 

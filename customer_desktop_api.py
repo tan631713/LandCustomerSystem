@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import mimetypes
 import os
 import socket
@@ -159,7 +160,11 @@ class DesktopApiClient:
         raw_body=None,
         content_type=None,
         timeout_seconds=None,
+        response_format="json",
+        request_headers=None,
     ):
+        if response_format not in {"json", "bytes"}:
+            raise ValueError("Unsupported API response format")
         query = urlencode(
             {
                 key: value
@@ -172,7 +177,13 @@ class DesktopApiClient:
         if query:
             url += "?" + query
         body = None
-        headers = {"Accept": "application/json"}
+        headers = {
+            "Accept": (
+                "application/octet-stream"
+                if response_format == "bytes"
+                else "application/json"
+            )
+        }
         if payload is not None and raw_body is not None:
             raise ValueError("payload and raw_body cannot be used together")
         if payload is not None:
@@ -185,6 +196,11 @@ class DesktopApiClient:
             if not self.access_token:
                 raise DesktopApiResponseError(401, "尚未登入 API")
             headers["Authorization"] = f"Bearer {self.access_token}"
+        for key, value in dict(request_headers or {}).items():
+            header_name = str(key).strip()
+            if not header_name or header_name.casefold() == "authorization":
+                continue
+            headers[header_name] = str(value)
         request = Request(url, data=body, headers=headers, method=str(method).upper())
         request_method = str(method).upper()
         attempts = 1 + (self.read_retry_count if request_method == "GET" else 0)
@@ -199,6 +215,8 @@ class DesktopApiClient:
                     urlopen_options["context"] = self._ssl_context
                 with self._urlopen(request, **urlopen_options) as response:
                     raw = response.read()
+                    if response_format == "bytes":
+                        return raw
                     if not raw:
                         return None
                     try:
@@ -294,9 +312,79 @@ class DesktopApiClient:
         )
         return int(result["id"])
 
+    def replace_record_with_history(self, record_id, values, change_logs):
+        result = self._request(
+            "PUT",
+            f"/api/v1/records/{int(record_id)}/with-history",
+            payload={
+                "values": dict(values),
+                "change_logs": list(change_logs),
+            },
+        )
+        return int(result["id"])
+
     def delete_record(self, record_id):
         self._request("DELETE", f"/api/v1/records/{int(record_id)}")
         return True
+
+    @staticmethod
+    def _field_visit_idempotency_key(action):
+        return f"desktop-{str(action).strip()}-{uuid.uuid4().hex}"
+
+    def get_field_visit_for_date(self, visit_date):
+        result = self._request(
+            "GET",
+            "/api/v1/field-visits/today",
+            params={"visit_date": str(visit_date)},
+        )
+        return dict(result["item"]) if result and result.get("item") else None
+
+    def create_field_visit(self, visit_date, title="今日拜訪行程"):
+        result = self._request(
+            "POST",
+            "/api/v1/field-visits",
+            payload={
+                "visit_date": str(visit_date),
+                "title": str(title or "").strip() or "今日拜訪行程",
+            },
+            request_headers={
+                "Idempotency-Key": self._field_visit_idempotency_key(
+                    "create-field-visit"
+                )
+            },
+        )
+        return dict(result or {})
+
+    def add_field_visit_records(self, route_id, record_ids, *, priority=0):
+        ownership_ids = list(
+            dict.fromkeys(
+                int(record_id)
+                for record_id in record_ids
+                if int(record_id) > 0
+            )
+        )
+        if not ownership_ids:
+            raise ValueError("請先選取要加入今日行程的資料。")
+        priority = max(0, min(int(priority), 100))
+        result = self._request(
+            "POST",
+            f"/api/v1/field-visits/{int(route_id)}/items",
+            payload={
+                "items": [
+                    {
+                        "ownership_id": ownership_id,
+                        "priority": priority,
+                    }
+                    for ownership_id in ownership_ids
+                ]
+            },
+            request_headers={
+                "Idempotency-Key": self._field_visit_idempotency_key(
+                    "add-field-visit-items"
+                )
+            },
+        )
+        return dict(result or {})
 
     def import_records(self, items, source_file_name="import.xlsx"):
         return self._request(
@@ -480,6 +568,22 @@ class DesktopApiClient:
             "GET", f"/api/v1/records/{int(record_id)}/attachments"
         )
         return list(result.get("items") or [])
+
+    def download_attachment_content(self, record_id, attachment_id):
+        """Download a managed attachment using the current desktop login."""
+
+        content = self._request(
+            "GET",
+            (
+                f"/api/v1/records/{int(record_id)}/attachments/"
+                f"{int(attachment_id)}/content"
+            ),
+            timeout_seconds=120,
+            response_format="bytes",
+        )
+        if len(content) > MAX_CLIENT_ATTACHMENT_BYTES:
+            raise DesktopApiError("伺服器回傳的附件超過 50 MB 安全限制。")
+        return bytes(content)
 
     def add_external_attachment(self, record_id, file_path, description=""):
         result = self._request(
@@ -903,6 +1007,7 @@ class DesktopApiRecordRepository:
         self.last_inserted_customer_ids = []
         self._contact_log_record_ids = {}
         self._attachment_record_ids = {}
+        self._attachments_by_id = {}
 
     def _invalidate(self):
         self._rows = None
@@ -967,6 +1072,35 @@ class DesktopApiRecordRepository:
         self._invalidate()
         return int(saved_id)
 
+    @staticmethod
+    def _record_change_log_items(logs):
+        items = []
+        for log in logs:
+            items.append(
+                {
+                    "record_id": int(log.get("record_id") or log.get("customer_id")),
+                    "action_type": str(log.get("action_type") or "修改資料"),
+                    "field_key": str(log.get("field_key") or ""),
+                    "field_label": str(
+                        log.get("field_label") or log.get("field_key") or ""
+                    ),
+                    "old_value": log.get("old_value"),
+                    "new_value": log.get("new_value"),
+                }
+            )
+        return items
+
+    def save_customer_with_change_logs(self, values, record_id, logs):
+        record_id = int(record_id)
+        items = self._record_change_log_items(logs)
+        saved_id = self.client.replace_record_with_history(
+            record_id,
+            self._plain_values(values),
+            items,
+        )
+        self._invalidate()
+        return int(saved_id)
+
     def update_customers(self, records):
         records = list(records)
         for record in records:
@@ -989,6 +1123,40 @@ class DesktopApiRecordRepository:
     def delete_all_customers(self):
         return self.delete_customers(self.fetch_customer_ids())
 
+    def add_customers_to_field_visit(
+        self,
+        record_ids,
+        *,
+        visit_date,
+        title="今日拜訪行程",
+        priority=0,
+    ):
+        ownership_ids = list(
+            dict.fromkeys(
+                int(record_id)
+                for record_id in record_ids
+                if int(record_id) > 0
+            )
+        )
+        if not ownership_ids:
+            raise ValueError("請先選取要加入今日行程的資料。")
+        route = self.client.get_field_visit_for_date(visit_date)
+        if route is None:
+            route = self.client.create_field_visit(visit_date, title)
+        route_id = int(route.get("id") or 0)
+        if route_id <= 0:
+            raise DesktopApiError("伺服器沒有回傳今日行程編號。")
+        result = self.client.add_field_visit_records(
+            route_id,
+            ownership_ids,
+            priority=priority,
+        )
+        result["route_id"] = int(result.get("route_id") or route_id)
+        result["visit_date"] = str(visit_date)
+        result["title"] = str(route.get("title") or title or "今日拜訪行程")
+        result["priority"] = max(0, min(int(priority), 100))
+        return result
+
     def get_record_change_logs(self, record_id, limit=300):
         return [
             dict(row)
@@ -996,20 +1164,7 @@ class DesktopApiRecordRepository:
         ]
 
     def add_record_change_logs(self, logs):
-        items = []
-        for log in logs:
-            items.append(
-                {
-                    "record_id": int(log.get("record_id") or log.get("customer_id")),
-                    "action_type": str(log.get("action_type") or "修改資料"),
-                    "field_key": str(log.get("field_key") or ""),
-                    "field_label": str(
-                        log.get("field_label") or log.get("field_key") or ""
-                    ),
-                    "old_value": log.get("old_value"),
-                    "new_value": log.get("new_value"),
-                }
-            )
+        items = self._record_change_log_items(logs)
         return self.client.add_record_change_logs(items) if items else 0
 
     def import_records(
@@ -1201,8 +1356,72 @@ class DesktopApiRecordRepository:
             dict(row) for row in self.client.list_attachments(customer_id)
         ]
         for row in rows:
-            self._attachment_record_ids[int(row["id"])] = customer_id
+            attachment_id = int(row["id"])
+            self._attachment_record_ids[attachment_id] = customer_id
+            self._attachments_by_id[attachment_id] = dict(row)
         return rows
+
+    @staticmethod
+    def _safe_attachment_name(value, attachment_id):
+        name = Path(str(value or "")).name.strip().strip(".")
+        if not name:
+            name = f"attachment-{int(attachment_id)}"
+        invalid = '<>:"/\\|?*'
+        name = "".join(
+            "_" if character in invalid or ord(character) < 32 else character
+            for character in name
+        ).strip().strip(".")
+        reserved = {"CON", "PRN", "AUX", "NUL"} | {
+            f"{prefix}{number}"
+            for prefix in ("COM", "LPT")
+            for number in range(1, 10)
+        }
+        if name.split(".", 1)[0].upper() in reserved:
+            name = "_" + name
+        return name[:180] or f"attachment-{int(attachment_id)}"
+
+    def download_customer_attachment(self, attachment_id, cache_root=None):
+        """Materialize a server-managed attachment in a safe client cache."""
+
+        attachment_id = int(attachment_id)
+        record_id = self._attachment_record_ids.get(attachment_id)
+        attachment = self._attachments_by_id.get(attachment_id)
+        if record_id is None or attachment is None:
+            raise DesktopApiError(
+                "找不到附件所屬資料，請重新開啟附件管理後再試。"
+            )
+        if str(attachment.get("status") or "").casefold() == "external":
+            raise DesktopApiError("外部連結附件不需要從伺服器下載。")
+
+        content = self.client.download_attachment_content(record_id, attachment_id)
+        original_name = (
+            attachment.get("original_name")
+            or attachment.get("file_path")
+            or f"attachment-{attachment_id}"
+        )
+        safe_name = self._safe_attachment_name(original_name, attachment_id)
+        if cache_root is None:
+            local_app_data = str(os.environ.get("LOCALAPPDATA") or "").strip()
+            cache_root = (
+                Path(local_app_data) / "LandCustomerSystem" / "attachment-cache"
+                if local_app_data
+                else Path.home() / ".land-customer-system" / "attachment-cache"
+            )
+        target_directory = Path(cache_root) / str(int(record_id))
+        target_directory.mkdir(parents=True, exist_ok=True)
+        digest = hashlib.sha256(content).hexdigest()[:12]
+        target = target_directory / f"{attachment_id}-{digest}-{safe_name}"
+        if not target.is_file():
+            temporary = target.with_name(target.name + ".part")
+            temporary.write_bytes(content)
+            os.replace(temporary, target)
+        for old_path in target_directory.glob(f"{attachment_id}-*"):
+            if old_path != target and old_path.is_file():
+                try:
+                    old_path.unlink()
+                except OSError:
+                    pass
+        return str(target)
 
     def add_customer_attachment(self, customer_id, file_path, description=""):
         customer_id = int(customer_id)
@@ -1233,6 +1452,7 @@ class DesktopApiRecordRepository:
             )
         deleted = self.client.delete_attachment(customer_id, attachment_id)
         self._attachment_record_ids.pop(attachment_id, None)
+        self._attachments_by_id.pop(attachment_id, None)
         self._invalidate()
         return int(bool(deleted))
 

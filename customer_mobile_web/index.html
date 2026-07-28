@@ -75,6 +75,7 @@
       </div>
       <nav class="app-nav" aria-label="主要功能">
         <button class="active" type="button" data-page="home" aria-current="page"><span class="nav-icon" aria-hidden="true">⌂</span><span>總覽</span></button>
+        <button type="button" data-page="field"><span class="nav-icon" aria-hidden="true">外</span><span>今日外勤</span></button>
         <button type="button" data-page="owners"><span class="nav-icon" aria-hidden="true">人</span><span>地主搜尋</span></button>
         <button type="button" data-page="lands"><span class="nav-icon" aria-hidden="true">田</span><span>土地搜尋</span></button>
         <button type="button" data-page="followups"><span class="nav-icon" aria-hidden="true">✓</span><span>追蹤提醒</span><span id="nav-followup-count" class="nav-count hidden">0</span></button>
@@ -126,6 +127,7 @@
                 <button type="button" data-go="owners"><span class="quick-icon">人</span><span><strong>搜尋地主</strong><small>姓名、身分證、地址</small></span><b aria-hidden="true">→</b></button>
                 <button type="button" data-go="lands"><span class="quick-icon">田</span><span><strong>搜尋土地</strong><small>地號、地區、地段</small></span><b aria-hidden="true">→</b></button>
                 <button type="button" data-go="followups"><span class="quick-icon">✓</span><span><strong>處理追蹤</strong><small>查看即將到期項目</small></span><b aria-hidden="true">→</b></button>
+                <button type="button" data-go="field"><span class="quick-icon">外</span><span><strong>開始今日外勤</strong><small>查看行程與開啟導航</small></span><b aria-hidden="true">→</b></button>
               </div>
             </section>
             <section class="panel sync-panel">
@@ -135,6 +137,102 @@
               <p>每次操作都直接透過安全連線讀寫自架 PostgreSQL，不在此裝置另外保存土地資料。</p>
               <small id="last-sync-time">等待首次同步</small>
             </section>
+          </div>
+          <section id="field-location-panel" class="panel field-location-panel" aria-labelledby="field-location-heading">
+            <div class="field-location-copy">
+              <p class="eyebrow">外勤準備</p>
+              <h3 id="field-location-heading">確認手機定位</h3>
+              <p id="field-location-status" role="status" aria-live="polite">開始外勤前可先確認 GPS；定位失敗不會影響原始拜訪順序。</p>
+              <small id="field-location-detail">位置只會在本次開啟頁面期間使用，不會儲存在手機裡。</small>
+            </div>
+            <button id="field-location-button" class="secondary-button" type="button">取得目前位置</button>
+          </section>
+        </section>
+
+        <section id="page-field" class="page" aria-labelledby="field-heading">
+          <div class="page-heading section-heading">
+            <div>
+              <p class="eyebrow">手機外勤模式</p>
+              <h2 id="field-heading">今日拜訪行程</h2>
+              <p class="page-lead">一次專注一位地主，完成後再前往下一站。</p>
+            </div>
+            <div class="page-heading-actions">
+              <button id="field-visit-manage" class="primary-button editor-only" type="button">安排今日行程</button>
+              <button id="field-visit-refresh" class="secondary-button" type="button">重新整理</button>
+            </div>
+          </div>
+
+          <div id="field-visit-loading" class="empty-state">正在載入今日行程…</div>
+          <div id="field-visit-empty" class="empty-state hidden">
+            <p id="field-visit-empty-message">今天尚未建立拜訪行程。</p>
+            <button id="field-visit-create" class="primary-button editor-only" type="button">建立今日行程</button>
+          </div>
+
+          <div id="field-visit-workspace" class="field-visit-workspace hidden">
+            <section class="field-visit-summary" aria-label="今日行程進度">
+              <div class="field-visit-summary-heading">
+                <div>
+                  <p id="field-visit-date" class="eyebrow">今日</p>
+                  <h3 id="field-visit-title">今日拜訪</h3>
+                </div>
+                <span id="field-visit-route-status" class="visit-status">尚未開始</span>
+              </div>
+              <div class="field-progress-track" aria-hidden="true"><span id="field-progress-bar"></span></div>
+              <div class="field-progress-stats">
+                <span><strong id="field-stat-total">0</strong><small>總數</small></span>
+                <span><strong id="field-stat-completed">0</strong><small>完成</small></span>
+                <span><strong id="field-stat-remaining">0</strong><small>未完成</small></span>
+                <span><strong id="field-stat-skipped">0</strong><small>略過</small></span>
+                <span><strong id="field-stat-distance">—</strong><small>預估公里</small></span>
+              </div>
+              <div class="field-start-row editor-only">
+                <div>
+                  <strong id="field-start-title">準備開始今天的外勤</strong>
+                  <small id="field-start-detail">會先取得 GPS，再讓你確認路線。</small>
+                </div>
+                <div class="field-start-actions">
+                  <button id="field-visit-reoptimize" class="secondary-button" type="button">重新規劃剩餘路線</button>
+                  <button id="field-visit-start" class="primary-button" type="button">開始外勤</button>
+                </div>
+              </div>
+            </section>
+
+            <section id="field-completion-summary" class="field-completion-summary hidden" aria-live="polite">
+              <div class="field-completion-heading">
+                <div>
+                  <p class="eyebrow">今日成果</p>
+                  <h3>今日外勤已完成</h3>
+                </div>
+                <span class="field-completion-check" aria-hidden="true">✓</span>
+              </div>
+              <p id="field-completion-message" class="field-completion-message">今日行程已全部處理完成。</p>
+              <div class="field-completion-stats" aria-label="今日行程成果">
+                <span><strong id="field-completion-total">0</strong><small>行程總數</small></span>
+                <span><strong id="field-completion-completed">0</strong><small>完成拜訪</small></span>
+                <span><strong id="field-completion-skipped">0</strong><small>略過</small></span>
+                <span><strong id="field-completion-cancelled">0</strong><small>已移除</small></span>
+                <span><strong id="field-completion-distance">—</strong><small>預估公里</small></span>
+                <span><strong id="field-completion-duration">—</strong><small>外勤耗時</small></span>
+              </div>
+              <div class="field-completion-times">
+                <span>開始時間 <strong id="field-completion-started">—</strong></span>
+                <span>完成時間 <strong id="field-completion-ended">—</strong></span>
+              </div>
+              <button id="field-completion-review" class="secondary-button" type="button">查看今日完整清單</button>
+            </section>
+
+            <section id="field-visit-current" class="field-current-card" aria-live="polite"></section>
+
+            <nav class="field-step-navigation" aria-label="切換拜訪地主">
+              <button id="field-visit-previous" type="button">← 上一位</button>
+              <span id="field-visit-position">0 / 0</span>
+              <button id="field-visit-next" type="button">下一位 →</button>
+            </nav>
+
+            <details class="field-itinerary">
+              <summary>查看完整今日清單</summary>
+              <div id="field-visit-list" class="field-visit-list"></div>
+            </details>
           </div>
         </section>
 
@@ -178,6 +276,7 @@
 
     <nav class="mobile-nav" aria-label="手機版主要功能">
       <button class="active" type="button" data-page="home" aria-current="page"><span aria-hidden="true">⌂</span><small>總覽</small></button>
+      <button type="button" data-page="field"><span aria-hidden="true">外</span><small>外勤</small></button>
       <button type="button" data-page="owners"><span aria-hidden="true">人</span><small>地主</small></button>
       <button type="button" data-page="lands"><span aria-hidden="true">田</span><small>土地</small></button>
       <button type="button" data-page="followups"><span aria-hidden="true">✓</span><small>追蹤</small></button>
@@ -192,6 +291,64 @@
         <button type="button" class="icon-button" data-close-sheet aria-label="關閉">×</button>
       </header>
       <div id="record-detail" class="detail-grid"></div>
+      <section id="attachment-section" class="sheet-section">
+        <div class="panel-heading attachment-heading">
+          <div><p class="eyebrow">現場資料</p><h3>照片與附件</h3></div>
+          <span id="attachment-count" class="attachment-count" aria-live="polite">0 個附件</span>
+        </div>
+        <div class="attachment-toolbar" aria-label="附件篩選與排序">
+          <label for="attachment-filter">顯示
+            <select id="attachment-filter">
+              <option value="all">全部附件</option>
+              <option value="photos">照片</option>
+              <option value="documents">文件</option>
+              <option value="other">其他</option>
+            </select>
+          </label>
+          <label for="attachment-sort">排序
+            <select id="attachment-sort">
+              <option value="newest">最新優先</option>
+              <option value="oldest">最舊優先</option>
+              <option value="name">檔名</option>
+            </select>
+          </label>
+        </div>
+        <div id="attachment-results" class="attachment-list"></div>
+        <form id="attachment-form" class="stack-form compact-form editor-only">
+          <div class="field-pair">
+            <label for="attachment-category">附件分類
+              <select id="attachment-category">
+                <option value="">未分類</option>
+                <option>現場照片</option>
+                <option>謄本文件</option>
+                <option>聯絡資料</option>
+                <option>合約文件</option>
+                <option>其他</option>
+              </select>
+            </label>
+            <label for="attachment-description">附件說明
+              <input id="attachment-description" maxlength="1000" placeholder="例如：東側道路現況">
+            </label>
+          </div>
+          <div class="attachment-picker-grid">
+            <label class="file-picker photo-picker" for="attachment-photo-input">
+              <span aria-hidden="true">相機</span>
+              <strong>直接拍照</strong>
+              <small>使用手機後鏡頭</small>
+            </label>
+            <input id="attachment-photo-input" class="sr-only" type="file" accept="image/*" capture="environment">
+            <label class="file-picker" for="attachment-file-input">
+              <span aria-hidden="true">檔案</span>
+              <strong>選擇附件</strong>
+              <small>可一次選擇多個檔案</small>
+            </label>
+            <input id="attachment-file-input" class="sr-only" type="file" multiple>
+          </div>
+          <p class="attachment-compression-note">照片會在手機端適度縮小後再上傳；PDF 與其他檔案維持原檔。</p>
+          <p id="attachment-selection" class="attachment-selection" aria-live="polite">尚未選擇檔案</p>
+          <button id="attachment-upload-button" type="submit" disabled>上傳至家中伺服器</button>
+        </form>
+      </section>
       <section id="contact-section" class="sheet-section">
         <div class="panel-heading"><div><p class="eyebrow">互動歷程</p><h3>聯絡／拜訪紀錄</h3></div></div>
         <div id="contact-results" class="timeline"></div>
@@ -220,7 +377,115 @@
     </div>
   </section>
 
+  <section id="photo-viewer" class="photo-viewer hidden" role="dialog" aria-modal="true" aria-labelledby="photo-viewer-title">
+    <header class="photo-viewer-header">
+      <div><p class="eyebrow">照片預覽</p><h2 id="photo-viewer-title">照片</h2></div>
+      <button id="photo-viewer-close" type="button" class="icon-button" aria-label="關閉照片">×</button>
+    </header>
+    <div class="photo-viewer-stage">
+      <button id="photo-viewer-previous" type="button" class="photo-nav" aria-label="上一張">‹</button>
+      <div id="photo-viewer-loading" class="photo-viewer-loading">正在載入照片…</div>
+      <img id="photo-viewer-image" class="hidden" alt="">
+      <button id="photo-viewer-next" type="button" class="photo-nav" aria-label="下一張">›</button>
+    </div>
+    <footer class="photo-viewer-footer">
+      <p id="photo-viewer-caption"></p>
+      <span id="photo-viewer-position"></span>
+      <button id="photo-viewer-download" type="button" class="secondary-button">下載檔案</button>
+    </footer>
+  </section>
+
+  <section id="attachment-edit-dialog" class="modal-layer hidden" role="dialog" aria-modal="true" aria-labelledby="attachment-edit-title">
+    <div class="modal-backdrop" data-close-attachment-edit></div>
+    <form id="attachment-edit-form" class="modal-card stack-form">
+      <header class="modal-header">
+        <div><p class="eyebrow">整理附件</p><h2 id="attachment-edit-title">修改分類與說明</h2></div>
+        <button type="button" class="icon-button" data-close-attachment-edit aria-label="關閉">×</button>
+      </header>
+      <input id="attachment-edit-id" type="hidden">
+      <label for="attachment-edit-category">附件分類
+        <select id="attachment-edit-category">
+          <option value="">未分類</option>
+          <option>現場照片</option>
+          <option>謄本文件</option>
+          <option>聯絡資料</option>
+          <option>合約文件</option>
+          <option>其他</option>
+        </select>
+      </label>
+      <label for="attachment-edit-description">附件說明
+        <textarea id="attachment-edit-description" maxlength="1000" rows="4"></textarea>
+      </label>
+      <button id="attachment-edit-save" type="submit">儲存附件資料</button>
+    </form>
+  </section>
+
+  <section id="field-action-dialog" class="modal-layer hidden" role="dialog" aria-modal="true" aria-labelledby="field-action-title">
+    <div class="modal-backdrop" data-close-field-action></div>
+    <form id="field-action-form" class="modal-card stack-form">
+      <header class="modal-header">
+        <div><p class="eyebrow">外勤紀錄</p><h2 id="field-action-title">更新拜訪狀態</h2></div>
+        <button type="button" class="icon-button" data-close-field-action aria-label="關閉">×</button>
+      </header>
+      <p id="field-action-owner" class="field-action-owner"></p>
+      <input id="field-action-item-id" type="hidden">
+      <input id="field-action-name" type="hidden">
+      <label id="field-action-postpone-row" class="hidden" for="field-action-postponed-until">延後至
+        <input id="field-action-postponed-until" type="datetime-local">
+      </label>
+      <label for="field-action-note">現場備註
+        <textarea id="field-action-note" maxlength="5000" rows="4" placeholder="選填，例如：地主臨時不在、已約下次時間"></textarea>
+      </label>
+      <p id="field-action-location-note" class="field-action-location-note">送出時會嘗試附上目前 GPS；定位失敗仍可正常儲存。</p>
+      <button id="field-action-submit" type="submit">儲存狀態</button>
+    </form>
+  </section>
+
+  <section id="field-plan-dialog" class="modal-layer hidden" role="dialog" aria-modal="true" aria-labelledby="field-plan-heading">
+    <div class="modal-backdrop" data-close-field-plan></div>
+    <div class="modal-card field-plan-card">
+      <header class="modal-header">
+        <div><p class="eyebrow">今日外勤</p><h2 id="field-plan-heading">安排今日行程</h2></div>
+        <button type="button" class="icon-button" data-close-field-plan aria-label="關閉">×</button>
+      </header>
+      <label id="field-plan-title-row" for="field-plan-title">行程名稱
+        <input id="field-plan-title" maxlength="200" value="今日拜訪行程">
+      </label>
+      <section id="field-plan-current-section" class="field-plan-current-section hidden">
+        <div class="field-plan-section-heading">
+          <div><p class="eyebrow">目前名單</p><h3>尚未完成的拜訪順序</h3></div>
+          <div class="field-plan-section-actions">
+            <button id="field-plan-unlock-order" class="secondary-button" type="button" disabled>目前為自動排序</button>
+            <button id="field-plan-order-save" class="secondary-button" type="button">儲存順序</button>
+          </div>
+        </div>
+        <p class="muted">使用上下按鈕調整後儲存，項目會顯示「固定順序」；若要讓優先權及重新規劃再次自動安排，請先恢復自動排序。</p>
+        <div id="field-plan-current" class="field-plan-current"></div>
+      </section>
+      <section id="field-plan-add-section" class="field-plan-add-section">
+        <div class="field-plan-section-heading">
+          <div><p class="eyebrow">新增地主</p><h3>搜尋並批次加入</h3></div>
+        </div>
+        <form id="field-plan-search-form" class="field-plan-search">
+          <label for="field-plan-query">搜尋地主或土地
+            <input id="field-plan-query" type="search" maxlength="200" enterkeyhint="search" placeholder="姓名、地區、地段、地號或地址">
+          </label>
+          <button id="field-plan-search-button" type="submit">搜尋</button>
+        </form>
+        <p id="field-plan-existing" class="muted"></p>
+        <div id="field-plan-results" class="field-plan-results" aria-live="polite">
+          <div class="empty-state">請先輸入條件搜尋要加入的資料。</div>
+        </div>
+        <footer class="field-plan-footer">
+          <span id="field-plan-selected">已選取 0 筆</span>
+          <button id="field-plan-submit" type="button" disabled>加入今日行程</button>
+        </footer>
+      </section>
+    </div>
+  </section>
+
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-  <script src="./app.js" defer></script>
+  <script src="./field-visit.js?v=2" defer></script>
+  <script src="./app.js?v=21" defer></script>
 </body>
 </html>

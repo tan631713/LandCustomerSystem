@@ -7,26 +7,37 @@ import uuid
 from pathlib import Path
 
 from customer_api.data_source_base import _row_dict
+from customer_api.field_visit_permissions import (
+    FieldVisitPermissionDenied,
+    can_delete_field_visit_attachment,
+)
 
 
 class PostgreSQLAttachmentMixin:
     def list_attachments(self, user, record_id):
-        del user
         record_id = int(record_id)
         with self._connect() as conn:
             self._require_ids(conn, "ownerships", [record_id])
             rows = conn.execute(
                 """
-                SELECT id, ownership_id AS customer_id, file_path, description,
+                SELECT id, ownership_id AS customer_id, file_path, description, category,
                        storage_path, original_name, media_type, sha256, size_bytes,
-                       status, version, created_at
+                       status, version, contact_log_id, field_visit_route_item_id,
+                       created_by, created_at
                 FROM attachments
                 WHERE ownership_id = %s
                 ORDER BY id DESC
                 """,
                 (record_id,),
             ).fetchall()
-        return [_row_dict(row) for row in rows]
+        results = []
+        for row in rows:
+            item = _row_dict(row)
+            item["can_delete"] = can_delete_field_visit_attachment(
+                user, item.pop("created_by", None)
+            )
+            results.append(item)
+        return results
 
     def get_attachment(self, user, record_id, attachment_id):
         rows = self.list_attachments(user, record_id)
@@ -44,7 +55,17 @@ class PostgreSQLAttachmentMixin:
             raise KeyError(record_id)
         return int(row["owner_id"]), int(row["land_id"])
 
-    def add_external_attachment(self, user, record_id, file_path, description=""):
+    def add_external_attachment(
+        self,
+        user,
+        record_id,
+        file_path,
+        description="",
+        category="",
+        field_visit_route_item_id=None,
+        idempotency_key=None,
+        request_hash=None,
+    ):
         record_id = int(record_id)
         file_path = str(file_path or "").strip()
         if not file_path:
@@ -53,12 +74,25 @@ class PostgreSQLAttachmentMixin:
         media_type = mimetypes.guess_type(original_name)[0]
         with self._connect() as conn:
             owner_id, land_id = self._record_attachment_links(conn, record_id)
+            if idempotency_key is not None:
+                self._lock_idempotency_key(conn, user.id, idempotency_key)
+                cached = self._cached_idempotency_result(
+                    conn, user.id, idempotency_key, request_hash
+                )
+                if cached is not None:
+                    return int(cached["id"])
+            field_visit_item_id = None
+            if field_visit_route_item_id is not None:
+                field_visit_item_id = self._require_field_visit_item_link(
+                    conn, user, record_id, field_visit_route_item_id
+                )
             row = conn.execute(
                 """
                 INSERT INTO attachments (
                     ownership_id, owner_id, land_id, file_path, storage_path,
-                    original_name, description, media_type, status, created_by
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'external', %s)
+                    original_name, description, category, media_type, status,
+                    field_visit_route_item_id, created_by
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'external', %s, %s)
                 RETURNING id
                 """,
                 (
@@ -69,7 +103,9 @@ class PostgreSQLAttachmentMixin:
                     file_path,
                     original_name,
                     str(description or "").strip() or None,
+                    str(category or "").strip() or None,
                     media_type,
+                    field_visit_item_id,
                     user.id,
                 ),
             ).fetchone()
@@ -87,6 +123,15 @@ class PostgreSQLAttachmentMixin:
                     f"Created external attachment for ownership {record_id}",
                 ),
             )
+            if idempotency_key is not None:
+                self._save_idempotency_result(
+                    conn,
+                    user.id,
+                    idempotency_key,
+                    request_hash,
+                    {"id": attachment_id},
+                    status_code=201,
+                )
         return attachment_id
 
     def import_managed_attachment(
@@ -97,6 +142,10 @@ class PostgreSQLAttachmentMixin:
         original_name,
         description="",
         media_type="",
+        category="",
+        field_visit_route_item_id=None,
+        idempotency_key=None,
+        request_hash=None,
     ):
         record_id = int(record_id)
         source = Path(source_path).expanduser().resolve()
@@ -116,14 +165,27 @@ class PostgreSQLAttachmentMixin:
         try:
             with self._connect() as conn:
                 owner_id, land_id = self._record_attachment_links(conn, record_id)
+                if idempotency_key is not None:
+                    self._lock_idempotency_key(conn, user.id, idempotency_key)
+                    cached = self._cached_idempotency_result(
+                        conn, user.id, idempotency_key, request_hash
+                    )
+                    if cached is not None:
+                        destination.unlink(missing_ok=True)
+                        return int(cached["id"])
+                field_visit_item_id = None
+                if field_visit_route_item_id is not None:
+                    field_visit_item_id = self._require_field_visit_item_link(
+                        conn, user, record_id, field_visit_route_item_id
+                    )
                 row = conn.execute(
                     """
                     INSERT INTO attachments (
                         ownership_id, owner_id, land_id, file_path, storage_path,
-                        original_name, description, media_type, size_bytes,
-                        sha256, status, version, created_by
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                              'managed', 1, %s)
+                        original_name, description, category, media_type, size_bytes,
+                        sha256, status, version, field_visit_route_item_id, created_by
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                              'managed', 1, %s, %s)
                     RETURNING id
                     """,
                     (
@@ -134,10 +196,12 @@ class PostgreSQLAttachmentMixin:
                         str(destination),
                         safe_name,
                         str(description or "").strip() or None,
+                        str(category or "").strip() or None,
                         str(media_type or "").strip()
                         or mimetypes.guess_type(safe_name)[0],
                         destination.stat().st_size,
                         digest.hexdigest(),
+                        field_visit_item_id,
                         user.id,
                     ),
                 ).fetchone()
@@ -155,10 +219,56 @@ class PostgreSQLAttachmentMixin:
                         f"Uploaded attachment for ownership {record_id}",
                     ),
                 )
+                if idempotency_key is not None:
+                    self._save_idempotency_result(
+                        conn,
+                        user.id,
+                        idempotency_key,
+                        request_hash,
+                        {"id": attachment_id},
+                        status_code=201,
+                    )
         except Exception:
             destination.unlink(missing_ok=True)
             raise
         return attachment_id
+
+    def update_attachment_metadata(
+        self, user, record_id, attachment_id, description="", category=""
+    ):
+        record_id = int(record_id)
+        attachment_id = int(attachment_id)
+        with self._connect() as conn:
+            self._require_ids(conn, "ownerships", [record_id])
+            updated = conn.execute(
+                """
+                UPDATE attachments
+                SET description = %s, category = %s, version = version + 1
+                WHERE id = %s AND ownership_id = %s
+                RETURNING id
+                """,
+                (
+                    str(description or "").strip() or None,
+                    str(category or "").strip() or None,
+                    attachment_id,
+                    record_id,
+                ),
+            ).fetchone()
+            if updated:
+                conn.execute(
+                    """
+                    INSERT INTO audit_logs (
+                        user_id, actor, action_type, entity_type, entity_id, summary
+                    ) VALUES (%s, %s, 'api_update_attachment', 'attachment', %s, %s)
+                    """,
+                    (
+                        user.id,
+                        user.username,
+                        attachment_id,
+                        f"Updated attachment metadata for ownership {record_id}",
+                    ),
+                )
+        return bool(updated)
 
     def delete_attachment(self, user, record_id, attachment_id):
         record_id = int(record_id)
@@ -167,6 +277,23 @@ class PostgreSQLAttachmentMixin:
         status = ""
         with self._connect() as conn:
             self._require_ids(conn, "ownerships", [record_id])
+            attachment = conn.execute(
+                """
+                SELECT storage_path, status, created_by
+                FROM attachments
+                WHERE id = %s AND ownership_id = %s
+                FOR UPDATE
+                """,
+                (attachment_id, record_id),
+            ).fetchone()
+            if attachment is None:
+                return False
+            if not can_delete_field_visit_attachment(
+                user, attachment.get("created_by")
+            ):
+                raise FieldVisitPermissionDenied(
+                    "only the uploader or an administrator can delete this attachment"
+                )
             deleted = conn.execute(
                 """
                 DELETE FROM attachments

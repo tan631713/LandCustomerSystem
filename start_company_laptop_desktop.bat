@@ -5,7 +5,6 @@ title 土地資料系統 公司筆電遠端桌面版
 cd /d "%~dp0"
 
 set "DESKTOP_EXE=%~dp0LandCustomerSystem\LandCustomerSystem.exe"
-set "CA_CERT=%~dp0land-customer-local-ca.pem"
 
 echo ============================================================
 echo 土地資料系統 - 公司筆電一鍵客戶端
@@ -16,21 +15,17 @@ if not exist "%DESKTOP_EXE%" (
   echo 找不到完整桌面程式：%DESKTOP_EXE%
   goto FAILED
 )
-if not exist "%CA_CERT%" (
-  echo 找不到家中主機公開 CA：%CA_CERT%
-  goto FAILED
-)
-
 echo [1/2] 檢查 NetBird 安裝、登入與連線...
 call "%~dp0setup_netbird_client.bat" --no-pause
 if errorlevel 1 goto FAILED
 
 set "LAND_CUSTOMER_DESKTOP_BACKEND=postgresql"
-set "LAND_CUSTOMER_API_CA_CERT=%CA_CERT%"
+set "LAND_CUSTOMER_API_CA_CERT="
 
 echo.
 echo [2/2] 正在開啟完整桌面程式...
 echo 第一次啟動時，程式會要求輸入家中伺服器的 NetBird IP。
+echo 程式會從家中主機取得公開 CA，顯示指紋並在你確認後保存。
 echo 公司筆電不會啟動 PostgreSQL，也不會建立第二份正式資料庫。
 "%DESKTOP_EXE%"
 set "EXIT_CODE=%ERRORLEVEL%"

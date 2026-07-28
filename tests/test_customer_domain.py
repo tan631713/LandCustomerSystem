@@ -34,7 +34,8 @@ class CustomerDomainTests(unittest.TestCase):
         self.assertEqual(calculate_ping(record), "15.12")
 
     def test_identity_mask_and_duplicate_signature(self):
-        self.assertEqual(mask_identity_text("A123456789"), "A12******9")
+        self.assertEqual(mask_identity_text("A123456789"), "A123*****9")
+        self.assertEqual(mask_identity_text("A1234"), "A1234")
         first = {
             "district": " 中正區 ",
             "section": "一段",

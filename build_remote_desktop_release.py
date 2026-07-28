@@ -11,8 +11,7 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-from customer_version import APP_VERSION, BUILD_DATE
-from setup_local_https import certificate_paths
+from customer_version import BUILD_DATE, DESKTOP_CLIENT_VERSION
 
 
 ROOT = Path(__file__).resolve().parent
@@ -59,6 +58,7 @@ def audit_client_bundle(bundle: Path) -> None:
     forbidden_names = {
         "customers.db",
         "desktop-client-settings.db",
+        "land-customer-local-ca.pem",
         "postgresql-dsn.bin",
         "land-customer-server-key.pem",
         "landcustomerserver.exe",
@@ -85,27 +85,22 @@ def package_remote_client() -> tuple[Path, Path]:
         if not (ROOT / name).is_file():
             raise FileNotFoundError(f"Missing remote client file: {name}")
 
-    ca_source = certificate_paths().ca_certificate_pem
-    if not ca_source.is_file():
-        raise FileNotFoundError("The public local CA certificate has not been created")
-    ca_bytes = ca_source.read_bytes()
-    if b"BEGIN CERTIFICATE" not in ca_bytes or b"PRIVATE KEY" in ca_bytes:
-        raise RuntimeError("Remote client CA payload is not a public-only PEM certificate")
-
     RELEASES.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    release_name = f"LandCustomerSystem-CompanyLaptopClient-v{APP_VERSION}-{timestamp}"
+    release_name = (
+        "LandCustomerSystem-CompanyLaptopClient-"
+        f"v{DESKTOP_CLIENT_VERSION}-{timestamp}"
+    )
     with tempfile.TemporaryDirectory(prefix="land-customer-client-", dir=RELEASES) as temporary:
         bundle = Path(temporary) / release_name
         copy_desktop_client(bundle / "LandCustomerSystem")
         for name in CLIENT_FILES:
             shutil.copy2(ROOT / name, bundle / name)
-        (bundle / "land-customer-local-ca.pem").write_bytes(ca_bytes)
         (bundle / "LandCustomerSystem" / "company-client-config.json").write_text(
             json.dumps(
                 {
-                    "ca_certificate": "../land-customer-local-ca.pem",
                     "server_ip_user_configurable": True,
+                    "dynamic_server_ca": True,
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -114,7 +109,7 @@ def package_remote_client() -> tuple[Path, Path]:
         )
         manifest = {
             "product": "LandCustomerSystem Company Laptop Client",
-            "version": APP_VERSION,
+            "version": DESKTOP_CLIENT_VERSION,
             "build_date": BUILD_DATE,
             "packaged_at": datetime.now().astimezone().isoformat(),
             "server_ip_user_configurable": True,
@@ -124,7 +119,10 @@ def package_remote_client() -> tuple[Path, Path]:
             "postgresql_credentials_included": False,
             "server_executable_included": False,
             "private_keys_included": False,
-            "public_ca_included": True,
+            "public_ca_included": False,
+            "dynamic_server_ca": True,
+            "certificate_bootstrap_port": 8733,
+            "certificate_requires_user_confirmation": True,
             "direct_exe_click_forces_remote_mode": True,
             "https_health_preflight": True,
             "safe_get_retry": True,

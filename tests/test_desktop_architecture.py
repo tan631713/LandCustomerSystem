@@ -1,7 +1,9 @@
 import unittest
 
 from customer_desktop_data import DesktopDataAccess
+from customer_management_workflows import ManagementWorkflowMixin
 from customer_settings_workflows import SettingsWorkflowMixin
+from PySide6.QtWidgets import QDialog
 
 
 class DesktopDataAccessTests(unittest.TestCase):
@@ -96,3 +98,85 @@ class RemoteSettingsWorkflowTests(unittest.TestCase):
 
         self.assertEqual(window.watchlist_names, {"王大明"})
         self.assertTrue(window.confirm_watchlist_match("王大明"))
+
+
+class DesktopFieldVisitWorkflowTests(unittest.TestCase):
+    def test_remote_desktop_adds_selected_records_to_shared_field_visit(self):
+        captured = {}
+
+        class Repository:
+            def add_customers_to_field_visit(
+                self, record_ids, *, visit_date, title, priority
+            ):
+                captured["request"] = (
+                    list(record_ids),
+                    visit_date,
+                    title,
+                    priority,
+                )
+                return {
+                    "visit_date": visit_date,
+                    "added_count": 2,
+                    "existing_count": 1,
+                    "priority": priority,
+                }
+
+        class ScheduleDialog:
+            def __init__(self, selected_count, parent):
+                captured["selected_count"] = selected_count
+                captured["parent"] = parent
+
+            def exec(self):
+                return QDialog.Accepted
+
+            def selected_date(self):
+                return "2026-07-29"
+
+            def title(self):
+                return "桃園外勤"
+
+            def priority(self):
+                return 100
+
+        class MessageBox:
+            @staticmethod
+            def information(_parent, title, message):
+                captured["information"] = (title, message)
+
+            @staticmethod
+            def warning(*_args):
+                raise AssertionError("不應顯示警告")
+
+            @staticmethod
+            def critical(*_args):
+                raise AssertionError("不應顯示錯誤")
+
+        class Window(ManagementWorkflowMixin):
+            api_mode = True
+
+            def ensure_can_modify(self, _action):
+                return True
+
+            def selected_or_checked_record_ids(self):
+                return [3, 7, 9]
+
+            def active_record_repository(self):
+                return Repository()
+
+            def _app_component(self, name):
+                return {
+                    "FieldVisitScheduleDialog": ScheduleDialog,
+                    "QMessageBox": MessageBox,
+                }[name]
+
+        window = Window()
+        window.add_selected_records_to_field_visit()
+
+        self.assertEqual(captured["selected_count"], 3)
+        self.assertEqual(
+            captured["request"],
+            ([3, 7, 9], "2026-07-29", "桃園外勤", 100),
+        )
+        self.assertIn("已加入 2 筆", captured["information"][1])
+        self.assertIn("優先拜訪", captured["information"][1])
+        self.assertIn("原本已在", captured["information"][1])

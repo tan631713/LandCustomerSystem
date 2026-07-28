@@ -4,6 +4,7 @@ from customer_api.config import ApiSettings
 from customer_api.postgres_attachments import PostgreSQLAttachmentMixin
 from customer_api.postgres_collaboration import PostgreSQLCollaborationMixin
 from customer_api.postgres_desktop_features import PostgreSQLDesktopFeatureMixin
+from customer_api.postgres_field_visits import PostgreSQLFieldVisitMixin
 from customer_api.postgres_projects import PostgreSQLProjectMixin
 from customer_api.postgres_records import PostgreSQLRecordMixin
 from customer_api.postgres_remote_operations import PostgreSQLRemoteOperationMixin
@@ -20,6 +21,7 @@ class PostgreSQLCustomerDataSource(
     PostgreSQLTagMixin,
     PostgreSQLAttachmentMixin,
     PostgreSQLDesktopFeatureMixin,
+    PostgreSQLFieldVisitMixin,
     PostgreSQLRemoteOperationMixin,
 ):
     backend_name = "postgresql"
@@ -31,9 +33,12 @@ class PostgreSQLCustomerDataSource(
                land.land_number, land.area, land.declared_value,
                ownership.numerator, ownership.denominator, ownership.ping,
                ownership.total_declared_value,
-               owner.owner_name, owner.external_id, owner.address,
+               COALESCE(ownership.owner_name_override, owner.owner_name) AS owner_name,
+               COALESCE(ownership.external_id_override, owner.external_id) AS external_id,
+               COALESCE(ownership.address_override, owner.address) AS address,
                ownership.registration_reason, ownership.note,
-               ownership.visit_log, owner.owner_name AS name,
+               ownership.visit_log,
+               COALESCE(ownership.owner_name_override, owner.owner_name) AS name,
                ownership.created_at, ownership.updated_at,
                COALESCE((
                    SELECT STRING_AGG(project.title, '、' ORDER BY project.updated_at DESC, project.id DESC)

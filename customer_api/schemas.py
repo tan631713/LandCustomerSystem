@@ -1,14 +1,22 @@
 """Validated request payloads for the customer API."""
 
-from datetime import date
+from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from customer_domain import (
     calculate_ping,
     calculate_total_declared_value,
     format_number_text,
+    format_ping_text,
     parse_number,
 )
 
@@ -33,6 +41,15 @@ class ContactLogCreate(BaseModel):
     result: str | None = Field(default=None, max_length=200)
     next_follow_up: date | None = None
     note: str | None = Field(default=None, max_length=5000)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+    field_visit_route_item_id: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def validate_coordinate_pair(self):
+        if (self.latitude is None) != (self.longitude is None):
+            raise ValueError("latitude and longitude must be supplied together")
+        return self
 
 
 class FollowUpUpdate(BaseModel):
@@ -234,6 +251,15 @@ class ExternalAttachmentCreate(BaseModel):
 
     file_path: str = Field(min_length=1, max_length=4096)
     description: str = Field(default="", max_length=1000)
+    category: str = Field(default="", max_length=50)
+    field_visit_route_item_id: int | None = Field(default=None, ge=1)
+
+
+class AttachmentMetadataUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    description: str = Field(default="", max_length=1000)
+    category: str = Field(default="", max_length=50)
 
 
 class RecordWrite(BaseModel):
@@ -249,7 +275,7 @@ class RecordWrite(BaseModel):
     denominator: str | None = Field(default=None, max_length=80)
     ping: str | None = Field(default=None, max_length=80)
     total_declared_value: str | None = Field(default=None, max_length=80)
-    owner_name: str = Field(min_length=1, max_length=200)
+    owner_name: str = Field(default="", max_length=200)
     external_id: str | None = Field(default=None, max_length=100)
     address: str | None = Field(default=None, max_length=1000)
     registration_reason: str | None = Field(default=None, max_length=500)
@@ -258,8 +284,10 @@ class RecordWrite(BaseModel):
 
     @field_validator("*", mode="before")
     @classmethod
-    def normalize_text_values(cls, value):
+    def normalize_text_values(cls, value, info: ValidationInfo):
         if value is None:
+            if info.field_name == "owner_name":
+                return ""
             return None
         return str(value).strip()
 
@@ -343,6 +371,15 @@ class RecordChangeLogBatch(BaseModel):
     items: list[RecordChangeLogItem] = Field(min_length=1, max_length=5000)
 
 
+class RecordUpdateWithHistory(BaseModel):
+    """Update one record and persist its field history in one transaction."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    values: RecordWrite
+    change_logs: list[RecordChangeLogItem] = Field(min_length=1, max_length=5000)
+
+
 class CustomFieldWrite(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -400,6 +437,113 @@ class RecordLocationWrite(BaseModel):
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
     source: str = Field(default="manual", min_length=1, max_length=80)
+
+
+class FieldVisitRouteCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    visit_date: date
+    title: str = Field(default="", max_length=200)
+    start_latitude: float | None = Field(default=None, ge=-90, le=90)
+    start_longitude: float | None = Field(default=None, ge=-180, le=180)
+
+    @model_validator(mode="after")
+    def validate_coordinate_pair(self):
+        if (self.start_latitude is None) != (self.start_longitude is None):
+            raise ValueError("start_latitude and start_longitude must be supplied together")
+        return self
+
+
+class FieldVisitItemCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    ownership_id: int = Field(ge=1)
+    priority: int = 0
+    route_order: int | None = Field(default=None, ge=1)
+    is_order_locked: bool = False
+    note: str = Field(default="", max_length=5000)
+
+    @model_validator(mode="after")
+    def validate_locked_order(self):
+        if self.is_order_locked and self.route_order is None:
+            raise ValueError("a locked item requires route_order")
+        return self
+
+
+class FieldVisitItemsCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[FieldVisitItemCreate] = Field(min_length=1, max_length=1000)
+
+    @field_validator("items")
+    @classmethod
+    def reject_duplicate_ownerships(cls, items):
+        ownership_ids = [item.ownership_id for item in items]
+        if len(ownership_ids) != len(set(ownership_ids)):
+            raise ValueError("items contain duplicate ownership_id values")
+        return items
+
+
+class FieldVisitItemUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    priority: int | None = Field(default=None, ge=0, le=100)
+    is_order_locked: bool | None = None
+
+    @model_validator(mode="after")
+    def require_change(self):
+        if self.priority is None and self.is_order_locked is None:
+            raise ValueError("at least one field-visit item setting is required")
+        return self
+
+
+class FieldVisitStatusUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+    note: str = Field(default="", max_length=5000)
+    postponed_until: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_coordinate_pair(self):
+        if (self.latitude is None) != (self.longitude is None):
+            raise ValueError("latitude and longitude must be supplied together")
+        return self
+
+
+class FieldVisitOptimizePreview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    current_latitude: float = Field(ge=-90, le=90)
+    current_longitude: float = Field(ge=-180, le=180)
+    keep_current_item_first: bool = True
+    current_item_id: int | None = Field(default=None, ge=1)
+
+
+class FieldVisitOptimizeApply(FieldVisitOptimizePreview):
+    plan_token: str = Field(min_length=64, max_length=64)
+
+
+class FieldVisitManualOrderItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    item_id: int = Field(ge=1)
+    is_order_locked: bool = True
+
+
+class FieldVisitManualOrder(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[FieldVisitManualOrderItem] = Field(min_length=1, max_length=1000)
+
+    @field_validator("items")
+    @classmethod
+    def reject_duplicate_items(cls, items):
+        item_ids = [item.item_id for item in items]
+        if len(item_ids) != len(set(item_ids)):
+            raise ValueError("manual order contains duplicate item ids")
+        return items
 
 
 class DuplicateReviewWrite(BaseModel):

@@ -61,6 +61,16 @@ def _build_record_menu(self):
     uncheck_selected_context_action.triggered.connect(self.uncheck_selected_rows)
     self.record_menu.addAction(uncheck_selected_context_action)
     self.record_menu.addSeparator()
+    context_field_visit_action = QAction("加入選取／勾選資料到今日行程", self)
+    context_field_visit_action.triggered.connect(
+        self.add_selected_records_to_field_visit
+    )
+    context_field_visit_action.setEnabled(bool(getattr(self, "api_mode", False)))
+    context_field_visit_action.setStatusTip(
+        "需使用公司筆電客戶端連線網路伺服器"
+    )
+    self.record_menu.addAction(context_field_visit_action)
+    self.record_menu.addSeparator()
     context_case_manage_action = QAction("案件管理", self)
     context_case_manage_action.triggered.connect(self.manage_cases)
     self.record_menu.addAction(context_case_manage_action)
@@ -100,6 +110,7 @@ def _build_record_menu(self):
         context_contact_action,
         context_follow_up_action,
         context_attachment_action,
+        context_field_visit_action,
     )
     self.api_preview_supported_context_actions = (
         context_case_manage_action,
@@ -110,6 +121,7 @@ def _build_record_menu(self):
         context_contact_action,
         context_follow_up_action,
         context_attachment_action,
+        context_field_visit_action,
     )
     self.api_preview_unavailable_context_actions = ()
 
@@ -230,6 +242,12 @@ def _build_batch_menu(self):
     clear_checked_action = QAction("取消全部勾選", self)
     clear_checked_action.triggered.connect(self.clear_checked_selection)
     batch_menu.addAction(clear_checked_action)
+    batch_menu.addSeparator()
+    field_visit_action = QAction("加入勾選資料到今日行程", self)
+    field_visit_action.triggered.connect(self.add_selected_records_to_field_visit)
+    field_visit_action.setEnabled(bool(getattr(self, "api_mode", False)))
+    field_visit_action.setStatusTip("需使用公司筆電客戶端連線網路伺服器")
+    batch_menu.addAction(field_visit_action)
     batch_menu.addSeparator()
     batch_edit_action = QAction("批次修改勾選資料", self)
     batch_edit_action.triggered.connect(self.batch_edit_checked_records)
@@ -439,6 +457,7 @@ def _configure_api_action_groups(self, actions):
         actions["uncheck_visible_action"],
         actions["invert_visible_action"],
         actions["clear_checked_action"],
+        actions["field_visit_action"],
         actions["batch_edit_action"],
         actions["assign_case_action"],
         actions["remove_case_action"],
@@ -477,6 +496,14 @@ def _configure_api_action_groups(self, actions):
         actions["user_management_action"],
         actions["change_password_action"],
         actions["backup_status_action"],
+        actions["backup_management_action"],
+        actions["backup_now_action"],
+        actions["open_backup_action"],
+        actions["external_backup_action"],
+        actions["restore_backup_action"],
+    )
+    self.api_admin_only_settings_actions = (
+        actions["user_management_action"],
         actions["backup_management_action"],
         actions["backup_now_action"],
         actions["open_backup_action"],

@@ -13,7 +13,12 @@ from PySide6.QtCore import QEventLoop, QThread, QTimer
 from PySide6.QtWidgets import QApplication
 
 import customer_ui_qt as app
-from customer_excel import ExcelExportWorker, ExcelImportWorker, ExcelService
+from customer_excel import (
+    ExcelExportWorker,
+    ExcelImportWorker,
+    ExcelService,
+    cell_to_text,
+)
 
 
 class CustomerExcelTests(unittest.TestCase):
@@ -57,6 +62,43 @@ class CustomerExcelTests(unittest.TestCase):
         self.assertEqual(result["records"][0]["total_declared_value"], "1,000,000")
         self.assertIn("分母不能為 0", result["error_rows"][0]["reason"])
         self.assertEqual(result["error_rows"][0]["data"]["district"], "中正區")
+
+    def test_import_requires_land_identity_but_allows_blank_owner(self):
+        data = {
+            "district": "中壢區",
+            "section": "中路段",
+            "land_number": "1-3",
+            "owner_name": None,
+        }
+
+        self.assertEqual(self.service.validate_import_record(data), [])
+
+        data["owner_name"] = "王小明"
+        data["section"] = " "
+        self.assertEqual(self.service.validate_import_record(data), ["地段不可空白"])
+
+    def test_import_keeps_rows_with_blank_owner(self):
+        path = self.root / "blank-owner.xlsx"
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(["地區", "地段", "地號", "姓名"])
+        sheet.append(["中壢區", "中路段", "1-3", None])
+        sheet.append(["中壢區", "中路段", "1-5", "王小明"])
+        workbook.save(path)
+        workbook.close()
+
+        result = self.service.read_import_file(path)
+
+        self.assertEqual(len(result["records"]), 2)
+        self.assertEqual(result["records"][0]["land_number"], "1-3")
+        self.assertIsNone(result["records"][0]["owner_name"])
+        self.assertEqual(result["records"][1]["land_number"], "1-5")
+        self.assertFalse(result["error_rows"])
+
+    def test_cell_to_text_treats_non_finite_numbers_as_blank(self):
+        self.assertIsNone(cell_to_text(float("nan")))
+        self.assertIsNone(cell_to_text(float("inf")))
+        self.assertEqual(cell_to_text(15.0), "15")
 
     def test_export_writes_requested_columns_and_values(self):
         path = self.root / "export.xlsx"

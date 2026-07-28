@@ -123,6 +123,7 @@ CREATE TABLE IF NOT EXISTS customer_attachments (
     customer_id INTEGER NOT NULL,
     file_path TEXT NOT NULL,
     description TEXT,
+    category TEXT,
     storage_path TEXT,
     original_name TEXT,
     sha256 TEXT,

@@ -1,11 +1,17 @@
 """Application release metadata."""
 
-APP_VERSION = "1.7.3"
-BUILD_DATE = "2026-07-17"
+APP_VERSION = "1.9.17"
+DESKTOP_CLIENT_VERSION = "1.8.6"
+BUILD_DATE = "2026-07-28"
+MOBILE_ASSET_VERSION = 21
 
 
 def version_label():
     return f"v{APP_VERSION}"
+
+
+def desktop_client_version_label():
+    return f"v{DESKTOP_CLIENT_VERSION}"
 
 
 def full_version_text():

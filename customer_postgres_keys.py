@@ -23,7 +23,14 @@ def owner_key_for(record, data_key):
     address = normalize_match_text(record.get("address"))
     if name or address:
         return _keyed_digest(data_key, "owner", name, address)
-    return _keyed_digest(data_key, "legacy-owner", record.get("id"))
+    return _keyed_digest(
+        data_key,
+        "unidentified-owner",
+        record.get("district"),
+        record.get("section"),
+        record.get("land_number"),
+        record.get("registration_order"),
+    )
 
 
 def land_key_for(record):

@@ -21,6 +21,10 @@ from customer_client_connection import (
     normalize_server_api_url,
     server_ip_from_api_url,
 )
+from customer_client_certificate import (
+    ClientCertificateError,
+    ensure_trusted_server_ca,
+)
 from customer_database import (
     AUTO_BACKUP_LIMIT,
     DEFAULT_BACKUP_MAX_COUNT,
@@ -55,6 +59,7 @@ from customer_extra_dialogs import (
     CustomFieldManagementDialog,
     CustomerCustomValuesDialog,
     CustomerTagsDialog,
+    FieldVisitScheduleDialog,
     HealthCheckDialog,
     MergeRecordsDialog,
     TagManagementDialog,
@@ -130,7 +135,11 @@ from customer_selection_workflows import SelectionWorkflowMixin
 from customer_search_presets import SearchPresetMixin, configure_search_presets
 from customer_table_ui import build_customer_table_ui
 from customer_ui_state import UiStateMixin, configure_ui_state
-from customer_version import full_version_text, version_label
+from customer_version import (
+    desktop_client_version_label,
+    full_version_text,
+    version_label,
+)
 from customer_window_ui import DesktopWindowMixin
 from customer_settings_workflows import SettingsWorkflowMixin
 from customer_security import (
@@ -822,6 +831,45 @@ def create_healthy_desktop_api_client(api_url):
     return client
 
 
+def prepare_server_ca_for_api(api_url, parent=None):
+    """Download, confirm, and pin the selected home server's public CA."""
+
+    def confirm(downloaded, existing):
+        changed = existing is not None
+        title = "家中伺服器憑證已變更" if changed else "信任家中伺服器"
+        description = (
+            "偵測到家中伺服器的公開憑證已變更。"
+            if changed
+            else "這是此電腦第一次連線到這台家中伺服器。"
+        )
+        message = (
+            f"{description}\n\n"
+            f"NetBird IP：{downloaded.server_ip}\n"
+            f"SHA-256 指紋：\n{downloaded.display_fingerprint}\n\n"
+            "請確認這是你的家中主機，再選擇「是」保存公開憑證。"
+        )
+        return (
+            QMessageBox.question(
+                parent,
+                title,
+                message,
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            == QMessageBox.Yes
+        )
+
+    try:
+        ca_path = ensure_trusted_server_ca(
+            api_url,
+            confirm_callback=confirm,
+        )
+    except ClientCertificateError as exc:
+        raise DesktopApiError(str(exc)) from exc
+    os.environ["LAND_CUSTOMER_API_CA_CERT"] = str(ca_path)
+    return ca_path
+
+
 def connect_desktop_api(parent=None):
     """Resolve, validate, test, and persist the user-selected server address."""
 
@@ -832,6 +880,7 @@ def connect_desktop_api(parent=None):
         if candidate:
             try:
                 candidate = normalize_server_api_url(candidate)
+                prepare_server_ca_for_api(candidate, parent)
                 client = create_healthy_desktop_api_client(candidate)
             except (DesktopApiError, ValueError) as exc:
                 QMessageBox.warning(
@@ -859,6 +908,7 @@ def change_server_connection(parent):
     if not selected_url:
         return None
     try:
+        prepare_server_ca_for_api(selected_url, parent)
         create_healthy_desktop_api_client(selected_url)
     except (DesktopApiError, ValueError) as exc:
         QMessageBox.critical(
@@ -950,7 +1000,10 @@ class LandApp(
         )
         apply_backup_policy(self.database)
         mode_label = " [PostgreSQL 正式版]" if self.api_mode else ""
-        self.setWindowTitle(f"土地資料系統 {version_label()}{mode_label}")
+        displayed_version = (
+            desktop_client_version_label() if self.api_mode else version_label()
+        )
+        self.setWindowTitle(f"土地資料系統 {displayed_version}{mode_label}")
         self.resize(1280, 760)
         self.setMinimumSize(1080, 660)
         self.setStyleSheet("QMenu { padding: 6px; }")

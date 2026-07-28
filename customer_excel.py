@@ -1,5 +1,6 @@
 """Excel import/export services and Qt workers for non-blocking file processing."""
 
+import math
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal, Slot
@@ -47,6 +48,12 @@ NUMERIC_IMPORT_FIELDS = {
     "denominator": "分母", "ping": "坪數", "total_declared_value": "總現值/元",
 }
 
+REQUIRED_IMPORT_FIELDS = {
+    "district": "地區",
+    "section": "地段",
+    "land_number": "地號",
+}
+
 
 def normalize_header(value):
     text = str(value or "").strip()
@@ -73,8 +80,11 @@ def map_header(value):
 def cell_to_text(value):
     if value is None:
         return None
-    if isinstance(value, float) and value.is_integer():
-        return str(int(value))
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return None
+        if value.is_integer():
+            return str(int(value))
     return str(value).strip()
 
 
@@ -147,11 +157,9 @@ class ExcelService:
                 and denominator_text is None
             ):
                 errors.append("權利範圍格式無法解析")
-        if not any(
-            str(data.get(key) or "").strip()
-            for key in ("district", "section", "land_number", "owner_name")
-        ):
-            errors.append("缺少基本識別欄位")
+        for key, label in REQUIRED_IMPORT_FIELDS.items():
+            if not str(data.get(key) or "").strip():
+                errors.append(f"{label}不可空白")
         return errors
 
     def prepare_import_records(self, sheet, header_row, column_map, merged_values):

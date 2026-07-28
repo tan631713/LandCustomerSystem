@@ -152,7 +152,7 @@ def main(argv=None):
         REPORT_PATH.write_text(
             json.dumps(failure, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        raise SystemExit(f"設定失敗：{exc}") from exc
+        raise SystemExit(f"設定失敗：{exc}") from None
     REPORT_PATH.write_text(
         json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
     )

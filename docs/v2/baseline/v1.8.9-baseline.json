@@ -1,0 +1,925 @@
+{
+  "report_type": "v2_planning_read_only_baseline",
+  "generated_at": "2026-07-22T05:29:52.167336+00:00",
+  "production_data_opened": false,
+  "versions": {
+    "server": "1.8.9",
+    "desktop_client": "1.8.2",
+    "build_date": "2026-07-22",
+    "line_bot": {
+      "root_found": true,
+      "latest_text": "﻿最新可攜伺服器：LandCustomerLineBotServer-v0.30.0-20260721-013728.zip\nSHA-256：572e2871c85d5e5591663a38002bd8c12fb1f7e8d1cbc6aa01e4071a0bda6961",
+      "version": "0.30.0",
+      "manifest": "C:\\Users\\Laptop\\Documents\\Codex\\2026-06-24\\new-chat\\line_bot_test\\releases\\LandCustomerLineBotServer-v0.30.0-20260721-013728\\release-manifest.json",
+      "api_v1_references": [
+        "/api/v1/auth/login",
+        "/api/v1/follow-ups",
+        "/api/v1/records",
+        "/api/v1/records/{record_id}/contact-logs"
+      ]
+    }
+  },
+  "schemas": {
+    "postgresql": {
+      "schema_version": 7,
+      "tables": [
+        "app_settings",
+        "attachments",
+        "audit_logs",
+        "contact_logs",
+        "custom_fields",
+        "duplicate_reviews",
+        "follow_up_reminders",
+        "import_batches",
+        "import_data",
+        "import_profiles",
+        "lands",
+        "notifications",
+        "operation_logs",
+        "owners",
+        "ownership_custom_values",
+        "ownership_locations",
+        "ownership_tags",
+        "ownerships",
+        "project_lands",
+        "project_owners",
+        "project_ownerships",
+        "project_tasks",
+        "projects",
+        "record_change_logs",
+        "recycle_bin",
+        "report_templates",
+        "schema_migrations",
+        "server_backup_targets",
+        "tags",
+        "text_templates",
+        "undo_operations",
+        "users",
+        "watchlist"
+      ]
+    },
+    "sqlite_compatibility": {
+      "schema_version": 8
+    }
+  },
+  "api": {
+    "method_route_count": 97,
+    "operational_route_count": 94,
+    "api_v1_route_count": 92,
+    "routes": [
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/",
+        "name": "root",
+        "api_family": "system"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "path": "/api/v1/attachments/verify",
+        "name": "verify_attachments",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "path": "/api/v1/auth/login",
+        "name": "login",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "path": "/api/v1/auth/logout",
+        "name": "logout",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/api/v1/auth/me",
+        "name": "me",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "PUT"
+        ],
+        "path": "/api/v1/auth/password",
+        "name": "change_password",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/api/v1/custom-fields",
+        "name": "custom_fields",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "path": "/api/v1/custom-fields",
+        "name": "create_custom_field",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "DELETE"
+        ],
+        "path": "/api/v1/custom-fields/{field_id}",
+        "name": "delete_custom_field",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "PUT"
+        ],
+        "path": "/api/v1/custom-fields/{field_id}",
+        "name": "update_custom_field",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "PUT"
+        ],
+        "path": "/api/v1/custom-values/assignments",
+        "name": "update_custom_value_assignments",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/api/v1/duplicate-reviews",
+        "name": "duplicate_reviews",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "path": "/api/v1/duplicate-reviews",
+        "name": "create_duplicate_review",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/api/v1/follow-ups",
+        "name": "follow_ups",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "path": "/api/v1/imports/records",
+        "name": "import_records",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/api/v1/lands",
+        "name": "lands",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "path": "/api/v1/maintenance/encrypt-existing-records",
+        "name": "encrypt_existing_records",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/api/v1/notifications",
+        "name": "notifications",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "PUT"
+        ],
+        "path": "/api/v1/notifications",
+        "name": "mark_notifications",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "path": "/api/v1/notifications/refresh",
+        "name": "refresh_notifications",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/api/v1/operation-logs",
+        "name": "operation_logs",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "path": "/api/v1/operation-logs",
+        "name": "create_operation_log",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/api/v1/owners",
+        "name": "owners",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/api/v1/project-tasks",
+        "name": "project_tasks",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "path": "/api/v1/project-tasks",
+        "name": "create_project_task",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "DELETE"
+        ],
+        "path": "/api/v1/project-tasks/{task_id}",
+        "name": "delete_project_task",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "PUT"
+        ],
+        "path": "/api/v1/project-tasks/{task_id}",
+        "name": "update_project_task",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/api/v1/projects",
+        "name": "projects",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "path": "/api/v1/projects",
+        "name": "create_project",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "DELETE"
+        ],
+        "path": "/api/v1/projects/{project_id}",
+        "name": "delete_project",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "PUT"
+        ],
+        "path": "/api/v1/projects/{project_id}",
+        "name": "update_project",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "PUT"
+        ],
+        "path": "/api/v1/projects/{project_id}/archive",
+        "name": "archive_project",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "PUT"
+        ],
+        "path": "/api/v1/projects/{project_id}/records",
+        "name": "update_project_records",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "path": "/api/v1/record-change-logs",
+        "name": "create_record_change_logs",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/api/v1/record-locations",
+        "name": "record_locations",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/api/v1/records",
+        "name": "records",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "path": "/api/v1/records",
+        "name": "create_record",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "path": "/api/v1/records/merge",
+        "name": "merge_records",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "DELETE"
+        ],
+        "path": "/api/v1/records/{record_id}",
+        "name": "delete_record",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/api/v1/records/{record_id}",
+        "name": "record_detail",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "PUT"
+        ],
+        "path": "/api/v1/records/{record_id}",
+        "name": "replace_record",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/api/v1/records/{record_id}/attachments",
+        "name": "record_attachments",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "path": "/api/v1/records/{record_id}/attachments",
+        "name": "create_external_attachment",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "path": "/api/v1/records/{record_id}/attachments/upload",
+        "name": "upload_managed_attachment",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "DELETE"
+        ],
+        "path": "/api/v1/records/{record_id}/attachments/{attachment_id}",
+        "name": "delete_attachment",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "PATCH"
+        ],
+        "path": "/api/v1/records/{record_id}/attachments/{attachment_id}",
+        "name": "update_attachment_metadata",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/api/v1/records/{record_id}/attachments/{attachment_id}/content",
+        "name": "attachment_content",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/api/v1/records/{record_id}/attachments/{attachment_id}/thumbnail",
+        "name": "attachment_thumbnail",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/api/v1/records/{record_id}/change-logs",
+        "name": "record_change_logs",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/api/v1/records/{record_id}/contact-logs",
+        "name": "contact_logs",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "path": "/api/v1/records/{record_id}/contact-logs",
+        "name": "create_contact_log",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "DELETE"
+        ],
+        "path": "/api/v1/records/{record_id}/contact-logs/{log_id}",
+        "name": "delete_contact_log",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/api/v1/records/{record_id}/custom-values",
+        "name": "record_custom_values",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "PUT"
+        ],
+        "path": "/api/v1/records/{record_id}/custom-values",
+        "name": "update_record_custom_values",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "DELETE"
+        ],
+        "path": "/api/v1/records/{record_id}/follow-up",
+        "name": "delete_follow_up",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/api/v1/records/{record_id}/follow-up",
+        "name": "get_follow_up",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "PUT"
+        ],
+        "path": "/api/v1/records/{record_id}/follow-up",
+        "name": "update_follow_up",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "PUT"
+        ],
+        "path": "/api/v1/records/{record_id}/location",
+        "name": "update_record_location",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/api/v1/records/{record_id}/tags",
+        "name": "record_tags",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "PUT"
+        ],
+        "path": "/api/v1/records/{record_id}/tags",
+        "name": "update_record_tags",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "PUT"
+        ],
+        "path": "/api/v1/records/{record_id}/with-history",
+        "name": "replace_record_with_history",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/api/v1/recycle-bin",
+        "name": "recycle_bin",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "path": "/api/v1/recycle-bin/purge",
+        "name": "purge_recycle_bin",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "path": "/api/v1/recycle-bin/restore",
+        "name": "restore_recycle_bin",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/api/v1/server-backup-targets",
+        "name": "list_server_backup_targets",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "path": "/api/v1/server-backup-targets",
+        "name": "create_server_backup_target",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "path": "/api/v1/server-backup-targets/sync",
+        "name": "sync_server_backup_targets",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "DELETE"
+        ],
+        "path": "/api/v1/server-backup-targets/{target_id}",
+        "name": "delete_server_backup_target",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "PUT"
+        ],
+        "path": "/api/v1/server-backup-targets/{target_id}",
+        "name": "update_server_backup_target",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/api/v1/server-backups",
+        "name": "list_server_backups",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "path": "/api/v1/server-backups",
+        "name": "create_server_backup",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "path": "/api/v1/server-backups/maintenance",
+        "name": "maintain_server_backups",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "path": "/api/v1/server-backups/restore",
+        "name": "restore_server_backup",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/api/v1/server-backups/status",
+        "name": "server_backup_status",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/api/v1/tags",
+        "name": "tags",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "path": "/api/v1/tags",
+        "name": "create_tag",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "PUT"
+        ],
+        "path": "/api/v1/tags/assignments",
+        "name": "update_tag_assignments",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "DELETE"
+        ],
+        "path": "/api/v1/tags/{tag_id}",
+        "name": "delete_tag",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "PUT"
+        ],
+        "path": "/api/v1/tags/{tag_id}",
+        "name": "update_tag",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/api/v1/text-templates",
+        "name": "text_templates",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "path": "/api/v1/text-templates",
+        "name": "create_text_template",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "DELETE"
+        ],
+        "path": "/api/v1/text-templates/{template_id}",
+        "name": "delete_text_template",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "PUT"
+        ],
+        "path": "/api/v1/text-templates/{template_id}",
+        "name": "update_text_template",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/api/v1/undo-operations",
+        "name": "undo_operations",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "path": "/api/v1/undo-operations/insert",
+        "name": "record_insert_undo",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "path": "/api/v1/undo-operations/snapshot",
+        "name": "record_undo",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "path": "/api/v1/undo-operations/{operation_id}/apply",
+        "name": "apply_undo",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/api/v1/users",
+        "name": "users",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "POST"
+        ],
+        "path": "/api/v1/users",
+        "name": "create_user",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "PUT"
+        ],
+        "path": "/api/v1/users/{user_id}",
+        "name": "update_user",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "PUT"
+        ],
+        "path": "/api/v1/users/{user_id}/password",
+        "name": "reset_user_password",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/api/v1/watchlist",
+        "name": "watchlist",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "PUT"
+        ],
+        "path": "/api/v1/watchlist",
+        "name": "update_watchlist",
+        "api_family": "v1"
+      },
+      {
+        "methods": [
+          "GET",
+          "HEAD"
+        ],
+        "path": "/docs",
+        "name": "swagger_ui_html",
+        "api_family": "system"
+      },
+      {
+        "methods": [
+          "GET",
+          "HEAD"
+        ],
+        "path": "/docs/oauth2-redirect",
+        "name": "swagger_ui_redirect",
+        "api_family": "system"
+      },
+      {
+        "methods": [
+          "GET"
+        ],
+        "path": "/health",
+        "name": "health",
+        "api_family": "system"
+      },
+      {
+        "methods": [
+          "GET",
+          "HEAD"
+        ],
+        "path": "/openapi.json",
+        "name": "openapi",
+        "api_family": "system"
+      }
+    ]
+  },
+  "client_endpoint_references": {
+    "desktop": [
+      "/api/v1/attachments/verify",
+      "/api/v1/auth/login",
+      "/api/v1/auth/logout",
+      "/api/v1/auth/password",
+      "/api/v1/custom-fields",
+      "/api/v1/custom-fields/{int",
+      "/api/v1/custom-values/assignments",
+      "/api/v1/duplicate-reviews",
+      "/api/v1/follow-ups",
+      "/api/v1/imports/records",
+      "/api/v1/maintenance/encrypt-existing-records",
+      "/api/v1/notifications",
+      "/api/v1/notifications/refresh",
+      "/api/v1/operation-logs",
+      "/api/v1/project-tasks",
+      "/api/v1/project-tasks/{int",
+      "/api/v1/projects",
+      "/api/v1/projects/{int",
+      "/api/v1/record-change-logs",
+      "/api/v1/record-locations",
+      "/api/v1/records",
+      "/api/v1/records/merge",
+      "/api/v1/records/{int",
+      "/api/v1/recycle-bin",
+      "/api/v1/recycle-bin/purge",
+      "/api/v1/recycle-bin/restore",
+      "/api/v1/server-backup-targets",
+      "/api/v1/server-backup-targets/sync",
+      "/api/v1/server-backup-targets/{int",
+      "/api/v1/server-backups",
+      "/api/v1/server-backups/maintenance",
+      "/api/v1/server-backups/restore",
+      "/api/v1/server-backups/status",
+      "/api/v1/tags",
+      "/api/v1/tags/assignments",
+      "/api/v1/tags/{int",
+      "/api/v1/text-templates",
+      "/api/v1/text-templates/{int",
+      "/api/v1/undo-operations",
+      "/api/v1/undo-operations/insert",
+      "/api/v1/undo-operations/snapshot",
+      "/api/v1/undo-operations/{int",
+      "/api/v1/users",
+      "/api/v1/users/{int",
+      "/api/v1/watchlist"
+    ],
+    "mobile_pwa": [
+      "/api/v1/auth/login",
+      "/api/v1/auth/logout",
+      "/api/v1/auth/me",
+      "/api/v1/follow-ups",
+      "/api/v1/lands",
+      "/api/v1/owners",
+      "/api/v1/records",
+      "/api/v1/records/${state",
+      "/api/v1/records/{id}",
+      "/api/v1/records/{id}/attachments",
+      "/api/v1/records/{id}/attachments/${item",
+      "/api/v1/records/{id}/attachments/upload",
+      "/api/v1/records/{id}/attachments/{id}",
+      "/api/v1/records/{id}/attachments/{id}/content",
+      "/api/v1/records/{id}/contact-logs",
+      "/api/v1/records/{id}/follow-up"
+    ]
+  },
+  "file_hashes": {
+    "customer_version.py": "f5ac26e53ef637f55b6c9fbb8599ad618bda55fb97d3858abe79339685ff79ad",
+    "customer_api/app.py": "d2c1f74f1cf8b275a4e1b23a150591e984263ccfffbcf783d3a64b33518c58e1",
+    "postgres/schema.sql": "f0fe81103eb445b294db65af008633ecc35d1f7d8b69dd8d218cbbc9b71c7a78",
+    "customer_desktop_api.py": "2fca0d6a23f2f14df17b0c56ab39af9428ee813bc299a4e7121b9a2a9781926f",
+    "customer_mobile_web/app.js": "11c51365502b72145077d9ced88143c801c6a505921e044045e79da701f05ccd"
+  }
+}

@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableExtensions
-title Land Customer System - Home Server
+title Land Customer System v1.9.4 - Home Server
 cd /d "%~dp0"
 
 for %%I in ("%~dp0.") do set "PACKAGE_ROOT=%%~fI"

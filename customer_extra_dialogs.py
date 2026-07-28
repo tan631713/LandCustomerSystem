@@ -2,13 +2,14 @@
 
 from datetime import datetime
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QDate, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QColorDialog,
     QComboBox,
+    QDateEdit,
     QFileDialog,
     QGridLayout,
     QHBoxLayout,
@@ -212,6 +213,55 @@ class CaseSelectDialog(QDialog):
 
     def selected_case_id(self):
         return self.case_combo.currentData()
+
+
+class FieldVisitScheduleDialog(QDialog):
+    def __init__(self, selected_count=0, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("加入今日行程")
+        self.resize(460, 220)
+
+        self.date_edit = QDateEdit(QDate.currentDate())
+        self.date_edit.setCalendarPopup(True)
+        self.date_edit.setDisplayFormat("yyyy-MM-dd")
+        self.title_edit = QLineEdit("今日拜訪行程")
+        self.title_edit.setMaxLength(200)
+        self.priority_checkbox = QCheckBox("將這次新增的地主設為優先拜訪")
+        self.priority_checkbox.setToolTip(
+            "重新規劃路線時，優先地主會排在一般地主之前；同組內仍依距離安排。"
+        )
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(f"將 {int(selected_count)} 筆已選資料加入拜訪行程："))
+        form = QGridLayout()
+        form.addWidget(QLabel("拜訪日期"), 0, 0)
+        form.addWidget(self.date_edit, 0, 1)
+        form.addWidget(QLabel("行程名稱"), 1, 0)
+        form.addWidget(self.title_edit, 1, 1)
+        layout.addLayout(form)
+        layout.addWidget(self.priority_checkbox)
+
+        hint = QLabel("同一天已存在行程時，資料會加入原有行程，不會另建重複行程。")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        buttons = QHBoxLayout()
+        cancel_button = QPushButton("取消")
+        cancel_button.clicked.connect(self.reject)
+        submit_button = QPushButton("加入行程")
+        submit_button.clicked.connect(self.accept)
+        buttons.addStretch(1)
+        buttons.addWidget(cancel_button)
+        buttons.addWidget(submit_button)
+        layout.addLayout(buttons)
+
+    def selected_date(self):
+        return self.date_edit.date().toString("yyyy-MM-dd")
+
+    def title(self):
+        return self.title_edit.text().strip() or "今日拜訪行程"
+
+    def priority(self):
+        return 100 if self.priority_checkbox.isChecked() else 0
 
 
 class TagManagementDialog(QDialog):
@@ -448,14 +498,17 @@ class BatchCustomerTagsDialog(QDialog):
 
 
 class AttachmentDialog(QDialog):
-    def __init__(self, attachments, record_label="", parent=None):
+    def __init__(
+        self, attachments, record_label="", parent=None, *, open_attachment=None
+    ):
         super().__init__(parent)
         self.attachments = [dict(row) for row in attachments]
+        self.open_attachment = open_attachment
         self.action = None
         self.setWindowTitle("附件管理")
         self.resize(780, 470)
         self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["ID", "檔案路徑", "說明", "保存方式", "建立時間"])
+        self.table.setHorizontalHeaderLabels(["ID", "檔案／路徑", "說明", "保存方式", "建立時間"])
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setSelectionMode(QTableWidget.SingleSelection)
@@ -504,12 +557,17 @@ class AttachmentDialog(QDialog):
     def load_rows(self):
         self.table.setRowCount(len(self.attachments))
         for row_number, attachment in enumerate(self.attachments):
+            display_path = (
+                attachment.get("original_name")
+                if attachment.get("status") != "external"
+                else attachment.get("file_path")
+            ) or attachment.get("file_path")
             _set_row_values(
                 self.table,
                 row_number,
                 [
                     attachment.get("id"),
-                    attachment.get("file_path"),
+                    display_path,
                     attachment.get("description"),
                     "外部連結"
                     if attachment.get("status") == "external"
@@ -524,9 +582,21 @@ class AttachmentDialog(QDialog):
         return None if row_number < 0 else _row_id(self.table, row_number)
 
     def selected_file_path(self):
-        row_number = self.table.currentRow()
-        item = self.table.item(row_number, 1) if row_number >= 0 else None
-        return "" if item is None else item.text()
+        attachment = self.selected_attachment()
+        return "" if attachment is None else str(attachment.get("file_path") or "")
+
+    def selected_attachment(self):
+        attachment_id = self.selected_attachment_id()
+        if attachment_id is None:
+            return None
+        return next(
+            (
+                attachment
+                for attachment in self.attachments
+                if int(attachment.get("id")) == int(attachment_id)
+            ),
+            None,
+        )
 
     def browse_file(self):
         file_path, _selected_filter = QFileDialog.getOpenFileName(self, "選取附件")
@@ -556,9 +626,16 @@ class AttachmentDialog(QDialog):
         self.accept()
 
     def open_selected_file(self, *_args):
-        file_path = self.selected_file_path()
-        if not file_path:
+        attachment = self.selected_attachment()
+        if attachment is None:
             QMessageBox.information(self, "未選取附件", "請先選取要開啟的附件。")
+            return
+        if self.open_attachment is not None:
+            self.open_attachment(dict(attachment))
+            return
+        file_path = str(attachment.get("file_path") or "")
+        if not file_path:
+            QMessageBox.warning(self, "附件資料不完整", "這個附件沒有可開啟的路徑。")
             return
         open_path_or_web_url(file_path, self, item_label="附件")
 
