@@ -29,23 +29,29 @@ def apply_company_client_config():
     ) else ""
 
     bundle_directory = runtime_directory.parent.resolve()
-    ca_path = (runtime_directory / str(payload.get("ca_certificate") or "")).resolve()
-    try:
-        ca_path.relative_to(bundle_directory)
-    except ValueError as exc:
-        raise ValueError("Company client CA path escaped the bundle") from exc
-    if not ca_path.is_file():
-        raise ValueError(f"Company client CA certificate does not exist: {ca_path}")
+    configured_ca = str(payload.get("ca_certificate") or "").strip()
+    ca_path = None
+    if configured_ca:
+        ca_path = (runtime_directory / configured_ca).resolve()
+        try:
+            ca_path.relative_to(bundle_directory)
+        except ValueError as exc:
+            raise ValueError("Company client CA path escaped the bundle") from exc
+        if not ca_path.is_file():
+            raise ValueError(f"Company client CA certificate does not exist: {ca_path}")
 
     os.environ["LAND_CUSTOMER_DESKTOP_BACKEND"] = "postgresql"
     if api_url:
         os.environ["LAND_CUSTOMER_API_URL"] = api_url
     else:
         os.environ.pop("LAND_CUSTOMER_API_URL", None)
-    os.environ["LAND_CUSTOMER_API_CA_CERT"] = str(ca_path)
+    if ca_path is not None:
+        os.environ["LAND_CUSTOMER_API_CA_CERT"] = str(ca_path)
+    else:
+        os.environ.pop("LAND_CUSTOMER_API_CA_CERT", None)
     return {
         "api_url": api_url,
-        "ca_certificate": str(ca_path),
+        "ca_certificate": str(ca_path or ""),
         "requires_server_ip_input": not bool(api_url),
     }
 

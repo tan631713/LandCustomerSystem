@@ -1,7 +1,7 @@
 """Versioned, idempotent SQLite schema migrations."""
 
 
-LATEST_SCHEMA_VERSION = 7
+LATEST_SCHEMA_VERSION = 9
 
 
 def get_columns(conn, table_name):
@@ -19,6 +19,8 @@ class MigrationRunner:
             (5, "case tags attachments custom fields templates contact logs", self._migration_005_management_tables),
             (6, "productivity safety accounts workflow reports maps", self._migration_006_productivity_tables),
             (7, "normalize legacy contact logs", self._migration_007_normalize_contact_logs),
+            (8, "mobile attachment categories", self._migration_008_attachment_categories),
+            (9, "attachment uploader ownership", self._migration_009_attachment_uploader),
         )
 
     @staticmethod
@@ -268,6 +270,7 @@ class MigrationRunner:
                 customer_id INTEGER NOT NULL,
                 file_path TEXT NOT NULL,
                 description TEXT,
+                created_by INTEGER,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(customer_id) REFERENCES customers(id) ON DELETE CASCADE
             )
@@ -486,6 +489,16 @@ class MigrationRunner:
         )
 
     @staticmethod
+    def _migration_008_attachment_categories(conn):
+        if "category" not in get_columns(conn, "customer_attachments"):
+            conn.execute("ALTER TABLE customer_attachments ADD COLUMN category TEXT")
+
+    @staticmethod
+    def _migration_009_attachment_uploader(conn):
+        if "created_by" not in get_columns(conn, "customer_attachments"):
+            conn.execute("ALTER TABLE customer_attachments ADD COLUMN created_by INTEGER")
+
+    @staticmethod
     def _migration_006_productivity_tables(conn):
         """Add the v1.1 safety, collaboration, workflow, and reporting layer."""
 
@@ -514,6 +527,7 @@ class MigrationRunner:
         add_column("customer_attachments", "size_bytes", "INTEGER")
         add_column("customer_attachments", "status", "TEXT NOT NULL DEFAULT 'external'")
         add_column("customer_attachments", "version", "INTEGER NOT NULL DEFAULT 1")
+        add_column("customer_attachments", "created_by", "INTEGER")
 
         conn.executescript(
             """

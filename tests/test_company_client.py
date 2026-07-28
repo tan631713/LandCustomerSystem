@@ -37,11 +37,13 @@ class CompanyClientConfigurationTests(unittest.TestCase):
                 "create_healthy_desktop_api_client",
                 return_value=healthy_client,
             ) as health_check,
+            patch.object(desktop_app, "prepare_server_ca_for_api") as prepare_ca,
             patch.object(desktop_app, "set_setting") as save_setting,
             patch.dict(os.environ, {}, clear=False),
         ):
             result = desktop_app.connect_desktop_api()
         self.assertIs(result, healthy_client)
+        prepare_ca.assert_called_once_with("https://100.101.102.103:8732", None)
         health_check.assert_called_once_with("https://100.101.102.103:8732")
         save_setting.assert_called_once_with(
             desktop_app.SERVER_API_URL_SETTING_KEY,
@@ -128,6 +130,31 @@ class CompanyClientConfigurationTests(unittest.TestCase):
                 self.assertTrue(result["requires_server_ip_input"])
                 self.assertEqual(Path(result["ca_certificate"]), ca_path)
 
+    def test_company_bundle_can_bootstrap_ca_from_selected_home_server(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = Path(directory)
+            runtime = bundle / "LandCustomerSystem"
+            runtime.mkdir()
+            (runtime / "company-client-config.json").write_text(
+                json.dumps(
+                    {
+                        "server_ip_user_configurable": True,
+                        "dynamic_server_ca": True,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with (
+                patch.object(customer_ui, "get_runtime_directory", return_value=runtime),
+                patch.dict(os.environ, {}, clear=True),
+            ):
+                result = customer_ui.apply_company_client_config()
+                self.assertEqual(result["ca_certificate"], "")
+                self.assertNotIn("LAND_CUSTOMER_API_CA_CERT", os.environ)
+                self.assertEqual(
+                    os.environ["LAND_CUSTOMER_DESKTOP_BACKEND"], "postgresql"
+                )
+
     def test_company_bundle_rejects_plain_http(self):
         with tempfile.TemporaryDirectory() as directory:
             runtime = Path(directory) / "LandCustomerSystem"
@@ -205,8 +232,10 @@ class CompanyClientConfigurationTests(unittest.TestCase):
         )
         self.assertIn("setup_netbird_client.bat", launcher)
         self.assertIn("LAND_CUSTOMER_DESKTOP_BACKEND=postgresql", launcher)
-        self.assertIn("LAND_CUSTOMER_API_CA_CERT=%CA_CERT%", launcher)
+        self.assertIn("LAND_CUSTOMER_API_CA_CERT=", launcher)
+        self.assertIn("取得公開 CA", launcher)
         self.assertIn("程式會要求輸入家中伺服器的 NetBird IP", launcher)
+        self.assertNotIn("land-customer-local-ca.pem", launcher)
         self.assertNotIn("home_server_ip.txt", launcher)
         self.assertNotIn("LAND_CUSTOMER_API_URL=", launcher)
         self.assertNotIn("company_client_preflight.ps1", launcher)

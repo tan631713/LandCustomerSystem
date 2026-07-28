@@ -240,10 +240,13 @@ def register_remote_operation_routes(
     def server_backup_status(
         session: Annotated[ApiSession, Depends(current_session)],
     ):
-        _admin(session.user)
         from backup_postgresql import backup_status
 
-        return {**backup_status(), "database": source.health()}
+        report = {**backup_status(), "database": source.health()}
+        if session.user.role != "admin":
+            report["backup_directory"] = "僅管理員可查看"
+            report["latest_backup"] = ""
+        return report
 
     @app.get("/api/v1/server-backups")
     def list_server_backups(

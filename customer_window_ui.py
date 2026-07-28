@@ -140,6 +140,10 @@ class DesktopWindowMixin:
         for action in getattr(self, "api_unavailable_settings_actions", ()):
             action.setEnabled(False)
             action.setStatusTip(unavailable_text)
+        if self.current_user.get("role") != "admin":
+            for action in getattr(self, "api_admin_only_settings_actions", ()):
+                action.setEnabled(False)
+                action.setStatusTip("此功能僅限管理員使用。")
         for action in getattr(self, "api_preview_unavailable_context_actions", ()):
             action.setEnabled(False)
             action.setStatusTip(unavailable_text)

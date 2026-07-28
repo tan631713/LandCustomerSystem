@@ -380,15 +380,7 @@ class RecordWorkflowMixin:
                 old_plain_data = self.get_plain_record_data(old_row)
         data = encrypt_record(self.fernet, plain_data)
 
-        try:
-            self.selected_record_id = record_repository.save_customer(
-                data,
-                self.selected_record_id,
-            )
-        except (sqlite3.IntegrityError, DesktopApiError) as exc:
-            self._app_component("QMessageBox").critical(self, "儲存失敗", database_save_failure_message(exc))
-            return
-
+        change_logs = []
         if not is_new_record and old_plain_data is not None:
             change_logs = self.build_record_change_logs(
                 self.selected_record_id,
@@ -396,8 +388,29 @@ class RecordWorkflowMixin:
                 plain_data,
                 "修改資料",
             )
-            if change_logs:
-                record_repository.add_record_change_logs(change_logs)
+
+        try:
+            save_with_history = getattr(
+                record_repository, "save_customer_with_change_logs", None
+            )
+            if change_logs and callable(save_with_history):
+                self.selected_record_id = save_with_history(
+                    data,
+                    self.selected_record_id,
+                    change_logs,
+                )
+                change_logs = []
+            else:
+                self.selected_record_id = record_repository.save_customer(
+                    data,
+                    self.selected_record_id,
+                )
+        except (sqlite3.IntegrityError, DesktopApiError) as exc:
+            self._app_component("QMessageBox").critical(self, "儲存失敗", database_save_failure_message(exc))
+            return
+
+        if change_logs:
+            record_repository.add_record_change_logs(change_logs)
 
         self.refresh_records(self.selected_record_id)
         action_type = "新增資料" if is_new_record else "修改資料"

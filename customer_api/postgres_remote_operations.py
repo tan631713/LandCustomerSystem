@@ -18,21 +18,22 @@ class PostgreSQLRemoteOperationMixin:
         "project_ownerships": "SELECT * FROM project_ownerships WHERE ownership_id=%s",
         "ownership_tags": "SELECT * FROM ownership_tags WHERE ownership_id=%s",
         "ownership_custom_values": "SELECT * FROM ownership_custom_values WHERE ownership_id=%s",
-        "attachments": "SELECT * FROM attachments WHERE ownership_id=%s",
         "contact_logs": "SELECT * FROM contact_logs WHERE ownership_id=%s",
+        "attachments": "SELECT * FROM attachments WHERE ownership_id=%s",
         "follow_up_reminders": "SELECT * FROM follow_up_reminders WHERE ownership_id=%s",
         "record_change_logs": "SELECT * FROM record_change_logs WHERE ownership_id=%s",
         "ownership_locations": "SELECT * FROM ownership_locations WHERE ownership_id=%s",
     }
 
     def _capture_record_snapshot(self, conn, record_id):
+        record_id = int(record_id)
         row = conn.execute(
-            self.RECORD_SELECT + " WHERE ownership.id = %s", (int(record_id),)
+            self.RECORD_SELECT + " WHERE ownership.id = %s", (record_id,)
         ).fetchone()
         if row is None:
             return None
         related = {
-            name: [_row_dict(item) for item in conn.execute(query, (int(record_id),)).fetchall()]
+            name: [_row_dict(item) for item in conn.execute(query, (record_id,)).fetchall()]
             for name, query in self._SNAPSHOT_QUERIES.items()
         }
         related["duplicate_reviews"] = [
@@ -42,10 +43,50 @@ class PostgreSQLRemoteOperationMixin:
                 SELECT * FROM duplicate_reviews
                 WHERE left_ownership_id=%s OR right_ownership_id=%s
                 """,
-                (int(record_id), int(record_id)),
+                (record_id, record_id),
             ).fetchall()
         ]
+        field_visit_items = [
+            _row_dict(item)
+            for item in conn.execute(
+                """
+                SELECT * FROM field_visit_route_items
+                WHERE ownership_id=%s ORDER BY id
+                """,
+                (record_id,),
+            ).fetchall()
+        ]
+        related["field_visit_route_items"] = field_visit_items
+        route_item_ids = [int(item["id"]) for item in field_visit_items]
+        related["field_visit_status_history"] = (
+            [
+                _row_dict(item)
+                for item in conn.execute(
+                    """
+                    SELECT * FROM field_visit_status_history
+                    WHERE route_item_id=ANY(%s) ORDER BY id
+                    """,
+                    (route_item_ids,),
+                ).fetchall()
+            ]
+            if route_item_ids
+            else []
+        )
         return {"record": _row_dict(row), "related": related}
+
+    def _delete_record_dependencies(self, conn, record_ids):
+        ids = self._normalize_ids(record_ids)
+        if not ids:
+            return 0
+        rows = conn.execute(
+            """
+            DELETE FROM field_visit_route_items
+            WHERE ownership_id=ANY(%s)
+            RETURNING id
+            """,
+            (ids,),
+        ).fetchall()
+        return len(rows)
 
     def capture_record_snapshots(self, user, record_ids):
         del user
@@ -65,11 +106,13 @@ class PostgreSQLRemoteOperationMixin:
                 "id", "owner_id", "land_id", "project_id", "storage_path",
                 "original_name", "media_type", "size_bytes", "sha256", "created_by",
                 "created_at", "legacy_attachment_id", "ownership_id", "file_path",
-                "description", "status", "version",
+                "description", "status", "version", "category", "contact_log_id",
+                "field_visit_route_item_id",
             ),
             "contact_logs": (
                 "id", "legacy_contact_log_id", "ownership_id", "contact_date",
                 "method", "result", "next_follow_up", "note", "created_by", "created_at",
+                "contacted_at", "latitude", "longitude", "field_visit_route_item_id",
             ),
             "follow_up_reminders": (
                 "id", "ownership_id", "due_date", "status", "note", "created_at", "updated_at",
@@ -94,6 +137,108 @@ class PostgreSQLRemoteOperationMixin:
                 row["ownership_id"] = int(ownership_id)
             conn.execute(sql, tuple(row.get(column) for column in columns))
 
+    @staticmethod
+    def _restore_field_visit_snapshot(conn, related, ownership_id):
+        restored_item_ids = set()
+        for raw_item in related.get("field_visit_route_items", []):
+            item = dict(raw_item)
+            route_id = int(item["route_id"])
+            if conn.execute(
+                "SELECT 1 FROM field_visit_routes WHERE id=%s", (route_id,)
+            ).fetchone() is None:
+                continue
+            if conn.execute(
+                """
+                SELECT 1 FROM field_visit_route_items
+                WHERE id=%s OR (route_id=%s AND ownership_id=%s)
+                """,
+                (int(item["id"]), route_id, int(ownership_id)),
+            ).fetchone() is not None:
+                continue
+            route_order = int(item.get("route_order") or 1)
+            if conn.execute(
+                """
+                SELECT 1 FROM field_visit_route_items
+                WHERE route_id=%s AND route_order=%s
+                """,
+                (route_id, route_order),
+            ).fetchone() is not None:
+                order_row = conn.execute(
+                    """
+                    SELECT COALESCE(MAX(route_order), 0) + 1 AS route_order
+                    FROM field_visit_route_items WHERE route_id=%s
+                    """,
+                    (route_id,),
+                ).fetchone()
+                route_order = int(order_row["route_order"])
+            restored = conn.execute(
+                """
+                INSERT INTO field_visit_route_items (
+                    id, route_id, owner_id, ownership_id, land_id, route_order,
+                    status, priority, is_order_locked, estimated_distance_km,
+                    arrived_at, completed_at, postponed_until, note,
+                    created_at, updated_at
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s,
+                    %s, %s, %s, %s,
+                    COALESCE(%s, CURRENT_TIMESTAMP),
+                    COALESCE(%s, CURRENT_TIMESTAMP)
+                )
+                RETURNING id
+                """,
+                (
+                    int(item["id"]),
+                    route_id,
+                    int(item["owner_id"]),
+                    int(ownership_id),
+                    int(item["land_id"]),
+                    route_order,
+                    item.get("status") or "planned",
+                    int(item.get("priority") or 0),
+                    bool(item.get("is_order_locked")),
+                    item.get("estimated_distance_km"),
+                    item.get("arrived_at"),
+                    item.get("completed_at"),
+                    item.get("postponed_until"),
+                    item.get("note"),
+                    item.get("created_at"),
+                    item.get("updated_at"),
+                ),
+            ).fetchone()
+            if restored is not None:
+                restored_item_ids.add(int(restored["id"]))
+
+        for raw_history in related.get("field_visit_status_history", []):
+            history = dict(raw_history)
+            route_item_id = int(history["route_item_id"])
+            if route_item_id not in restored_item_ids:
+                continue
+            conn.execute(
+                """
+                INSERT INTO field_visit_status_history (
+                    id, route_item_id, old_status, new_status, user_id,
+                    latitude, longitude, note, created_at
+                ) VALUES (
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, COALESCE(%s, CURRENT_TIMESTAMP)
+                )
+                ON CONFLICT DO NOTHING
+                """,
+                (
+                    int(history["id"]),
+                    route_item_id,
+                    history.get("old_status"),
+                    history.get("new_status") or "planned",
+                    history.get("user_id"),
+                    history.get("latitude"),
+                    history.get("longitude"),
+                    history.get("note"),
+                    history.get("created_at"),
+                ),
+            )
+        return restored_item_ids
+
     def _restore_record_snapshot(self, conn, user, snapshot):
         raw = dict(snapshot.get("record") or {})
         if not raw:
@@ -101,14 +246,17 @@ class PostgreSQLRemoteOperationMixin:
         original_id = int(raw["id"])
         plain = _decrypt_record(raw, user)
         owner_id, land_id, encrypted = self._save_owner_and_land(conn, user, plain)
+        self._delete_record_dependencies(conn, [original_id])
         conn.execute("DELETE FROM ownerships WHERE id=%s", (original_id,))
         conn.execute(
             """
             INSERT INTO ownerships (
                 id, owner_id, land_id, registration_order, numerator, denominator,
                 ping, total_declared_value, registration_reason, note, visit_log,
-                name, created_at, updated_at
+                name, owner_name_override, external_id_override, address_override,
+                created_at, updated_at
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                      %s, %s, %s,
                       COALESCE(%s, CURRENT_TIMESTAMP), COALESCE(%s, CURRENT_TIMESTAMP))
             """,
             (
@@ -116,10 +264,13 @@ class PostgreSQLRemoteOperationMixin:
                 raw.get("numerator"), raw.get("denominator"), raw.get("ping"),
                 raw.get("total_declared_value"), raw.get("registration_reason"),
                 encrypted.get("note"), encrypted.get("visit_log"), encrypted.get("name"),
+                encrypted.get("owner_name"), encrypted.get("external_id"),
+                encrypted.get("address"),
                 raw.get("created_at"), raw.get("updated_at"),
             ),
         )
         related = dict(snapshot.get("related") or {})
+        self._restore_field_visit_snapshot(conn, related, original_id)
         for table_name in self._SNAPSHOT_QUERIES:
             self._insert_rows(
                 conn, table_name, related.get(table_name, []), original_id
@@ -260,7 +411,12 @@ class PostgreSQLRemoteOperationMixin:
             if mode in {"delete_inserted", "composite"}:
                 ids = payload.get("record_ids") or payload.get("inserted_record_ids") or []
                 if ids:
-                    conn.execute("DELETE FROM ownerships WHERE id=ANY(%s)", (self._normalize_ids(ids),))
+                    normalized_ids = self._normalize_ids(ids)
+                    self._delete_record_dependencies(conn, normalized_ids)
+                    conn.execute(
+                        "DELETE FROM ownerships WHERE id=ANY(%s)",
+                        (normalized_ids,),
+                    )
             restored = []
             if mode in {"restore", "composite"}:
                 for snapshot in payload.get("snapshots", []):
@@ -348,6 +504,7 @@ class PostgreSQLRemoteOperationMixin:
                 "DELETE FROM duplicate_reviews WHERE left_ownership_id=%s OR right_ownership_id=%s",
                 (secondary_id, secondary_id),
             )
+            self._delete_record_dependencies(conn, [secondary_id])
             conn.execute("DELETE FROM ownerships WHERE id=%s", (secondary_id,))
             for project_id in affected_projects:
                 self._sync_project_dimension_links(conn, project_id)

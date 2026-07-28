@@ -1,9 +1,11 @@
 import tempfile
 import unittest
+from io import BytesIO
 from unittest.mock import patch
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from customer_api.app import create_app
 from customer_api.auth import LoginThrottle, SessionStore
@@ -106,7 +108,7 @@ class CustomerApiTests(unittest.TestCase):
         health = self.client.get("/health")
         self.assertEqual(health.status_code, 200)
         self.assertEqual(health.json()["backend"], "sqlite")
-        self.assertEqual(health.json()["schema_version"], 7)
+        self.assertEqual(health.json()["schema_version"], 9)
 
         bad_login = self.client.post(
             "/api/v1/auth/login",
@@ -132,6 +134,36 @@ class CustomerApiTests(unittest.TestCase):
         self.assertEqual(lands["items"][0]["land_number"], "100-1")
         self.assertEqual(lands["items"][0]["owners"][0]["name"], "王大明")
 
+    def test_import_accepts_only_district_section_and_land_number(self):
+        headers = self.login()
+
+        response = self.client.post(
+            "/api/v1/imports/records",
+            headers=headers,
+            json={
+                "source_file_name": "minimal.xlsx",
+                "items": [
+                    {
+                        "record_id": None,
+                        "values": {
+                            "district": "中壢區",
+                            "section": "中路段",
+                            "land_number": "1-3",
+                            "owner_name": None,
+                        },
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual(response.status_code, 201, response.text)
+        created_id = response.json()["inserted_ids"][0]
+        detail = self.client.get(
+            f"/api/v1/records/{created_id}", headers=headers
+        )
+        self.assertEqual(detail.status_code, 200, detail.text)
+        self.assertEqual(detail.json()["owner_name"], "")
+
     def test_mobile_pwa_is_served_with_security_headers(self):
         root = self.client.get("/")
         self.assertEqual(root.status_code, 200)
@@ -140,7 +172,47 @@ class CustomerApiTests(unittest.TestCase):
         page = self.client.get("/mobile/")
         self.assertEqual(page.status_code, 200)
         self.assertIn("地主開發助手", page.text)
+        self.assertIn('src="./field-visit.js?v=2"', page.text)
+        self.assertIn('src="./app.js?v=21"', page.text)
+        self.assertIn('id="field-location-panel"', page.text)
+        self.assertIn('id="field-location-button"', page.text)
+        self.assertIn('id="page-field"', page.text)
+        self.assertIn('id="field-visit-workspace"', page.text)
+        self.assertIn('id="field-visit-start"', page.text)
+        self.assertIn('id="field-visit-reoptimize"', page.text)
+        self.assertIn('id="field-visit-current"', page.text)
+        self.assertIn('id="field-visit-previous"', page.text)
+        self.assertIn('id="field-visit-next"', page.text)
+        self.assertIn('id="field-completion-summary"', page.text)
+        self.assertIn('id="field-completion-duration"', page.text)
+        self.assertIn('id="field-completion-review"', page.text)
+        self.assertIn('id="field-action-dialog"', page.text)
+        self.assertIn('id="field-action-note"', page.text)
+        self.assertIn('id="field-action-postponed-until"', page.text)
+        self.assertIn('id="field-visit-manage"', page.text)
+        self.assertIn('id="field-visit-create"', page.text)
+        self.assertIn('id="field-plan-dialog"', page.text)
+        self.assertIn('id="field-plan-search-form"', page.text)
+        self.assertIn('id="field-plan-results"', page.text)
+        self.assertIn('id="field-plan-submit"', page.text)
+        self.assertIn('id="field-plan-current"', page.text)
+        self.assertIn('id="field-plan-order-save"', page.text)
+        self.assertIn('id="field-plan-unlock-order"', page.text)
+        self.assertIn('id="field-plan-add-section"', page.text)
+        self.assertIn('id="attachment-section"', page.text)
+        self.assertIn('id="attachment-photo-input"', page.text)
+        self.assertIn('capture="environment"', page.text)
+        self.assertIn('id="attachment-file-input"', page.text)
+        self.assertIn('type="file" multiple', page.text)
+        self.assertIn('id="attachment-filter"', page.text)
+        self.assertIn('id="attachment-sort"', page.text)
+        self.assertIn('id="photo-viewer"', page.text)
+        self.assertIn('id="attachment-edit-dialog"', page.text)
         self.assertIn("default-src 'self'", page.headers["content-security-policy"])
+        self.assertIn("img-src 'self' data: blob:", page.headers["content-security-policy"])
+        self.assertIn("geolocation=(self)", page.headers["permissions-policy"])
+        self.assertIn("camera=()", page.headers["permissions-policy"])
+        self.assertIn("microphone=()", page.headers["permissions-policy"])
         self.assertEqual(page.headers["cache-control"], "no-store")
 
         manifest = self.client.get("/mobile/manifest.webmanifest")
@@ -150,7 +222,109 @@ class CustomerApiTests(unittest.TestCase):
         service_worker = self.client.get("/mobile/service-worker.js")
         self.assertEqual(service_worker.status_code, 200)
         self.assertIn('url.pathname.startsWith("/api/")', service_worker.text)
+        self.assertIn('land-customer-mobile-v21', service_worker.text)
+        self.assertIn('/mobile/field-visit.js?v=2', service_worker.text)
+        self.assertIn('/mobile/app.js?v=21', service_worker.text)
+        self.assertIn('fetch(event.request, { cache: "no-store" })', service_worker.text)
         self.assertIn("no-store", service_worker.headers["cache-control"])
+
+        field_visit_script = self.client.get("/mobile/field-visit.js?v=2")
+        self.assertEqual(field_visit_script.status_code, 200)
+        self.assertEqual(field_visit_script.headers["cache-control"], "no-store")
+        self.assertIn("function requestCurrentPosition(", field_visit_script.text)
+        self.assertIn("function buildGoogleMapsNavigationUrl(", field_visit_script.text)
+        self.assertIn("value === null || value === undefined", field_visit_script.text)
+        self.assertIn("https://www.google.com/maps/dir/", field_visit_script.text)
+        self.assertIn("destination.address", field_visit_script.text)
+        self.assertIn('url.searchParams.set("origin", originValue)', field_visit_script.text)
+        self.assertIn('url.searchParams.set("travelmode", "driving")', field_visit_script.text)
+        self.assertIn('url.searchParams.set("dir_action", "navigate")', field_visit_script.text)
+        self.assertIn("replace(/[\\r\\n\\t]+/g", field_visit_script.text)
+        self.assertIn("window.isSecureContext === false", field_visit_script.text)
+        self.assertIn("navigator.geolocation.getCurrentPosition(", field_visit_script.text)
+
+        app_script = self.client.get("/mobile/app.js?v=21")
+        self.assertEqual(app_script.status_code, 200)
+        self.assertEqual(app_script.headers["cache-control"], "no-store")
+        self.assertIn("function maskIdentity(value)", app_script.text)
+        self.assertIn('characters.slice(0, 4)', app_script.text)
+        self.assertIn('maskIdentity(owner.external_id)', app_script.text)
+        self.assertIn('key === "external_id" ? maskIdentity(record[key])', app_script.text)
+        self.assertIn("function renderAttachments(items = null)", app_script.text)
+        self.assertIn("new FormData()", app_script.text)
+        self.assertIn("/attachments/upload", app_script.text)
+        self.assertIn("/thumbnail", app_script.text)
+        self.assertIn("function compressPhotoFile(file)", app_script.text)
+        self.assertIn("function openPhotoViewer(attachmentId)", app_script.text)
+        self.assertIn("method: \"PATCH\"", app_script.text)
+        self.assertIn("dataset.attachmentOpen", app_script.text)
+        self.assertIn("dataset.attachmentDelete", app_script.text)
+        self.assertIn("item.can_delete === true", app_script.text)
+        self.assertIn("function requestBlob(path)", app_script.text)
+        self.assertIn("async function requestFieldLocation()", app_script.text)
+        self.assertIn("window.LCSFieldVisit.requestCurrentPosition()", app_script.text)
+        self.assertIn("async function loadFieldVisit(", app_script.text)
+        self.assertIn("function formatFieldVisitDuration(", app_script.text)
+        self.assertIn("function renderFieldVisitCompletion(", app_script.text)
+        self.assertIn("function reviewFieldVisitItinerary()", app_script.text)
+        self.assertIn('"今日行程已全部處理完成"', app_script.text)
+        self.assertIn("async function updateFieldPlanPriority(", app_script.text)
+        self.assertIn("dataset.fieldPlanPriority", app_script.text)
+        self.assertIn('method: "PATCH"', app_script.text)
+        self.assertIn("/api/v1/field-visits/today", app_script.text)
+        self.assertIn("async function startFieldWork()", app_script.text)
+        self.assertIn("async function reoptimizeRemainingFieldVisit()", app_script.text)
+        self.assertIn('idempotencyKey("reoptimize", route.id)', app_script.text)
+        self.assertIn("preview.excluded_item_ids", app_script.text)
+        self.assertIn("current_item_id: activeItem ? Number(activeItem.id) : null", app_script.text)
+        self.assertIn("/optimize/preview", app_script.text)
+        self.assertIn('"Idempotency-Key": idempotencyKey(', app_script.text)
+        self.assertIn("async function openFieldNavigation(itemId)", app_script.text)
+        self.assertIn("openGoogleMapsNavigation(item, origin)", app_script.text)
+        self.assertIn("maximumAge: 60000", app_script.text)
+        self.assertIn("function openFieldAction(", app_script.text)
+        self.assertIn("async function submitFieldAction(", app_script.text)
+        self.assertIn("field-action-postponed-until", app_script.text)
+        self.assertIn("/api/v1/field-visit-items/${itemId}/${action}", app_script.text)
+        self.assertIn("await loadFieldVisit({ quiet: true })", app_script.text)
+        self.assertIn("item.ownership_id", app_script.text)
+        self.assertIn("button.dataset.fieldRecordId", app_script.text)
+        self.assertIn("button.dataset.fieldRouteItemId", app_script.text)
+        self.assertIn("state.currentFieldVisitItemId", app_script.text)
+        self.assertIn('payload.field_visit_route_item_id', app_script.text)
+        self.assertIn('form.append("field_visit_route_item_id"', app_script.text)
+        self.assertIn('"field-context-badge", "本次行程"', app_script.text)
+        self.assertIn("function focusRecordSection(sectionId)", app_script.text)
+        self.assertIn('fieldRecordButton.dataset.fieldRecordSection', app_script.text)
+        self.assertIn("function openFieldPlan()", app_script.text)
+        self.assertIn("async function searchFieldPlanRecords(event)", app_script.text)
+        self.assertIn("async function submitFieldPlan()", app_script.text)
+        self.assertIn('request("/api/v1/field-visits"', app_script.text)
+        self.assertIn('/api/v1/field-visits/${routeId}/items', app_script.text)
+        self.assertIn("error.status = response.status", app_script.text)
+        self.assertIn("error.path = path", app_script.text)
+        self.assertIn("手機頁面已更新，但伺服器程式仍是舊版", app_script.text)
+        self.assertIn("state.fieldPlanSelection", app_script.text)
+        self.assertIn("function renderFieldPlanCurrent()", app_script.text)
+        self.assertIn("async function saveFieldPlanOrder()", app_script.text)
+        self.assertIn("async function unlockFieldPlanOrder()", app_script.text)
+        self.assertIn('idempotencyKey("unlock-order", route.id)', app_script.text)
+        self.assertIn("is_order_locked: false", app_script.text)
+        self.assertIn('"已解除固定順序，可重新規劃路線"', app_script.text)
+        self.assertIn("async function removeFieldPlanItem(itemId, button)", app_script.text)
+        self.assertIn('/api/v1/field-visits/${route.id}/reorder', app_script.text)
+        self.assertIn('/api/v1/field-visit-items/${item.id}/cancel', app_script.text)
+        self.assertIn("async function restoreFieldPlanItem(itemId, button)", app_script.text)
+        self.assertIn('/api/v1/field-visit-items/${item.id}/restore', app_script.text)
+        self.assertIn("networkError.isNetworkError = true", app_script.text)
+        self.assertIn("function saveFieldActionDraft()", app_script.text)
+        self.assertIn("state.fieldActionIdempotencyKey", app_script.text)
+        self.assertIn("function saveContactDraft()", app_script.text)
+        self.assertIn("function restoreContactDraft()", app_script.text)
+        self.assertIn("state.contactIdempotencyKey", app_script.text)
+        self.assertIn("state.attachmentUploadKeys", app_script.text)
+        self.assertIn('"上傳中斷，未完成的檔案已保留，可再次上傳"', app_script.text)
+        self.assertIn('"Idempotency-Key": uploadKey', app_script.text)
 
     def test_full_desktop_remote_workflow_end_to_end(self):
         headers = self.login()
@@ -289,7 +463,7 @@ class CustomerApiTests(unittest.TestCase):
         self.assertEqual(password_change.status_code, 200, password_change.text)
         self.login("admin", "admin-new-password")
 
-    def test_server_backup_controls_are_admin_only_and_use_server_backup_module(self):
+    def test_server_backup_status_is_visible_to_users_but_controls_are_admin_only(self):
         headers = self.login()
         with patch(
             "backup_postgresql.backup_status",
@@ -329,8 +503,29 @@ class CustomerApiTests(unittest.TestCase):
             self.assertEqual(maintained.status_code, 200, maintained.text)
 
         viewer_headers = self.login("viewer", "viewer-password")
-        forbidden = self.client.get(
-            "/api/v1/server-backups/status", headers=viewer_headers
+        with patch(
+            "backup_postgresql.backup_status",
+            return_value={
+                "status": "ok",
+                "backup_directory": "C:/server-backups",
+                "backup_count": 2,
+                "latest_backup": "C:/server-backups/latest.zip",
+                "latest_backup_at": "2026-07-20T08:00:00+08:00",
+                "total_bytes": 1234,
+            },
+        ):
+            visible = self.client.get(
+                "/api/v1/server-backups/status", headers=viewer_headers
+            )
+        self.assertEqual(visible.status_code, 200, visible.text)
+        self.assertEqual(visible.json()["backup_count"], 2)
+        self.assertEqual(visible.json()["backup_directory"], "僅管理員可查看")
+        self.assertEqual(visible.json()["latest_backup"], "")
+
+        forbidden = self.client.post(
+            "/api/v1/server-backups",
+            headers=viewer_headers,
+            json={"label": "manual", "retention_days": 60, "max_count": 20},
         )
         self.assertEqual(forbidden.status_code, 403)
 
@@ -451,7 +646,7 @@ class CustomerApiTests(unittest.TestCase):
         viewed = self.client.get(
             f"/api/v1/records/{self.record_id}", headers=viewer_headers
         )
-        self.assertEqual(viewed.json()["external_id"], "H10******3")
+        self.assertEqual(viewed.json()["external_id"], "H100*****3")
         denied = self.client.post(
             f"/api/v1/records/{self.record_id}/contact-logs",
             headers=viewer_headers,
@@ -731,9 +926,44 @@ class CustomerApiTests(unittest.TestCase):
             },
         )
         self.assertEqual(change_logs.json()["count"], 1)
+
+        update_with_history = self.client.put(
+            f"/api/v1/records/{self.record_id}/with-history",
+            headers=headers,
+            json={
+                "values": {
+                    "district": "桃園區",
+                    "section": "測試段",
+                    "land_number": "100-1",
+                    "owner_name": "王大明",
+                    "note": "一次完成更新",
+                },
+                "change_logs": [
+                    {
+                        "record_id": self.record_id,
+                        "action_type": "修改資料",
+                        "field_key": "land_number",
+                        "field_label": "地號",
+                        "old_value": "100",
+                        "new_value": "100-1",
+                    },
+                    {
+                        "record_id": self.record_id,
+                        "action_type": "修改資料",
+                        "field_key": "note",
+                        "field_label": "備註",
+                        "old_value": "",
+                        "new_value": "一次完成更新",
+                    },
+                ],
+            },
+        )
+        self.assertEqual(update_with_history.status_code, 200, update_with_history.text)
+        self.assertEqual(update_with_history.json()["id"], self.record_id)
         history = self.client.get(
             f"/api/v1/records/{self.record_id}/change-logs", headers=headers
         )
+        self.assertGreaterEqual(len(history.json()["items"]), 3)
         self.assertEqual(history.json()["items"][0]["field_label"], "備註")
 
         operation = self.client.post(
@@ -940,6 +1170,115 @@ class CustomerApiTests(unittest.TestCase):
             204,
         )
 
+    def test_mobile_attachment_thumbnail_metadata_and_viewer_permissions(self):
+        admin_headers = self.login()
+        image_buffer = BytesIO()
+        Image.new("RGB", (1200, 800), "#2a6f62").save(image_buffer, format="JPEG")
+        image_content = image_buffer.getvalue()
+        uploaded = self.client.post(
+            f"/api/v1/records/{self.record_id}/attachments/upload",
+            headers=admin_headers,
+            files={"file": ("site-photo.jpg", image_content, "image/jpeg")},
+            data={"description": "東側道路", "category": "現場照片"},
+        )
+        self.assertEqual(uploaded.status_code, 201, uploaded.text)
+        attachment_id = uploaded.json()["id"]
+
+        thumbnail = self.client.get(
+            f"/api/v1/records/{self.record_id}/attachments/{attachment_id}/thumbnail",
+            headers=admin_headers,
+        )
+        self.assertEqual(thumbnail.status_code, 200, thumbnail.text)
+        self.assertEqual(thumbnail.headers["content-type"], "image/jpeg")
+        with Image.open(BytesIO(thumbnail.content)) as preview:
+            self.assertLessEqual(max(preview.size), 640)
+
+        updated = self.client.patch(
+            f"/api/v1/records/{self.record_id}/attachments/{attachment_id}",
+            headers=admin_headers,
+            json={"description": "北側道路現況", "category": "謄本文件"},
+        )
+        self.assertEqual(updated.status_code, 200, updated.text)
+        attachment = self.client.get(
+            f"/api/v1/records/{self.record_id}/attachments", headers=admin_headers
+        ).json()["items"][0]
+        self.assertEqual(attachment["description"], "北側道路現況")
+        self.assertEqual(attachment["category"], "謄本文件")
+        self.assertEqual(attachment["version"], 2)
+
+        viewer_headers = self.login("viewer", "viewer-password")
+        viewer_thumbnail = self.client.get(
+            f"/api/v1/records/{self.record_id}/attachments/{attachment_id}/thumbnail",
+            headers=viewer_headers,
+        )
+        self.assertEqual(viewer_thumbnail.status_code, 200, viewer_thumbnail.text)
+        denied = self.client.patch(
+            f"/api/v1/records/{self.record_id}/attachments/{attachment_id}",
+            headers=viewer_headers,
+            json={"description": "不可修改", "category": "其他"},
+        )
+        self.assertEqual(denied.status_code, 403)
+
+    def test_attachment_delete_is_limited_to_uploader_or_admin(self):
+        self.source.repository.create_user(
+            "editor-one",
+            "editor-one-password",
+            "editor",
+            self.data_key,
+            "外勤一",
+        )
+        self.source.repository.create_user(
+            "editor-two",
+            "editor-two-password",
+            "editor",
+            self.data_key,
+            "外勤二",
+        )
+        editor_one = self.login("editor-one", "editor-one-password")
+        editor_two = self.login("editor-two", "editor-two-password")
+        admin = self.login()
+
+        uploaded = self.client.post(
+            f"/api/v1/records/{self.record_id}/attachments/upload",
+            headers=editor_one,
+            files={"file": ("owner-proof.txt", b"owner only", "text/plain")},
+        )
+        self.assertEqual(uploaded.status_code, 201, uploaded.text)
+        attachment_id = uploaded.json()["id"]
+
+        owner_item = self.client.get(
+            f"/api/v1/records/{self.record_id}/attachments",
+            headers=editor_one,
+        ).json()["items"][0]
+        other_item = self.client.get(
+            f"/api/v1/records/{self.record_id}/attachments",
+            headers=editor_two,
+        ).json()["items"][0]
+        admin_item = self.client.get(
+            f"/api/v1/records/{self.record_id}/attachments",
+            headers=admin,
+        ).json()["items"][0]
+        self.assertTrue(owner_item["can_delete"])
+        self.assertFalse(other_item["can_delete"])
+        self.assertTrue(admin_item["can_delete"])
+        self.assertNotIn("created_by", owner_item)
+
+        denied = self.client.delete(
+            f"/api/v1/records/{self.record_id}/attachments/{attachment_id}",
+            headers=editor_two,
+        )
+        self.assertEqual(denied.status_code, 403, denied.text)
+        self.assertIn("上傳者或管理員", denied.json()["detail"])
+        managed_path = Path(owner_item["storage_path"])
+        self.assertTrue(managed_path.is_file())
+
+        deleted = self.client.delete(
+            f"/api/v1/records/{self.record_id}/attachments/{attachment_id}",
+            headers=admin,
+        )
+        self.assertEqual(deleted.status_code, 204, deleted.text)
+        self.assertFalse(managed_path.exists())
+
     def test_record_crud_validates_calculates_encrypts_and_enforces_roles(self):
         admin_headers = self.login()
         payload = self.record(
@@ -1129,6 +1468,7 @@ class PostgreSQLMigrationPlanTests(unittest.TestCase):
         schema_path = Path(__file__).resolve().parents[1] / "postgres" / "schema.sql"
         schema = schema_path.read_text(encoding="utf-8")
         self.assertIn("VALUES (2, 'desktop productivity mirror", schema)
+        self.assertIn("VALUES (5, 'repair all PostgreSQL identity cursors')", schema)
         for table in (
             "project_ownerships",
             "project_tasks",

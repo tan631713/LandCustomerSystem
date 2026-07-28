@@ -528,6 +528,8 @@ class BackupStatusMixin:
 
     def backup_now(self):
         if getattr(self, "api_mode", False):
+            if not self.ensure_admin("立即備份"):
+                return None
             policy = self._app_component("load_backup_policy")()
             try:
                 report = self.active_record_repository().create_server_backup(

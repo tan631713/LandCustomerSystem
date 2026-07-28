@@ -13,14 +13,17 @@ $ErrorActionPreference = 'Stop'
 $packagePath = [IO.Path]::GetFullPath($PackageRoot)
 $supportPath = [IO.Path]::GetFullPath($SupportRoot)
 $diagnosticsPath = Join-Path $env:LOCALAPPDATA 'LandCustomerSystem\home-server-diagnostics.json'
+$protectedPostgresDsn = Join-Path $env:LOCALAPPDATA 'LandCustomerSystem\postgres-dsn.dpapi'
 $certificateDirectory = Join-Path $env:LOCALAPPDATA 'LandCustomerSystem\certificates'
 $serverCertificate = Join-Path $certificateDirectory 'land-customer-server-cert.pem'
 $serverPrivateKey = Join-Path $certificateDirectory 'land-customer-server-key.pem'
+$caCertificate = Join-Path $certificateDirectory 'land-customer-local-ca.cer'
 $serverExecutable = Join-Path $packagePath 'LandCustomerServer\LandCustomerServer.exe'
 $serverScript = Join-Path $packagePath 'start_api_server.py'
 $pythonExecutable = Join-Path $env:LOCALAPPDATA 'Programs\Python\Python314\python.exe'
 $preflightScript = Join-Path $supportPath 'home_server_preflight.ps1'
 $netBirdExecutable = Join-Path $env:ProgramFiles 'NetBird\netbird.exe'
+$adminRecoveryRequest = Join-Path $packagePath 'recover-admin-password.request'
 
 $state = [ordered]@{
     checked_at = [DateTimeOffset]::Now.ToString('o')
@@ -37,10 +40,17 @@ $state = [ordered]@{
     postgresql_service = ''
     postgresql_status = ''
     database_status = ''
+    recovery_account_status = 'not_found'
+    recovery_account_username = ''
+    admin_password_recovery = 'not_requested'
+    migration_package_status = 'not_found'
+    migration_package_name = ''
+    migration_backup = ''
     schema_version = $null
     record_count = $null
     https_certificate = ''
     certificate_url = ''
+    certificate_sha256 = ''
     backup_status = 'not_checked'
     api_url = ''
     process_id = $null
@@ -223,21 +233,30 @@ function Get-NetBirdIp {
 
 function Invoke-ServerTool {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
-    if (Test-Path -LiteralPath $serverExecutable -PathType Leaf) {
-        & $serverExecutable @Arguments | Out-Host
-        return [int]$LASTEXITCODE
-    }
-    if (-not (Test-Path -LiteralPath $pythonExecutable -PathType Leaf)) {
-        $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
-        if ($pythonCommand) {
-            $script:pythonExecutable = $pythonCommand.Source
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        # Windows PowerShell 會把原生程式的 stderr 包裝成 ErrorRecord。
+        # 維護命令以非零代碼回報「需要修復」是正常控制流程，不能在尚未
+        # 取得 $LASTEXITCODE 前就被全域 Stop 設定中止。
+        $ErrorActionPreference = 'Continue'
+        if (Test-Path -LiteralPath $serverExecutable -PathType Leaf) {
+            & $serverExecutable @Arguments 2>&1 | Out-Host
+            return [int]$LASTEXITCODE
         }
+        if (-not (Test-Path -LiteralPath $pythonExecutable -PathType Leaf)) {
+            $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+            if ($pythonCommand) {
+                $script:pythonExecutable = $pythonCommand.Source
+            }
+        }
+        if (-not (Test-Path -LiteralPath $serverScript -PathType Leaf) -or -not $script:pythonExecutable) {
+            throw '找不到 LandCustomerServer.exe，伺服器封裝可能不完整。'
+        }
+        & $script:pythonExecutable $serverScript @Arguments 2>&1 | Out-Host
+        return [int]$LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
     }
-    if (-not (Test-Path -LiteralPath $serverScript -PathType Leaf) -or -not $script:pythonExecutable) {
-        throw '找不到 LandCustomerServer.exe，伺服器封裝可能不完整。'
-    }
-    & $script:pythonExecutable $serverScript @Arguments | Out-Host
-    return [int]$LASTEXITCODE
 }
 
 function Test-ExistingServer {
@@ -273,6 +292,29 @@ function Start-CertificateService {
 
 try {
     Save-Diagnostics
+
+    $recoveryFiles = @(Get-ChildItem -LiteralPath $packagePath -Filter '*.lcs-account' -File -ErrorAction SilentlyContinue)
+    if ($recoveryFiles.Count -gt 1) {
+        throw '啟動檔旁有多個 .lcs-account 帳號恢復檔；請只保留本次要匯入的一個檔案。'
+    }
+    if ($recoveryFiles.Count -eq 1) {
+        $state.recovery_account_status = 'pending'
+        Save-Diagnostics
+    }
+    $adminRecoveryRequested = Test-Path -LiteralPath $adminRecoveryRequest -PathType Leaf
+    if ($adminRecoveryRequested) {
+        $state.admin_password_recovery = 'pending'
+        Save-Diagnostics
+    }
+    $migrationFiles = @(Get-ChildItem -LiteralPath $packagePath -Filter '*.lcs-migration.zip' -File -ErrorAction SilentlyContinue)
+    if ($migrationFiles.Count -gt 1) {
+        throw '啟動檔旁有多個 .lcs-migration.zip；請只保留本次要匯入的一個遷移包。'
+    }
+    if ($migrationFiles.Count -eq 1) {
+        $state.migration_package_status = 'pending'
+        $state.migration_package_name = $migrationFiles[0].Name
+        Save-Diagnostics
+    }
 
     Set-Stage -Name 'prerequisites' -Description '[1/7] 檢查必要軟體...'
     $prerequisites = Get-PrerequisiteState
@@ -352,23 +394,51 @@ try {
     }
     Save-Diagnostics
 
+    $script:existingServerProcess = $null
     $listeners = @(Get-NetTCPConnection -State Listen -LocalPort 8732 -ErrorAction SilentlyContinue)
     if ($listeners.Count -gt 0) {
         if (Test-ExistingServer) {
-            $state.status = 'already_running'
-            $state.stage = 'ready'
-            $state.message = '家中伺服器已在執行，不需要重複啟動。'
-            $state.process_id = [int]$listeners[0].OwningProcess
-            Save-Diagnostics
-            Write-Host $state.message
-            Write-Host "手機網址：$($state.api_url)"
-            exit 0
+            $script:existingServerProcess = [int]$listeners[0].OwningProcess
+            if ($migrationFiles.Count -eq 1) {
+                throw '偵測到待匯入的單機資料，但家中伺服器仍在執行。請關閉原本的伺服器視窗，再重新開啟本啟動檔。'
+            }
+            if ($recoveryFiles.Count -eq 0 -and -not $adminRecoveryRequested) {
+                $state.status = 'already_running'
+                $state.stage = 'ready'
+                $state.message = '家中伺服器已在執行，不需要重複啟動。'
+                $state.process_id = $script:existingServerProcess
+                Save-Diagnostics
+                Write-Host $state.message
+                Write-Host "手機網址：$($state.api_url)"
+                exit 0
+            }
+            Write-Host '家中伺服器已在執行；偵測到帳號恢復檔，將繼續處理帳號匯入。'
         }
-        $owner = [int]$listeners[0].OwningProcess
-        throw "連接埠 8732 已被其他程式占用（PID $owner），請關閉舊伺服器視窗後再試。"
+        if (-not $script:existingServerProcess) {
+            $owner = [int]$listeners[0].OwningProcess
+            throw "連接埠 8732 已被其他程式占用（PID $owner），請關閉舊伺服器視窗後再試。"
+        }
     }
 
-    Set-Stage -Name 'database' -Description '[4/7] 檢查 PostgreSQL 專案資料庫...'
+    if ($Mode -eq 'Start' -and (Test-Path -LiteralPath $protectedPostgresDsn -PathType Leaf)) {
+        Set-Stage -Name 'pre_upgrade_backup' -Description '[4/8] 升級前確認 PostgreSQL 完整備份...'
+        $preUpgradeBackupCode = Invoke-ServerTool -Arguments @('--postgres', '--backup-if-due-hours', '24', '--backup-label', 'pre-upgrade')
+        if ($preUpgradeBackupCode -ne 0) {
+            Write-Warning '既有 PostgreSQL 連線設定無法完成備份，現在先修復專案帳號連線。'
+            Write-Host '請輸入安裝 PostgreSQL 時設定的 postgres 管理密碼；系統不會顯示或保存這個密碼。'
+            $repairCode = Invoke-ServerTool -Arguments @('--setup-postgresql')
+            if ($repairCode -ne 0) {
+                throw 'PostgreSQL 連線設定修復失敗，本次不會檢查或升級資料結構。'
+            }
+            $preUpgradeBackupCode = Invoke-ServerTool -Arguments @('--postgres', '--backup', '--backup-label', 'pre-upgrade-repaired')
+            if ($preUpgradeBackupCode -ne 0) {
+                throw '連線設定已修復，但升級前完整備份仍失敗，本次不會檢查或升級資料結構。'
+            }
+        }
+        $state.backup_status = 'ok'
+    }
+
+    Set-Stage -Name 'database' -Description '[5/8] 檢查 PostgreSQL 專案資料庫...'
     $databaseCode = Invoke-ServerTool -Arguments @('--postgres', '--check')
     if ($databaseCode -ne 0 -and $Mode -eq 'Start') {
         Write-Host '尚未完成這台 Windows 使用者的資料庫設定，現在進行一次性設定。'
@@ -384,6 +454,129 @@ try {
     $state.database_status = 'ok'
     Save-Diagnostics
 
+    if ($recoveryFiles.Count -eq 1) {
+        if ($Mode -eq 'Check') {
+            throw '偵測到待匯入的帳號恢復檔；請使用「啟動家中伺服器.bat」完成匯入。'
+        }
+        $recoveryFile = $recoveryFiles[0]
+        Write-Host ''
+        Write-Host "偵測到帳號恢復檔：$($recoveryFile.Name)" -ForegroundColor Yellow
+        Write-Host '匯入只會新增一個登入帳號，不會覆蓋地主、土地、持分或案件資料。'
+        $importAnswer = (Read-Host '是否現在匯入？請輸入 Y 或 N').Trim()
+        if ($importAnswer -match '^(?i:y|yes|是)$') {
+            $recoveryCode = Invoke-ServerTool -Arguments @(
+                '--postgres', '--import-recovery-account', $recoveryFile.FullName
+            )
+            if ($recoveryCode -ne 0) {
+                $state.recovery_account_status = 'error'
+                Save-Diagnostics
+                throw '帳號恢復檔匯入失敗；土地與客戶資料未被修改。'
+            }
+            $state.recovery_account_status = 'imported'
+            $state.recovery_account_username = $recoveryFile.BaseName
+            Save-Diagnostics
+            Write-Host '帳號已安全匯入。請先用手機測試登入。' -ForegroundColor Green
+            $deleteAnswer = (Read-Host '是否刪除已使用的帳號恢復檔？建議輸入 Y').Trim()
+            if ($deleteAnswer -match '^(?i:y|yes|是)$') {
+                Remove-Item -LiteralPath $recoveryFile.FullName -Force
+                Write-Host '帳號恢復檔已刪除。'
+            } else {
+                Write-Warning '帳號恢復檔含有密碼雜湊，請移到安全的離線位置保存。'
+            }
+        } else {
+            $state.recovery_account_status = 'declined'
+            Save-Diagnostics
+            Write-Warning '已略過帳號匯入；下次啟動仍會再次詢問。'
+        }
+    }
+
+    if ($adminRecoveryRequested) {
+        if ($Mode -eq 'Check') {
+            throw '偵測到 admin 密碼恢復要求；請使用「啟動家中伺服器.bat」完成操作。'
+        }
+        Write-Host ''
+        Write-Host '偵測到 admin 密碼恢復要求。' -ForegroundColor Yellow
+        Write-Host '此操作只在家中主機本地執行，會先驗證既有帳號與資料金鑰。'
+        Write-Host '不會修改地主、土地、持分、案件或附件資料。'
+        $adminRecoveryAnswer = (Read-Host '是否現在重設 admin 密碼？請輸入 Y 或 N').Trim()
+        if ($adminRecoveryAnswer -match '^(?i:y|yes|是)$') {
+            $adminRecoveryCode = Invoke-ServerTool -Arguments @(
+                '--postgres', '--recover-admin-password'
+            )
+            if ($adminRecoveryCode -ne 0) {
+                $state.admin_password_recovery = 'error'
+                Save-Diagnostics
+                throw 'admin 密碼恢復失敗；原密碼與所有正式資料均未修改。'
+            }
+            $state.admin_password_recovery = 'complete'
+            Save-Diagnostics
+            Remove-Item -LiteralPath $adminRecoveryRequest -Force
+            Write-Host 'admin 密碼已安全重設；恢復要求檔已自動刪除。' -ForegroundColor Green
+        } else {
+            $state.admin_password_recovery = 'declined'
+            Save-Diagnostics
+            Write-Warning '已略過 admin 密碼恢復；下次啟動仍會再次詢問。'
+        }
+    }
+
+    if ($migrationFiles.Count -eq 1) {
+        if ($Mode -eq 'Check') {
+            throw '偵測到待匯入的單機資料遷移包；請使用「啟動家中伺服器.bat」完成匯入。'
+        }
+        $migrationFile = $migrationFiles[0]
+        Write-Host ''
+        Write-Host "偵測到單機資料遷移包：$($migrationFile.Name)" -ForegroundColor Yellow
+        Write-Host '系統會先驗證單機帳號與家中伺服器 admin，並建立匯入前 PostgreSQL 備份。'
+        Write-Host '家中伺服器的帳號與密碼會保留；單機資料會改用伺服器共用金鑰重新加密。'
+        Write-Host '先前刪除測試資料留下的孤立地主／土地會安全清理；回收桶與操作紀錄會保留。'
+        Write-Host '若伺服器已有正式業務資料，系統會停止，避免覆蓋或重複匯入。'
+        $migrationAnswer = (Read-Host '是否現在匯入？請輸入 Y 或 N').Trim()
+        if ($migrationAnswer -match '^(?i:y|yes|是)$') {
+            $migrationCode = Invoke-ServerTool -Arguments @(
+                '--postgres', '--import-migration-package', $migrationFile.FullName
+            )
+            if ($migrationCode -ne 0) {
+                $state.migration_package_status = 'error'
+                Save-Diagnostics
+                throw '單機資料遷移失敗；請保留遷移包與診斷檔，原伺服器帳號未被覆蓋。'
+            }
+            $state.migration_package_status = 'imported'
+            $state.migration_backup = Join-Path $env:LOCALAPPDATA 'LandCustomerSystem\postgres-backups'
+            Save-Diagnostics
+            Write-Host '單機資料已匯入並通過筆數與關聯驗證。' -ForegroundColor Green
+            $deleteMigration = (Read-Host '是否刪除已使用的遷移包？建議驗證手機與筆電後再刪除，現在請輸入 Y 或 N').Trim()
+            if ($deleteMigration -match '^(?i:y|yes|是)$') {
+                Remove-Item -LiteralPath $migrationFile.FullName -Force
+                Write-Host '遷移包已刪除。'
+            } else {
+                $migrationArchiveDirectory = Join-Path $env:LOCALAPPDATA 'LandCustomerSystem\migration-archives'
+                New-Item -ItemType Directory -Path $migrationArchiveDirectory -Force | Out-Null
+                $archivedMigration = Join-Path $migrationArchiveDirectory $migrationFile.Name
+                if (Test-Path -LiteralPath $archivedMigration -PathType Leaf) {
+                    $archiveStamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+                    $archivedMigration = Join-Path $migrationArchiveDirectory ("{0}-{1}.zip" -f $migrationFile.BaseName, $archiveStamp)
+                }
+                Move-Item -LiteralPath $migrationFile.FullName -Destination $archivedMigration
+                Write-Warning "遷移包已移到安全封存位置，避免下次重複匯入：$archivedMigration"
+            }
+        } else {
+            $state.migration_package_status = 'declined'
+            Save-Diagnostics
+            Write-Warning '已略過資料遷移；下次啟動仍會再次詢問。'
+        }
+    }
+
+    if ($script:existingServerProcess) {
+        $state.status = 'already_running'
+        $state.stage = 'ready'
+        $state.message = '帳號處理完成；家中伺服器原本已在執行。'
+        $state.process_id = $script:existingServerProcess
+        Save-Diagnostics
+        Write-Host $state.message
+        Write-Host "手機網址：$($state.api_url)"
+        exit 0
+    }
+
     if ($Mode -eq 'Check') {
         $state.status = 'ok'
         $state.stage = 'complete'
@@ -393,7 +586,7 @@ try {
         exit 0
     }
 
-    Set-Stage -Name 'https' -Description '[5/7] 建立包含目前 NetBird IP 的 HTTPS 憑證...'
+    Set-Stage -Name 'https' -Description '[6/8] 建立包含目前 NetBird IP 的 HTTPS 憑證...'
     $httpsCode = Invoke-ServerTool -Arguments @('--setup-https', '--prefer-vpn')
     if ($httpsCode -ne 0 -or
         -not (Test-Path -LiteralPath $serverCertificate -PathType Leaf) -or
@@ -401,6 +594,9 @@ try {
         throw 'HTTPS 憑證建立失敗。'
     }
     $state.https_certificate = $serverCertificate
+    if (Test-Path -LiteralPath $caCertificate -PathType Leaf) {
+        $state.certificate_sha256 = (Get-FileHash -LiteralPath $caCertificate -Algorithm SHA256).Hash
+    }
     Save-Diagnostics
 
     $state.certificate_url = "http://${vpnIp}:8733/"
@@ -410,8 +606,8 @@ try {
     }
     Save-Diagnostics
 
-    Set-Stage -Name 'backup' -Description '[6/7] 檢查每日 PostgreSQL 備份...'
-    $backupCode = Invoke-ServerTool -Arguments @('--backup-if-due-hours', '24', '--backup-label', 'auto')
+    Set-Stage -Name 'backup' -Description '[7/8] 檢查每日 PostgreSQL 備份...'
+    $backupCode = Invoke-ServerTool -Arguments @('--postgres', '--backup-if-due-hours', '24', '--backup-label', 'auto')
     if ($backupCode -eq 0) {
         $state.backup_status = 'ok'
     } else {
@@ -425,6 +621,7 @@ try {
     Write-Host 'NetBird 私人 VPN 已就緒。'
     Write-Host "手機瀏覽器：$($state.api_url)"
     Write-Host "iPhone 首次安裝公開憑證：$($state.certificate_url)"
+    Write-Host "公開 CA SHA-256 指紋：$($state.certificate_sha256)"
     Write-Host '公司筆電請使用同一個 NetBird 帳號及新版客戶端。'
     Write-Host '請勿在路由器開放 8732、8733 或 PostgreSQL 5432。'
     Write-Host ''

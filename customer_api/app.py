@@ -10,11 +10,13 @@ from customer_api.auth import LoginThrottle, SessionStore
 from customer_api.config import ApiSettings
 from customer_api.data_sources import CustomerDataSource, create_data_source
 from customer_api.dependencies import build_auth_dependencies
+from customer_api.error_reporting import install_server_error_reporting
 from customer_api.middleware import install_mobile_security_headers
 from customer_api.routes_attachments import register_attachment_routes
 from customer_api.routes_contacts import register_contact_routes
 from customer_api.routes_core import register_core_routes
 from customer_api.routes_desktop_features import register_desktop_feature_routes
+from customer_api.routes_field_visits import register_field_visit_routes
 from customer_api.routes_followups import register_followup_routes
 from customer_api.routes_projects import register_project_routes
 from customer_api.routes_records import register_record_routes
@@ -49,6 +51,7 @@ def create_app(
     app.state.data_source = source
     app.state.sessions = sessions
 
+    install_server_error_reporting(app)
     install_mobile_security_headers(app)
     current_session, editor_user = build_auth_dependencies(sessions, bearer)
 
@@ -73,6 +76,7 @@ def create_app(
         register_project_routes,
         register_tag_routes,
         register_desktop_feature_routes,
+        register_field_visit_routes,
         register_remote_operation_routes,
     ):
         registrar(

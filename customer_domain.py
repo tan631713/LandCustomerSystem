@@ -110,9 +110,9 @@ def format_ping_text(value):
 
 def mask_identity_text(value):
     text = str(value or "").strip()
-    if len(text) <= 4:
+    if len(text) <= 5:
         return text
-    return text[:3] + ("*" * (len(text) - 4)) + text[-1]
+    return text[:4] + ("*" * (len(text) - 5)) + text[-1]
 
 
 def normalize_text(value):

@@ -80,9 +80,15 @@ class CustomerMigrationTests(unittest.TestCase):
                     "WHERE type = 'index' AND tbl_name = 'customers'"
                 )
             }
+            attachment_columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(customer_attachments)")
+            }
 
         self.assertEqual(version, LATEST_SCHEMA_VERSION)
-        self.assertEqual([row["version"] for row in history], [1, 2, 3, 4, 5, 6, 7])
+        self.assertEqual(
+            [row["version"] for row in history], [1, 2, 3, 4, 5, 6, 7, 8, 9]
+        )
         self.assertEqual(customer["owner_name"], "王小明")
         self.assertEqual(customer["external_id"], "A123456789")
         self.assertTrue(
@@ -126,16 +132,35 @@ class CustomerMigrationTests(unittest.TestCase):
             }
             & indexes
         )
+        self.assertIn("category", attachment_columns)
+        self.assertIn("created_by", attachment_columns)
         self.assertEqual(len(list((self.root / "backups").glob("customers-pre-migration-*.db"))), 1)
 
         self.repository.init_db()
 
         self.assertEqual(len(list((self.root / "backups").glob("customers-pre-migration-*.db"))), 1)
+
+    def test_version_nine_adds_attachment_uploader_to_existing_database(self):
+        self.repository.init_db()
+        with self.database.connect() as conn:
+            conn.execute("DELETE FROM schema_migrations WHERE version = 9")
+            conn.execute("ALTER TABLE customer_attachments DROP COLUMN created_by")
+
+        self.repository.init_db()
+        with self.database.connect() as conn:
+            columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(customer_attachments)")
+            }
+            version = self.repository.migrations.current_version(conn)
+
+        self.assertEqual(version, 9)
+        self.assertIn("created_by", columns)
 
     def test_legacy_contact_log_shape_is_rebuilt_without_losing_data(self):
         self.repository.init_db()
         with self.database.connect() as conn:
-            conn.execute("DELETE FROM schema_migrations WHERE version = 7")
+            conn.execute("DELETE FROM schema_migrations WHERE version >= 7")
             conn.execute("DROP TABLE contact_logs")
             conn.executescript(
                 """

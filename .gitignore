@@ -11,6 +11,9 @@ venv/
 build/
 dist/
 releases/
+output/
+test-artifacts/
+tmp/
 *.spec
 *.zip
 *.sha256.txt

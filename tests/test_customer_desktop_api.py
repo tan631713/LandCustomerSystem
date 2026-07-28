@@ -33,6 +33,8 @@ class FakeResponse:
     def read(self):
         if self.payload is None:
             return b""
+        if isinstance(self.payload, bytes):
+            return self.payload
         return json.dumps(self.payload, ensure_ascii=False).encode("utf-8")
 
 
@@ -68,7 +70,32 @@ class DesktopApiClientTests(unittest.TestCase):
                         "updated_ids": [9],
                     }
                 )
+            if path.path == "/api/v1/field-visits/today":
+                return FakeResponse({"item": None})
+            if path.path == "/api/v1/field-visits":
+                return FakeResponse(
+                    {
+                        "id": 21,
+                        "visit_date": "2026-07-29",
+                        "title": "桃園外勤",
+                        "status": "planned",
+                    }
+                )
+            if path.path == "/api/v1/field-visits/21/items":
+                return FakeResponse(
+                    {
+                        "route_id": 21,
+                        "added_count": 2,
+                        "existing_count": 0,
+                        "item_ids": [31, 32],
+                    }
+                )
             if path.path == "/api/v1/records/9" and request.method == "PUT":
+                return FakeResponse({"id": 9})
+            if (
+                path.path == "/api/v1/records/9/with-history"
+                and request.method == "PUT"
+            ):
                 return FakeResponse({"id": 9})
             if path.path == "/api/v1/records/9/contact-logs":
                 if request.method == "GET":
@@ -120,6 +147,8 @@ class DesktopApiClientTests(unittest.TestCase):
                 return FakeResponse({"id": 6})
             if path.path == "/api/v1/records/9/attachments/upload":
                 return FakeResponse({"id": 7})
+            if path.path == "/api/v1/records/9/attachments/6/content":
+                return FakeResponse(b"remote attachment content")
             if path.path in {
                 "/api/v1/records/9/attachments/6",
                 "/api/v1/records/9/attachments/7",
@@ -141,6 +170,20 @@ class DesktopApiClientTests(unittest.TestCase):
         self.assertEqual(self.client.create_record({"district": "桃園區"}), 9)
         self.assertEqual(
             self.client.replace_record(9, {"district": "中壢區"}), 9
+        )
+        self.assertEqual(
+            self.client.replace_record_with_history(
+                9,
+                {"district": "中壢區"},
+                [
+                    {
+                        "record_id": 9,
+                        "field_key": "district",
+                        "field_label": "地區",
+                    }
+                ],
+            ),
+            9,
         )
         self.assertEqual(self.client.list_contact_logs(9)[0]["id"], 5)
         self.assertEqual(
@@ -171,6 +214,10 @@ class DesktopApiClientTests(unittest.TestCase):
         self.assertTrue(self.client.delete_tag(4))
         self.assertEqual(self.client.list_attachments(9)[0]["id"], 6)
         self.assertEqual(
+            self.client.download_attachment_content(9, 6),
+            b"remote attachment content",
+        )
+        self.assertEqual(
             self.client.add_external_attachment(9, "C:/docs/a.pdf", "謄本"), 6
         )
         with tempfile.TemporaryDirectory() as temporary:
@@ -190,6 +237,17 @@ class DesktopApiClientTests(unittest.TestCase):
         )
         self.assertEqual(import_result["batch_id"], 12)
         self.assertEqual(import_result["inserted_ids"], [11])
+        self.assertIsNone(self.client.get_field_visit_for_date("2026-07-29"))
+        self.assertEqual(
+            self.client.create_field_visit("2026-07-29", "桃園外勤")["id"],
+            21,
+        )
+        self.assertEqual(
+            self.client.add_field_visit_records(
+                21, [2, 1, 2], priority=100
+            )["added_count"],
+            2,
+        )
         self.assertTrue(self.client.delete_record(9))
         authenticated_requests = [
             request for request, _timeout in self.requests
@@ -197,6 +255,26 @@ class DesktopApiClientTests(unittest.TestCase):
         ]
         self.assertTrue(
             all(request.get_header("Authorization") == "Bearer test-token" for request in authenticated_requests)
+        )
+        field_visit_writes = [
+            request
+            for request, _timeout in self.requests
+            if request.method == "POST"
+            and "/field-visits" in urlparse(request.full_url).path
+        ]
+        self.assertEqual(len(field_visit_writes), 2)
+        self.assertTrue(
+            all(request.get_header("Idempotency-key") for request in field_visit_writes)
+        )
+        add_payload = json.loads(field_visit_writes[-1].data.decode("utf-8"))
+        self.assertEqual(
+            add_payload,
+            {
+                "items": [
+                    {"ownership_id": 2, "priority": 100},
+                    {"ownership_id": 1, "priority": 100},
+                ]
+            },
         )
         self.client.logout()
         self.assertFalse(self.client.authenticated)
@@ -407,6 +485,7 @@ class FakeRecordClient:
         self.external_attachments = []
         self.managed_attachments = []
         self.deleted_attachments = []
+        self.downloaded_attachments = []
         self.projects = [
             {"id": 8, "title": "整合案", "status": "進行中", "customer_count": 0}
         ]
@@ -415,6 +494,7 @@ class FakeRecordClient:
         self.project_record_updates = []
         self.imported_batches = []
         self.change_logs = []
+        self.replaced_with_history = []
         self.custom_fields = [{"id": 3, "field_key": "stage", "label": "開發階段"}]
         self.custom_values = {2: {3: "初談"}}
         self.text_templates = [
@@ -424,6 +504,8 @@ class FakeRecordClient:
         self.operation_logs = []
         self.locations = []
         self.duplicate_pairs = set()
+        self.field_visit_route = None
+        self.field_visit_additions = []
 
     @staticmethod
     def record(record_id, owner_name):
@@ -458,8 +540,42 @@ class FakeRecordClient:
         self.replaced.append((record_id, dict(values)))
         return record_id
 
+    def replace_record_with_history(self, record_id, values, change_logs):
+        self.replaced_with_history.append(
+            (int(record_id), dict(values), [dict(item) for item in change_logs])
+        )
+        self.change_logs.extend(dict(item) for item in change_logs)
+        return int(record_id)
+
     def delete_record(self, record_id):
         self.deleted.append(record_id)
+
+    def get_field_visit_for_date(self, visit_date):
+        if (
+            self.field_visit_route
+            and self.field_visit_route.get("visit_date") == str(visit_date)
+        ):
+            return dict(self.field_visit_route)
+        return None
+
+    def create_field_visit(self, visit_date, title="今日拜訪行程"):
+        self.field_visit_route = {
+            "id": 21,
+            "visit_date": str(visit_date),
+            "title": str(title),
+            "status": "planned",
+        }
+        return dict(self.field_visit_route)
+
+    def add_field_visit_records(self, route_id, record_ids, *, priority=0):
+        ids = list(record_ids)
+        self.field_visit_additions.append((int(route_id), ids, int(priority)))
+        return {
+            "route_id": int(route_id),
+            "added_count": len(ids),
+            "existing_count": 0,
+            "item_ids": list(range(31, 31 + len(ids))),
+        }
 
     def import_records(self, items, source_file_name="import.xlsx"):
         self.imported_batches.append((list(items), source_file_name))
@@ -615,6 +731,10 @@ class FakeRecordClient:
         ]
         return True
 
+    def download_attachment_content(self, record_id, attachment_id):
+        self.downloaded_attachments.append((int(record_id), int(attachment_id)))
+        return b"managed attachment downloaded from home server"
+
     def list_record_change_logs(self, record_id, limit=300):
         return [
             dict(row)
@@ -757,8 +877,45 @@ class DesktopApiRecordRepositoryTests(unittest.TestCase):
         self.assertEqual(client.created[0]["address"], "測試地址")
         self.assertEqual(repository.update_customers([{**encrypted, "id": 2}]), 1)
         self.assertEqual(client.replaced[0][0], 2)
+        self.assertEqual(
+            repository.save_customer_with_change_logs(
+                encrypted,
+                2,
+                [
+                    {
+                        "customer_id": 2,
+                        "action_type": "修改資料",
+                        "field_key": "address",
+                        "field_label": "地址",
+                        "old_value": "舊地址",
+                        "new_value": "測試地址",
+                    }
+                ],
+            ),
+            2,
+        )
+        self.assertEqual(client.replaced_with_history[0][0], 2)
+        self.assertEqual(
+            client.replaced_with_history[0][2][0]["record_id"], 2
+        )
         self.assertEqual(repository.delete_customers([2, 1, 2]), 2)
         self.assertEqual(client.deleted, [1, 2])
+        field_visit = repository.add_customers_to_field_visit(
+            [2, 1, 2],
+            visit_date="2026-07-29",
+            title="桃園外勤",
+            priority=100,
+        )
+        self.assertEqual(field_visit["route_id"], 21)
+        self.assertEqual(field_visit["added_count"], 2)
+        self.assertEqual(field_visit["priority"], 100)
+        self.assertEqual(client.field_visit_additions, [(21, [2, 1], 100)])
+        repository.add_customers_to_field_visit(
+            [1],
+            visit_date="2026-07-29",
+            title="不應覆蓋既有名稱",
+        )
+        self.assertEqual(client.field_visit_route["title"], "桃園外勤")
 
         import_result = repository.import_records(
             [{**encrypted, "_duplicate_reason": "資料庫已存在", "_row_number": 2}],
@@ -844,9 +1001,20 @@ class DesktopApiRecordRepositoryTests(unittest.TestCase):
                 7,
             )
         self.assertEqual(len(repository.list_customer_attachments(2)), 2)
+        with tempfile.TemporaryDirectory() as temporary:
+            cached = Path(
+                repository.download_customer_attachment(7, Path(temporary))
+            )
+            self.assertTrue(cached.is_file())
+            self.assertEqual(
+                cached.read_bytes(),
+                b"managed attachment downloaded from home server",
+            )
+            self.assertEqual(client.downloaded_attachments, [(2, 7)])
+            self.assertIn("managed.txt", cached.name)
         self.assertEqual(repository.delete_customer_attachment(7), 1)
         self.assertEqual(client.deleted_attachments, [(2, 7)])
-        self.assertEqual(repository.data_revision, 19)
+        self.assertEqual(repository.data_revision, 20)
 
     def test_record_adapter_supports_remote_desktop_productivity_features(self):
         client = FakeRecordClient()

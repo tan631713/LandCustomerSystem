@@ -39,6 +39,7 @@ from customer_extra_dialogs import (
     CustomFieldManagementDialog,
     CustomerCustomValuesDialog,
     CustomerTagsDialog,
+    FieldVisitScheduleDialog,
     HealthCheckDialog,
     MergeRecordsDialog,
     TagManagementDialog,
@@ -372,14 +373,26 @@ class UiComponentTests(unittest.TestCase):
         tags = [{"id": 2, "name": "Important", "color": "#ffcc00", "customer_count": 1}]
         fields = [{"id": 3, "field_key": "extra", "label": "Extra"}]
         templates = [{"id": 4, "template_type": "note", "title": "Note", "content": "Call back"}]
+        opened_attachments = []
         dialogs = [
             CaseManagementDialog(cases),
             CaseSelectDialog(cases, 2),
+            FieldVisitScheduleDialog(3),
             TagManagementDialog(tags),
             CustomerTagsDialog(tags, {2}, "ID 1"),
             AttachmentDialog(
-                [{"id": 5, "file_path": "C:/tmp/a.pdf", "description": "contract", "created_at": "2026-07-13"}],
+                [{
+                    "id": 5,
+                    "file_path": "C:/server/attachments/5/a.pdf",
+                    "original_name": "a.pdf",
+                    "description": "contract",
+                    "status": "managed",
+                    "created_at": "2026-07-13",
+                }],
                 "ID 1",
+                open_attachment=lambda attachment: opened_attachments.append(
+                    int(attachment["id"])
+                ),
             ),
             CustomFieldManagementDialog(fields),
             CustomerCustomValuesDialog(fields, {3: "value"}, "ID 1"),
@@ -406,16 +419,25 @@ class UiComponentTests(unittest.TestCase):
         try:
             self.assertEqual(dialogs[0].table.rowCount(), 1)
             self.assertEqual(dialogs[1].selected_case_id(), 1)
-            self.assertEqual(dialogs[3].selected_ids(), [2])
-            self.assertEqual(dialogs[6].result_values()[3], "value")
-            self.assertEqual(dialogs[8].values()["template"]["title"], "Note")
-            self.assertEqual(dialogs[11].table.rowCount(), 1)
-            dialogs[12].list_widget.item(0).setCheckState(Qt.Checked)
-            self.assertEqual(dialogs[12].selected_ids(), [2])
-            checkbox, edit = dialogs[13].rows[3]
+            self.assertEqual(dialogs[2].title(), "今日拜訪行程")
+            self.assertRegex(dialogs[2].selected_date(), r"^\d{4}-\d{2}-\d{2}$")
+            self.assertEqual(dialogs[2].priority(), 0)
+            dialogs[2].priority_checkbox.setChecked(True)
+            self.assertEqual(dialogs[2].priority(), 100)
+            self.assertEqual(dialogs[4].selected_ids(), [2])
+            dialogs[5].table.selectRow(0)
+            dialogs[5].open_selected_file()
+            self.assertEqual(opened_attachments, [5])
+            self.assertEqual(dialogs[5].table.item(0, 1).text(), "a.pdf")
+            self.assertEqual(dialogs[7].result_values()[3], "value")
+            self.assertEqual(dialogs[9].values()["template"]["title"], "Note")
+            self.assertEqual(dialogs[12].table.rowCount(), 1)
+            dialogs[13].list_widget.item(0).setCheckState(Qt.Checked)
+            self.assertEqual(dialogs[13].selected_ids(), [2])
+            checkbox, edit = dialogs[14].rows[3]
             checkbox.setChecked(True)
             edit.setText("batch value")
-            self.assertEqual(dialogs[13].result_values(), {3: "batch value"})
+            self.assertEqual(dialogs[14].result_values(), {3: "batch value"})
         finally:
             for dialog in dialogs:
                 dialog.close()

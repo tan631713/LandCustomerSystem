@@ -10,7 +10,8 @@ class PostgreSQLCollaborationMixin:
             rows = conn.execute(
                 """
                 SELECT id, ownership_id AS customer_id, contact_date, method,
-                       result, next_follow_up, note, created_at
+                       result, next_follow_up, note, latitude, longitude,
+                       field_visit_route_item_id, created_at
                 FROM contact_logs WHERE ownership_id = %s
                 ORDER BY COALESCE(contact_date, created_at::date) DESC, id DESC
                 """,
@@ -18,19 +19,40 @@ class PostgreSQLCollaborationMixin:
             ).fetchall()
         return [_row_dict(row) for row in rows]
 
-    def add_contact_log(self, user, record_id, values):
+    def add_contact_log(
+        self,
+        user,
+        record_id,
+        values,
+        idempotency_key=None,
+        request_hash=None,
+    ):
         with self._connect() as conn:
             exists = conn.execute(
                 "SELECT 1 FROM ownerships WHERE id = %s", (int(record_id),)
             ).fetchone()
             if not exists:
                 raise KeyError(record_id)
+            if idempotency_key is not None:
+                self._lock_idempotency_key(conn, user.id, idempotency_key)
+                cached = self._cached_idempotency_result(
+                    conn, user.id, idempotency_key, request_hash
+                )
+                if cached is not None:
+                    return int(cached["id"])
+            field_visit_item_id = values.get("field_visit_route_item_id")
+            if field_visit_item_id is not None:
+                field_visit_item_id = self._require_field_visit_item_link(
+                    conn, user, record_id, field_visit_item_id
+                )
             row = conn.execute(
                 """
                 INSERT INTO contact_logs (
                     ownership_id, contact_date, method, result, next_follow_up,
-                    note, created_by
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id
+                    note, latitude, longitude, field_visit_route_item_id,
+                    created_by
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
                 """,
                 (
                     int(record_id),
@@ -39,6 +61,9 @@ class PostgreSQLCollaborationMixin:
                     values.get("result") or None,
                     values.get("next_follow_up") or None,
                     values.get("note") or None,
+                    values.get("latitude"),
+                    values.get("longitude"),
+                    field_visit_item_id,
                     user.id,
                 ),
             ).fetchone()
@@ -55,6 +80,15 @@ class PostgreSQLCollaborationMixin:
                     f"Created contact log for ownership {int(record_id)}",
                 ),
             )
+            if idempotency_key is not None:
+                self._save_idempotency_result(
+                    conn,
+                    user.id,
+                    idempotency_key,
+                    request_hash,
+                    {"id": int(row["id"])},
+                    status_code=201,
+                )
         return int(row["id"])
 
     def delete_contact_log(self, user, record_id, log_id):

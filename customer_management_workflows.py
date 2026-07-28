@@ -3,12 +3,60 @@
 import sqlite3
 
 from customer_desktop_api import DesktopApiError
+from customer_desktop import open_path_or_web_url
 from customer_fields import LAND_FIELDS
 from customer_security import decrypt_value, encrypt_record, encrypt_value
 from PySide6.QtWidgets import QDialog
 
 
 class ManagementWorkflowMixin:
+    def add_selected_records_to_field_visit(self):
+        if not getattr(self, "api_mode", False):
+            self._app_component("QMessageBox").information(
+                self,
+                "需要連線伺服器",
+                "今日行程由網路伺服器統一管理，請使用公司筆電客戶端連線後操作。",
+            )
+            return
+        if not self.ensure_can_modify("加入今日行程"):
+            return
+        record_ids = self.selected_or_checked_record_ids()
+        if not record_ids:
+            self._app_component("QMessageBox").warning(
+                self,
+                "未選取資料",
+                "請先選取或勾選要加入今日行程的資料。",
+            )
+            return
+        dialog = self._app_component("FieldVisitScheduleDialog")(
+            len(record_ids), self
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return
+        repository = self.active_record_repository()
+        try:
+            result = repository.add_customers_to_field_visit(
+                record_ids,
+                visit_date=dialog.selected_date(),
+                title=dialog.title(),
+                priority=dialog.priority(),
+            )
+        except (DesktopApiError, ValueError) as exc:
+            self._app_component("QMessageBox").critical(
+                self, "加入行程失敗", str(exc)
+            )
+            return
+        added = int(result.get("added_count") or 0)
+        existing = int(result.get("existing_count") or 0)
+        message = f"已加入 {added} 筆資料到 {result.get('visit_date')} 的行程。"
+        if added and int(result.get("priority") or 0) > 0:
+            message += "\n本次新增資料已設為優先拜訪。"
+        if existing:
+            message += f"\n另有 {existing} 筆原本已在該行程內。"
+        self._app_component("QMessageBox").information(
+            self, "加入行程完成", message
+        )
+
     def manage_cases(self):
         repository = self.active_record_repository()
         try:
@@ -276,10 +324,28 @@ class ManagementWorkflowMixin:
         if plain_data is None:
             self._app_component("QMessageBox").warning(self, "未選取資料", "請先選取一筆資料。")
             return
+        open_attachment = None
+        if self.api_mode:
+            def open_attachment(attachment):
+                try:
+                    if str(attachment.get("status") or "").casefold() == "external":
+                        target = str(attachment.get("file_path") or "")
+                    else:
+                        target = repository.download_customer_attachment(
+                            attachment.get("id")
+                        )
+                except (DesktopApiError, OSError, ValueError) as exc:
+                    self._app_component("QMessageBox").warning(
+                        self, "附件開啟失敗", str(exc)
+                    )
+                    return False
+                return open_path_or_web_url(target, self, item_label="附件")
+
         dialog = self._app_component("AttachmentDialog")(
             attachments,
             self.record_label(self.selected_record_id, plain_data),
             self,
+            open_attachment=open_attachment,
         )
         if dialog.exec() != QDialog.Accepted:
             return

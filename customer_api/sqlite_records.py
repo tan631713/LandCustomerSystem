@@ -43,6 +43,16 @@ class SQLiteRecordMixin:
         )
         return saved_id
 
+    def save_record_with_change_logs(
+        self, user, values, record_id, change_logs
+    ):
+        saved_id = self.save_record(user, values, record_id=record_id)
+        normalized_logs = [
+            {**dict(item), "record_id": saved_id} for item in change_logs
+        ]
+        self.add_record_change_logs(user, normalized_logs)
+        return saved_id
+
     def delete_record(self, user, record_id):
         record_id = int(record_id)
         if self.repository.get_customer(record_id) is None:

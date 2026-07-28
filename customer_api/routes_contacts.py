@@ -1,10 +1,20 @@
 """Contact-log routes."""
 
 from typing import Annotated
-from fastapi import Depends, HTTPException
+from fastapi import Depends, Header, HTTPException
 from customer_api.auth import ApiSession
+from customer_api.field_visit_service import (
+    FieldVisitIdempotencyConflict,
+    field_visit_request_hash,
+)
 from customer_api.schemas import ContactLogCreate
 from customer_api.types import AuthenticatedUser
+
+
+OptionalIdempotencyKey = Annotated[
+    str | None,
+    Header(alias="Idempotency-Key", min_length=8, max_length=200),
+]
 
 
 def register_contact_routes(app, *, settings, source, current_session, editor_user):
@@ -22,10 +32,21 @@ def register_contact_routes(app, *, settings, source, current_session, editor_us
         record_id: int,
         payload: ContactLogCreate,
         user: Annotated[AuthenticatedUser, Depends(editor_user)],
+        idempotency_key: OptionalIdempotencyKey = None,
     ):
         values = payload.model_dump(mode="json")
         try:
-            log_id = source.add_contact_log(user, record_id, values)
+            request_hash = field_visit_request_hash(
+                "create_contact_log",
+                {"record_id": int(record_id), "values": values},
+            )
+            log_id = source.add_contact_log(
+                user,
+                record_id,
+                values,
+                idempotency_key=idempotency_key,
+                request_hash=request_hash,
+            )
             if values.get("next_follow_up"):
                 source.save_follow_up(
                     user,
@@ -38,6 +59,17 @@ def register_contact_routes(app, *, settings, source, current_session, editor_us
                 )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="找不到資料。") from exc
+        except PermissionError as exc:
+            raise HTTPException(
+                status_code=403, detail="不能將紀錄加入其他使用者的外勤行程。"
+            ) from exc
+        except FieldVisitIdempotencyConflict as exc:
+            raise HTTPException(
+                status_code=409,
+                detail="這筆聯絡紀錄已用相同識別碼送出，請重新整理後再試。",
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"id": log_id}
 
     @app.delete(

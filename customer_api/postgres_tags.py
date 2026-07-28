@@ -92,6 +92,7 @@ class PostgreSQLTagMixin:
 
     @staticmethod
     def _require_ids(conn, table, ids):
+        ids = PostgreSQLTagMixin._normalize_ids(ids)
         if not ids:
             return
         rows = conn.execute(

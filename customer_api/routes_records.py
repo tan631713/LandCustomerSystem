@@ -5,7 +5,11 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, Query
 
 from customer_api.auth import ApiSession
-from customer_api.schemas import RecordImportBatch, RecordWrite
+from customer_api.schemas import (
+    RecordImportBatch,
+    RecordUpdateWithHistory,
+    RecordWrite,
+)
 from customer_api.types import AuthenticatedUser
 
 
@@ -61,6 +65,28 @@ def register_record_routes(app, *, settings, source, current_session, editor_use
         try:
             saved_id = source.save_record(
                 user, payload.normalized_values(), record_id=record_id
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="找不到資料。") from exc
+        return {"id": saved_id}
+
+    @app.put("/api/v1/records/{record_id}/with-history")
+    def replace_record_with_history(
+        record_id: int,
+        payload: RecordUpdateWithHistory,
+        user: Annotated[AuthenticatedUser, Depends(editor_user)],
+    ):
+        if any(item.record_id != record_id for item in payload.change_logs):
+            raise HTTPException(
+                status_code=409,
+                detail="修改紀錄的資料 ID 與更新目標不一致。",
+            )
+        try:
+            saved_id = source.save_record_with_change_logs(
+                user,
+                payload.values.normalized_values(),
+                record_id,
+                [item.model_dump() for item in payload.change_logs],
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="找不到資料。") from exc

@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import tempfile
@@ -168,6 +169,29 @@ class PostgreSQLBackupMaintenanceTests(unittest.TestCase):
 
 
 class ProductionLauncherTests(unittest.TestCase):
+    def test_server_packager_rejects_stale_acceptance_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            current_report = {"success": True, "version": build_postgresql_release.APP_VERSION}
+            (root / "release-acceptance-report.json").write_text(
+                json.dumps(current_report), encoding="utf-8"
+            )
+            executable_report = (
+                root
+                / f"release-acceptance-exe-v{build_postgresql_release.APP_VERSION}.json"
+            )
+            executable_report.write_text(
+                json.dumps(current_report), encoding="utf-8"
+            )
+            with patch.object(build_postgresql_release, "ROOT", root):
+                build_postgresql_release.validate_acceptance_documents()
+                executable_report.write_text(
+                    json.dumps({"success": True, "version": "0.0.0"}),
+                    encoding="utf-8",
+                )
+                with self.assertRaises(RuntimeError):
+                    build_postgresql_release.validate_acceptance_documents()
+
     def test_server_packager_normalizes_launcher_to_ascii_crlf(self):
         with tempfile.TemporaryDirectory() as directory:
             destination = Path(directory) / "launcher.bat"
@@ -214,7 +238,28 @@ class ProductionLauncherTests(unittest.TestCase):
         self.assertIn("home_server_runtime.ps1", launcher)
         self.assertIn("--postgres', '--check", runtime)
         self.assertIn("--setup-https', '--prefer-vpn", runtime)
-        self.assertIn("--backup-if-due-hours', '24", runtime)
+        self.assertIn("'--postgres', '--backup-if-due-hours', '24", runtime)
+        self.assertLess(
+            runtime.index("'--postgres', '--backup-if-due-hours', '24"),
+            runtime.index("'--postgres', '--check'"),
+        )
+        self.assertIn("既有 PostgreSQL 連線設定無法完成備份", runtime)
+        self.assertIn(
+            "'--postgres', '--backup', '--backup-label', 'pre-upgrade-repaired'",
+            runtime,
+        )
+        self.assertIn("連線設定已修復，但升級前完整備份仍失敗", runtime)
+        self.assertIn("$ErrorActionPreference = 'Continue'", runtime)
+        self.assertIn("2>&1 | Out-Host", runtime)
+        self.assertIn("*.lcs-account", runtime)
+        self.assertIn("--import-recovery-account", runtime)
+        self.assertIn("recover-admin-password.request", runtime)
+        self.assertIn("--recover-admin-password", runtime)
+        self.assertIn("*.lcs-migration.zip", runtime)
+        self.assertIn("--import-migration-package", runtime)
+        self.assertIn("migration-archives", runtime)
+        self.assertIn("伺服器共用金鑰重新加密", runtime)
+        self.assertIn("不會覆蓋地主、土地、持分或案件資料", runtime)
         self.assertIn("--postgres', '--lan', '--prefer-vpn", runtime)
         self.assertIn("home-server-diagnostics.json", runtime)
         self.assertIn("Netbird.Netbird", runtime)
@@ -237,6 +282,8 @@ class ProductionLauncherTests(unittest.TestCase):
 
         packager = (root / "build_postgresql_release.py").read_text(encoding="utf-8")
         self.assertIn("'postgres' / 'schema.sql'", packager)
+        self.assertIn('"standalone_migration_import"', packager)
+        self.assertIn('"migration_preserves_server_accounts": True', packager)
 
         self.assertIn("NetBird\\netbird.exe", vpn_firewall_script)
         self.assertIn("-LocalPort $rule.Port", vpn_firewall_script)
@@ -256,7 +303,9 @@ class ProductionLauncherTests(unittest.TestCase):
             encoding="utf-8-sig"
         )
         self.assertIn("LAND_CUSTOMER_DESKTOP_BACKEND=postgresql", company_launcher)
-        self.assertIn("LAND_CUSTOMER_API_CA_CERT=%CA_CERT%", company_launcher)
+        self.assertIn("LAND_CUSTOMER_API_CA_CERT=", company_launcher)
+        self.assertIn("取得公開 CA", company_launcher)
+        self.assertNotIn("land-customer-local-ca.pem", company_launcher)
         self.assertIn("程式會要求輸入家中伺服器的 NetBird IP", company_launcher)
         self.assertNotIn("home_server_ip.txt", company_launcher)
         self.assertNotIn("LAND_CUSTOMER_API_URL=", company_launcher)

@@ -1588,6 +1588,56 @@ class UiWorkflowTests(unittest.TestCase):
         finally:
             window.close()
 
+    def test_postgresql_user_sees_backup_health_without_admin_controls(self):
+        app.REPOSITORY.create_admin_user("test-password")
+        encryption_key = app.REPOSITORY.authenticate_user("admin", "test-password")
+
+        class UserRepository:
+            data_revision = 0
+
+            def count_customers(self):
+                return 0
+
+            def fetch_customer_page(self, limit, before_id=None):
+                del limit, before_id
+                return []
+
+            def fetch_search_candidate_rows(self, **_criteria):
+                return []
+
+            def server_backup_status(self):
+                return {
+                    "status": "ok",
+                    "backup_directory": "僅管理員可查看",
+                    "backup_count": 2,
+                    "latest_backup": "",
+                    "latest_backup_at": "2099-07-20T08:00:00+08:00",
+                    "total_bytes": 1234,
+                    "database": {"status": "ok", "record_count": 0},
+                }
+
+        window = app.LandApp(
+            encryption_key,
+            record_repository=UserRepository(),
+            api_mode=True,
+            current_user={"username": "User", "display_name": "User", "role": "editor"},
+        )
+        try:
+            self.assertTrue(window.backup_status.healthy)
+            self.assertIn("備份正常", window.backup_status_button.text())
+            self.assertTrue(
+                all(not action.isEnabled() for action in window.api_admin_only_settings_actions)
+            )
+            self.assertTrue(
+                next(
+                    action
+                    for action in window.api_supported_settings_actions
+                    if action.text() == "備份狀態"
+                ).isEnabled()
+            )
+        finally:
+            window.close()
+
 
 if __name__ == "__main__":
     unittest.main()

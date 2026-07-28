@@ -1,6 +1,8 @@
 import contextlib
 import io
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import start_api_server
@@ -74,6 +76,25 @@ class PostgreSQLHealthCheckTests(unittest.TestCase):
             )
             self.assertNotIn("CUSTOMER_API_DATABASE_URL", start_api_server.os.environ)
 
+    def test_explicit_postgres_mode_uses_stable_local_attachment_directory(self):
+        parser = start_api_server.build_parser()
+        args = parser.parse_args(["--postgres", "--check"])
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(
+                start_api_server.os.environ,
+                {"LOCALAPPDATA": directory},
+                clear=True,
+            ):
+                start_api_server.select_protected_postgres_configuration(args)
+                selected = Path(
+                    start_api_server.os.environ["CUSTOMER_API_ATTACHMENT_DIR"]
+                )
+
+            self.assertEqual(
+                selected,
+                Path(directory) / "LandCustomerSystem" / "attachments",
+            )
+
     def test_backup_in_explicit_postgres_mode_also_ignores_stale_dsn(self):
         with (
             patch.dict(
@@ -90,6 +111,12 @@ class PostgreSQLHealthCheckTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         backup_main.assert_called_once_with(["--label", "manual"])
 
+    def test_backup_failure_returns_control_to_home_server_repair_flow(self):
+        with patch("backup_postgresql.main", side_effect=RuntimeError("bad password")):
+            exit_code = start_api_server.main(["--postgres", "--backup"])
+
+        self.assertEqual(exit_code, 1)
+
     def test_connection_timeout_message_explains_the_recovery_steps(self):
         connection_timeout = type("ConnectionTimeout", (Exception,), {})
         result = start_api_server.database_check_failure(connection_timeout())
@@ -104,6 +131,22 @@ class PostgreSQLHealthCheckTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         setup_main.assert_called_once_with([])
+
+    def test_parser_accepts_recovery_account_maintenance_mode(self):
+        args = start_api_server.build_parser().parse_args(
+            ["--postgres", "--import-recovery-account", "User.lcs-account"]
+        )
+
+        self.assertTrue(args.postgres)
+        self.assertEqual(args.import_recovery_account, "User.lcs-account")
+
+    def test_parser_accepts_offline_admin_password_recovery(self):
+        args = start_api_server.build_parser().parse_args(
+            ["--postgres", "--recover-admin-password"]
+        )
+
+        self.assertTrue(args.postgres)
+        self.assertTrue(args.recover_admin_password)
 
 
 if __name__ == "__main__":

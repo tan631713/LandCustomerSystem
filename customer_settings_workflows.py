@@ -44,6 +44,8 @@ class SettingsWorkflowMixin:
         return open_local_path(backup_directory, self, item_label="備份資料夾")
 
     def manage_backups(self):
+        if self.api_mode and not self.ensure_admin("備份管理"):
+            return None
         policy = self._app_component("load_backup_policy")()
         dialog = self._app_component("BackupManagementDialog")(parent=self, **policy)
         if dialog.exec() != QDialog.Accepted:

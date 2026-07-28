@@ -57,6 +57,14 @@ class CustomerDataSource(Protocol):
         record_id: int | None = None,
     ) -> int: ...
 
+    def save_record_with_change_logs(
+        self,
+        user: AuthenticatedUser,
+        values: dict,
+        record_id: int,
+        change_logs: list[dict],
+    ) -> int: ...
+
     def delete_record(self, user: AuthenticatedUser, record_id: int) -> bool: ...
 
     def import_records(
@@ -68,7 +76,14 @@ class CustomerDataSource(Protocol):
 
     def list_contact_logs(self, user: AuthenticatedUser, record_id: int) -> list[dict]: ...
 
-    def add_contact_log(self, user: AuthenticatedUser, record_id: int, values: dict) -> int: ...
+    def add_contact_log(
+        self,
+        user: AuthenticatedUser,
+        record_id: int,
+        values: dict,
+        idempotency_key: str | None = None,
+        request_hash: str | None = None,
+    ) -> int: ...
 
     def delete_contact_log(
         self, user: AuthenticatedUser, record_id: int, log_id: int
@@ -153,6 +168,10 @@ class CustomerDataSource(Protocol):
         record_id: int,
         file_path: str,
         description: str = "",
+        category: str = "",
+        field_visit_route_item_id: int | None = None,
+        idempotency_key: str | None = None,
+        request_hash: str | None = None,
     ) -> int: ...
 
     def import_managed_attachment(
@@ -163,11 +182,78 @@ class CustomerDataSource(Protocol):
         original_name: str,
         description: str = "",
         media_type: str = "",
+        category: str = "",
+        field_visit_route_item_id: int | None = None,
+        idempotency_key: str | None = None,
+        request_hash: str | None = None,
     ) -> int: ...
+
+    def update_attachment_metadata(
+        self,
+        user: AuthenticatedUser,
+        record_id: int,
+        attachment_id: int,
+        description: str = "",
+        category: str = "",
+    ) -> bool: ...
 
     def delete_attachment(
         self, user: AuthenticatedUser, record_id: int, attachment_id: int
     ) -> bool: ...
+
+    def get_today_field_visit(
+        self, user: AuthenticatedUser, visit_date: date
+    ) -> dict | None: ...
+
+    def get_field_visit_route(
+        self, user: AuthenticatedUser, route_id: int
+    ) -> dict: ...
+
+    def create_field_visit_route(
+        self,
+        user: AuthenticatedUser,
+        values: dict,
+        *,
+        idempotency_key: str | None = None,
+        request_hash: str = "",
+    ) -> dict: ...
+
+    def add_field_visit_items(
+        self,
+        user: AuthenticatedUser,
+        route_id: int,
+        items: list[dict],
+        *,
+        idempotency_key: str | None = None,
+        request_hash: str = "",
+    ) -> dict: ...
+
+    def transition_field_visit_item(
+        self,
+        user: AuthenticatedUser,
+        item_id: int,
+        new_status: str,
+        **values,
+    ) -> dict: ...
+
+    def update_field_visit_item(
+        self,
+        user: AuthenticatedUser,
+        item_id: int,
+        **values,
+    ) -> dict: ...
+
+    def get_field_visit_route_candidates(
+        self, user: AuthenticatedUser, route_id: int
+    ) -> dict: ...
+
+    def apply_field_visit_route_order(
+        self,
+        user: AuthenticatedUser,
+        route_id: int,
+        plan_items: list[dict],
+        **values,
+    ) -> dict: ...
 
 
 def _json_value(value):
@@ -215,5 +301,5 @@ def _filter_records(records, *, query="", filters=None):
 
 def _encrypted_record(user, values):
     plain = {key: values.get(key) for key, _label in LAND_FIELDS}
-    plain["name"] = plain.get("owner_name") or None
+    plain["name"] = plain.get("owner_name") or ""
     return encrypt_record(make_fernet(user.data_key), plain)

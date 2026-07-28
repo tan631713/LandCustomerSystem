@@ -13,7 +13,7 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-from customer_version import APP_VERSION, BUILD_DATE
+from customer_version import APP_VERSION, BUILD_DATE, MOBILE_ASSET_VERSION
 
 
 ROOT = Path(__file__).resolve().parent
@@ -30,6 +30,7 @@ SUPPORT_FILES = (
 DOCUMENTS = (
     "伺服器使用說明.txt",
     "公司筆電遠端使用說明.txt",
+    "外勤模式使用與驗收說明.txt",
     "交付說明.txt",
     "簡短版變更紀錄.txt",
     "完整版變更紀錄.txt",
@@ -37,6 +38,43 @@ DOCUMENTS = (
     "release-acceptance-report.json",
     f"release-acceptance-exe-v{APP_VERSION}.json",
 )
+
+
+def validate_acceptance_documents() -> None:
+    """Prevent a current release from carrying a stale acceptance report."""
+
+    for name in (
+        "release-acceptance-report.json",
+        f"release-acceptance-exe-v{APP_VERSION}.json",
+    ):
+        path = ROOT / name
+        if not path.is_file():
+            raise RuntimeError(f"正式封裝前缺少驗收報告：{name}")
+        try:
+            report = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"驗收報告無法讀取：{name}") from exc
+        if not report.get("success") or str(report.get("version")) != APP_VERSION:
+            raise RuntimeError(
+                f"驗收報告版本或結果不符：{name}，"
+                f"expected={APP_VERSION}, actual={report.get('version')}"
+            )
+
+
+def validate_field_visit_journey() -> None:
+    """Require the complete mobile-to-desktop journey before formal packaging."""
+
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "unittest",
+            "tests.test_field_visit_journey",
+            "-q",
+        ],
+        cwd=ROOT,
+        check=True,
+    )
 
 
 def sha256_file(path: Path) -> str:
@@ -175,7 +213,11 @@ def package_release() -> tuple[Path, Path]:
             "version": APP_VERSION,
             "build_date": BUILD_DATE,
             "packaged_at": datetime.now().astimezone().isoformat(),
+            "channel": "formal",
             "official_data_source": "postgresql",
+            "postgresql_schema_version": 8,
+            "mobile_asset_version": MOBILE_ASSET_VERSION,
+            "field_visit_phase_one": True,
             "server_executable": "LandCustomerServer/LandCustomerServer.exe",
             "primary_launcher": PRIMARY_LAUNCHER,
             "root_launcher_count": 1,
@@ -184,6 +226,13 @@ def package_release() -> tuple[Path, Path]:
             "package_source": "winget",
             "netbird_allowed_range": "100.64.0.0/10",
             "diagnostics_file": "%LOCALAPPDATA%/LandCustomerSystem/home-server-diagnostics.json",
+            "recovery_account_import": "將 .lcs-account 放在啟動檔旁，開啟唯一啟動檔並確認匯入",
+            "standalone_migration_import": "將唯一 .lcs-migration.zip 放在啟動檔旁，關閉舊伺服器後由唯一啟動檔匯入",
+            "migration_preserves_server_accounts": True,
+            "migration_requires_empty_business_database": True,
+            "migration_allows_deleted_test_residue": True,
+            "migration_preserves_recycle_bin_and_operation_logs": True,
+            "migration_creates_pre_import_backup": True,
             "database_included": False,
             "protected_dsn_included": False,
             "private_keys_included": False,
@@ -215,6 +264,8 @@ def build_parser():
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    validate_acceptance_documents()
+    validate_field_visit_journey()
     if not args.skip_server_build:
         build_server(sys.executable)
     directory, zip_path = package_release()

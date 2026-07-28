@@ -4,11 +4,20 @@ import hashlib
 from pathlib import Path
 
 from customer_api.data_source_base import _row_dict
+from customer_api.field_visit_routing import validate_coordinate
+from customer_api.field_visit_service import location_address_fingerprint
 from customer_repository import CustomerRepository, normalize_watch_name
 from customer_security import decrypt_value, make_fernet
 
 
 class PostgreSQLDesktopFeatureMixin:
+    @staticmethod
+    def _execute_many(conn, query, entries):
+        """Run a PostgreSQL batch through a cursor (psycopg 3 API)."""
+
+        with conn.cursor() as cursor:
+            cursor.executemany(query, entries)
+
     def list_record_change_logs(self, user, record_id, limit=300):
         del user
         record_id = int(record_id)
@@ -27,7 +36,8 @@ class PostgreSQLDesktopFeatureMixin:
             ).fetchall()
         return [_row_dict(row) for row in rows]
 
-    def add_record_change_logs(self, user, items):
+    @staticmethod
+    def _record_change_log_entries(items):
         entries = []
         for item in items:
             entries.append(
@@ -40,32 +50,40 @@ class PostgreSQLDesktopFeatureMixin:
                     item.get("new_value"),
                 )
             )
+        return entries
+
+    def _add_record_change_logs_with_conn(self, conn, user, items):
+        entries = self._record_change_log_entries(items)
         if not entries:
             return 0
-        with self._connect() as conn:
-            self._require_ids(conn, "ownerships", [row[0] for row in entries])
-            conn.executemany(
-                """
-                INSERT INTO record_change_logs (
-                    ownership_id, action_type, field_key, field_label,
-                    old_value, new_value
-                ) VALUES (%s, %s, %s, %s, %s, %s)
-                """,
-                entries,
-            )
-            conn.execute(
-                """
-                INSERT INTO operation_logs (
-                    action_type, summary, detail, actor_username
-                ) VALUES ('修改歷史', %s, %s, %s)
-                """,
-                (
-                    f"寫入 {len(entries)} 筆修改歷史",
-                    "Desktop API",
-                    user.username,
-                ),
-            )
+        self._require_ids(conn, "ownerships", [row[0] for row in entries])
+        self._execute_many(
+            conn,
+            """
+            INSERT INTO record_change_logs (
+                ownership_id, action_type, field_key, field_label,
+                old_value, new_value
+            ) VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            entries,
+        )
+        conn.execute(
+            """
+            INSERT INTO operation_logs (
+                action_type, summary, detail, actor_username
+            ) VALUES ('修改歷史', %s, %s, %s)
+            """,
+            (
+                f"寫入 {len(entries)} 筆修改歷史",
+                "Desktop API",
+                user.username,
+            ),
+        )
         return len(entries)
+
+    def add_record_change_logs(self, user, items):
+        with self._connect() as conn:
+            return self._add_record_change_logs_with_conn(conn, user, items)
 
     def list_custom_fields(self, user):
         del user
@@ -155,7 +173,8 @@ class PostgreSQLDesktopFeatureMixin:
                 if value
             ]
             if entries:
-                conn.executemany(
+                self._execute_many(
+                    conn,
                     """
                     INSERT INTO ownership_custom_values (
                         ownership_id, field_id, value
@@ -275,7 +294,8 @@ class PostgreSQLDesktopFeatureMixin:
         with self._connect() as conn:
             conn.execute("DELETE FROM watchlist")
             if cleaned:
-                conn.executemany(
+                self._execute_many(
+                    conn,
                     """
                     INSERT INTO watchlist (name, normalized_name, note)
                     VALUES (%s, %s, %s)
@@ -327,9 +347,13 @@ class PostgreSQLDesktopFeatureMixin:
             rows = conn.execute(
                 """
                 SELECT location.ownership_id AS customer_id, location.latitude,
-                       location.longitude, location.source, location.updated_at,
+                       location.longitude, location.source,
+                       location.geocode_status, location.geocode_source,
+                       location.geocoded_at, location.geocode_error,
+                       location.updated_at,
                        land.district, land.section, land.land_number,
-                       owner.owner_name, owner.address
+                       COALESCE(ownership.owner_name_override, owner.owner_name) AS owner_name,
+                       COALESCE(ownership.address_override, owner.address) AS address
                 FROM ownership_locations location
                 JOIN ownerships ownership ON ownership.id = location.ownership_id
                 JOIN lands land ON land.id = ownership.land_id
@@ -348,26 +372,65 @@ class PostgreSQLDesktopFeatureMixin:
     def set_record_location(
         self, user, record_id, latitude, longitude, source="manual"
     ):
-        del user
         record_id = int(record_id)
+        latitude, longitude = validate_coordinate(latitude, longitude)
+        location_source = str(source or "manual").strip() or "manual"
+        geocode_status = (
+            "manual" if location_source.casefold() == "manual" else "success"
+        )
+        fernet = make_fernet(user.data_key)
         with self._connect() as conn:
-            self._require_ids(conn, "ownerships", [record_id])
+            row = conn.execute(
+                """
+                SELECT COALESCE(ownership.address_override, owner.address) AS address
+                FROM ownerships ownership
+                JOIN owners owner ON owner.id = ownership.owner_id
+                WHERE ownership.id = %s
+                """,
+                (record_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(record_id)
+            address = decrypt_value(fernet, row.get("address"))
             conn.execute(
                 """
                 INSERT INTO ownership_locations (
-                    ownership_id, latitude, longitude, source
-                ) VALUES (%s, %s, %s, %s)
+                    ownership_id, latitude, longitude, source,
+                    geocode_status, geocode_source, geocoded_at,
+                    geocode_error, address_fingerprint
+                ) VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, NULL, %s)
                 ON CONFLICT (ownership_id) DO UPDATE SET
                     latitude = EXCLUDED.latitude,
                     longitude = EXCLUDED.longitude,
                     source = EXCLUDED.source,
+                    geocode_status = EXCLUDED.geocode_status,
+                    geocode_source = EXCLUDED.geocode_source,
+                    geocoded_at = CURRENT_TIMESTAMP,
+                    geocode_error = NULL,
+                    address_fingerprint = EXCLUDED.address_fingerprint,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
                     record_id,
-                    float(latitude),
-                    float(longitude),
-                    str(source or "manual"),
+                    latitude,
+                    longitude,
+                    location_source,
+                    geocode_status,
+                    location_source,
+                    location_address_fingerprint(address),
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO audit_logs (
+                    user_id, actor, action_type, entity_type, entity_id, summary
+                ) VALUES (%s, %s, 'api_set_record_location', 'ownership', %s, %s)
+                """,
+                (
+                    user.id,
+                    user.username,
+                    record_id,
+                    f"Updated manual location for ownership {record_id}",
                 ),
             )
         return record_id
