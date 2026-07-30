@@ -1,8 +1,9 @@
 """Desktop main-window layout, form, table, and menu construction."""
 
 from customer_table_ui import build_customer_table_ui
+from customer_owner_contacts import OwnerContactsWidget
 from customer_version import full_version_text
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSettings, QTimer, Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -14,9 +15,15 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QSplitter,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
+
+MAIN_SPLITTER_SETTINGS_KEY = "desktop/main_splitter_sizes"
+LAND_LIST_MINIMUM_WIDTH = 540
+DETAIL_PANEL_MINIMUM_WIDTH = 460
+DEFAULT_SPLITTER_SIZES = (760, 480)
 
 
 class DesktopWindowMixin:
@@ -86,26 +93,80 @@ class DesktopWindowMixin:
         new_button.clicked.connect(self.new_record)
         toolbar.addWidget(new_button)
 
-        splitter = QSplitter(Qt.Horizontal)
-        root.addWidget(splitter, 1)
+        self.main_splitter = QSplitter(Qt.Horizontal)
+        self.main_splitter.setChildrenCollapsible(False)
+        self.main_splitter.setHandleWidth(8)
+        root.addWidget(self.main_splitter, 1)
 
-        list_frame = QFrame()
-        list_frame.setObjectName("listFrame")
-        list_layout = QVBoxLayout(list_frame)
+        self.list_frame = QFrame()
+        self.list_frame.setObjectName("listFrame")
+        self.list_frame.setMinimumWidth(LAND_LIST_MINIMUM_WIDTH)
+        self.list_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        list_layout = QVBoxLayout(self.list_frame)
         list_layout.setContentsMargins(0, 0, 0, 0)
-        splitter.addWidget(list_frame)
+        self.main_splitter.addWidget(self.list_frame)
 
-        form_frame = QFrame()
-        form_frame.setObjectName("formFrame")
-        form_layout = QVBoxLayout(form_frame)
+        self.form_frame = QFrame()
+        self.form_frame.setObjectName("formFrame")
+        self.form_frame.setMinimumWidth(DETAIL_PANEL_MINIMUM_WIDTH)
+        self.form_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        form_layout = QVBoxLayout(self.form_frame)
         form_layout.setContentsMargins(18, 14, 18, 18)
         form_layout.setSpacing(12)
-        splitter.addWidget(form_frame)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
+        self.main_splitter.addWidget(self.form_frame)
+        self.main_splitter.setStretchFactor(0, 3)
+        self.main_splitter.setStretchFactor(1, 2)
+        self.main_splitter.setSizes(list(DEFAULT_SPLITTER_SIZES))
+
+        self.layout_settings = getattr(self, "layout_settings", None) or QSettings(
+            "LandCustomerSystem",
+            "DesktopClient",
+        )
+        self.splitter_save_timer = QTimer(self)
+        self.splitter_save_timer.setSingleShot(True)
+        self.splitter_save_timer.setInterval(250)
+        self.splitter_save_timer.timeout.connect(self.save_main_splitter_sizes)
+        self.main_splitter.splitterMoved.connect(
+            lambda _position, _index: self.splitter_save_timer.start()
+        )
 
         self.create_table(list_layout)
         self.create_form(form_layout)
+        QTimer.singleShot(0, self.restore_main_splitter_sizes)
+
+    @staticmethod
+    def _valid_splitter_sizes(value):
+        if not isinstance(value, (list, tuple)) or len(value) != 2:
+            return None
+        try:
+            sizes = [int(item) for item in value]
+        except (TypeError, ValueError):
+            return None
+        if any(size <= 0 for size in sizes):
+            return None
+        return [
+            max(LAND_LIST_MINIMUM_WIDTH, sizes[0]),
+            max(DETAIL_PANEL_MINIMUM_WIDTH, sizes[1]),
+        ]
+
+    def restore_main_splitter_sizes(self):
+        if getattr(self, "main_splitter", None) is None:
+            return False
+        saved = self._valid_splitter_sizes(
+            self.layout_settings.value(MAIN_SPLITTER_SETTINGS_KEY)
+        )
+        self.main_splitter.setSizes(saved or list(DEFAULT_SPLITTER_SIZES))
+        return bool(saved)
+
+    def save_main_splitter_sizes(self):
+        if getattr(self, "main_splitter", None) is None:
+            return False
+        sizes = self._valid_splitter_sizes(self.main_splitter.sizes())
+        if sizes is None:
+            return False
+        self.layout_settings.setValue(MAIN_SPLITTER_SETTINGS_KEY, sizes)
+        self.layout_settings.sync()
+        return True
 
     def create_table(self, parent_layout):
         build_customer_table_ui(
@@ -156,12 +217,26 @@ class DesktopWindowMixin:
 
 
     def create_form(self, parent_layout):
+        self.detail_tabs = QTabWidget()
+        self.detail_tabs.setMinimumWidth(0)
+        self.detail_tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        basic_page = QWidget()
+        basic_page.setMinimumWidth(0)
+        basic_page.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        basic_layout = QVBoxLayout(basic_page)
+        basic_layout.setContentsMargins(0, 0, 0, 0)
+        basic_layout.setSpacing(12)
+
         title = QLabel("土地資料")
         title.setStyleSheet("font-size: 16px; font-weight: 600; color: #f9fafb; padding-bottom: 4px;")
-        parent_layout.addWidget(title)
+        basic_layout.addWidget(title)
 
         self.management_summary_label = QLabel("尚未選取資料")
         self.management_summary_label.setWordWrap(True)
+        self.management_summary_label.setSizePolicy(
+            QSizePolicy.Ignored,
+            QSizePolicy.Preferred,
+        )
         self.management_summary_label.setStyleSheet(
             "background: #1f2937; color: #dbeafe; border: 1px solid #374151; "
             "border-radius: 5px; padding: 8px;"
@@ -169,9 +244,11 @@ class DesktopWindowMixin:
         self.management_summary_label.setToolTip(
             "顯示案件、標籤、附件、自訂欄位、最近聯絡與追蹤狀態。"
         )
-        parent_layout.addWidget(self.management_summary_label)
+        basic_layout.addWidget(self.management_summary_label)
 
         form_widget = QWidget()
+        form_widget.setMinimumWidth(0)
+        form_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         form_layout = QGridLayout(form_widget)
         form_layout.setContentsMargins(0, 0, 0, 0)
         form_layout.setHorizontalSpacing(12)
@@ -181,14 +258,18 @@ class DesktopWindowMixin:
             row = index
             label_widget = QLabel(label)
             label_widget.setStyleSheet("color: #d1d5db; padding-right: 6px;")
+            label_widget.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
             form_layout.addWidget(label_widget, row, 0)
             if key == "note":
                 widget = QPlainTextEdit()
+                widget.setMinimumWidth(0)
                 widget.setFixedHeight(88)
                 widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
                 self.fields[key] = widget
             else:
                 widget = QLineEdit()
+                widget.setMinimumWidth(0)
+                widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
                 if key == "total_declared_value":
                     widget.setReadOnly(True)
                 self.fields[key] = widget
@@ -201,7 +282,7 @@ class DesktopWindowMixin:
             form_layout.addWidget(widget, row, 1)
 
         form_layout.setColumnStretch(1, 1)
-        parent_layout.addWidget(form_widget)
+        basic_layout.addWidget(form_widget)
         self.bind_total_formula()
 
         button_row = QHBoxLayout()
@@ -219,8 +300,17 @@ class DesktopWindowMixin:
         delete_button.clicked.connect(self.delete_record)
         button_row.addWidget(delete_button)
 
-        parent_layout.addLayout(button_row)
-        parent_layout.addStretch(1)
+        basic_layout.addLayout(button_row)
+        basic_layout.addStretch(1)
+
+        self.detail_tabs.addTab(basic_page, "基本資料")
+        self.owner_contacts_widget = OwnerContactsWidget(
+            self.active_record_repository,
+            current_role=self.current_user.get("role", "viewer"),
+            parent=self.detail_tabs,
+        )
+        self.detail_tabs.addTab(self.owner_contacts_widget, "關係人")
+        parent_layout.addWidget(self.detail_tabs, 1)
 
     def show_settings_menu(self):
         if self.settings_menu is None or self.settings_button is None:

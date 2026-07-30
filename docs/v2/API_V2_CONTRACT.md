@@ -128,7 +128,7 @@
 
 ### `GET /api/v2/search`
 
-參數：`q`、`types=owner,land,project,attachment`、`limit`、`cursor`。
+參數：`q`、`types=owner,land,project,attachment`、`limit`、`cursor`。  
 結果欄位：`type`、`id`、`title`、`subtitle`、`match_fields`、`updated_at`、`version`。
 
 ## 7. 核心資源端點
@@ -179,3 +179,4 @@ v1 的 `records` 在 v2 對應為 `ownerships`。v1 路由仍可回傳既有欄�
 - v1.8.2 桌面進入有限讀取過渡；正式 v2 寫入只允許桌面 v2.0 以上。
 - 舊 PWA 由伺服器更新，不保留可離線寫入的舊資源。
 - LINE Bot v0.30.0 只保留既有唯讀查詢；新案件／通知功能要求 LINE Bot v2.0。
+

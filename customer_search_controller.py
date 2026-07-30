@@ -5,6 +5,7 @@ from customer_search import (
     CustomerRecordProcessor,
     CustomerSearchWorker,
 )
+from customer_land_tree import group_land_records
 from PySide6.QtCore import QThread
 from PySide6.QtWidgets import QMessageBox
 
@@ -63,7 +64,16 @@ class SearchControllerMixin:
             decryption_cache=self.search_decryption_cache,
         )
 
-    def refresh_records(self, record_to_select=None):
+    def refresh_records(
+        self,
+        record_to_select=None,
+        *,
+        tree_state=None,
+        auto_expand_search_matches=None,
+        preserve_existing_model=False,
+    ):
+        if tree_state is None:
+            tree_state = self.capture_land_tree_view_state()
         record_repository = self.active_record_repository()
         self.record_search_request_id += 1
         request_id = self.record_search_request_id
@@ -75,31 +85,19 @@ class SearchControllerMixin:
         sort_field = self.get_sort_field()
         reverse = self.get_sort_reverse()
         target_id = record_to_select if record_to_select is not None else self.selected_record_id
-        use_paged_browse = (
-            not keyword
-            and filter_field == "all"
-            and sort_field == "rowid"
-            and reverse
-            and not self.show_checked_only
-            and not any(str(value or "").strip() for value in self.advanced_search_criteria.values())
-        )
-        if use_paged_browse:
-            initial_rows = self.load_customer_page(0, TABLE_BATCH_SIZE)
-            self.table_model.set_paged_rows(
-                initial_rows,
-                record_repository.count_customers(),
-                self.load_customer_page,
+        search_active = bool(
+            keyword
+            or self.show_checked_only
+            or any(
+                str(value or "").strip()
+                for value in self.advanced_search_criteria.values()
             )
-            rows = initial_rows
-            self.apply_table_preferences()
-            if target_id is not None and self.select_record_in_table(target_id):
-                return
-            if not rows:
-                self.table_view.clearSelection()
-                if self.selected_record_id is not None:
-                    self.new_record()
-            return
-
+        )
+        search_auto_expand = (
+            search_active
+            if auto_expand_search_matches is None
+            else bool(auto_expand_search_matches)
+        )
         checked_ids = set(self.checked_record_ids)
         advanced_criteria = dict(self.advanced_search_criteria)
         processor = self.create_record_processor(
@@ -118,14 +116,77 @@ class SearchControllerMixin:
             advanced_criteria=advanced_criteria,
         )
 
-        if record_repository.count_customers() > ASYNC_SEARCH_THRESHOLD:
-            self.start_record_search(request_id, row_loader, process_rows, target_id)
+        record_count = record_repository.count_customers()
+        if record_count > ASYNC_SEARCH_THRESHOLD and not preserve_existing_model:
+            # Keep startup responsive and immediately useful while the
+            # hierarchy-aware grouping runs in the worker.  This is a preview,
+            # not the final pagination result; the worker replaces it with
+            # complete land groups.
+            preview_rows = [
+                processor.build_record(row, include_search_text=False)
+                for row in record_repository.fetch_customer_page(TABLE_BATCH_SIZE)
+            ]
+            preview = group_land_records(
+                preview_rows,
+                sort_field=sort_field,
+                reverse=reverse,
+            )
+            self.table_model.set_rows(preview)
+            self.table_model.total_count = record_count
+            self.table_model.ownership_total_count = record_count
+            # Legacy views/tests may ask whether more preview data exists.
+            # The actual full result is owned by the background worker.
+            self.table_model._legacy_total_count = record_count
+            self.table_model.page_loader = lambda _offset, _limit: []
+            self.table_model._background_preview_pending = True
+            self.apply_table_preferences()
+            self.update_land_page_status()
+            self._land_search_auto_expand = search_auto_expand
+            self.restore_land_tree_view_state(
+                tree_state,
+                search_auto_expand=search_auto_expand,
+                fallback_record_id=target_id,
+            )
+            self.start_record_search(
+                request_id,
+                row_loader,
+                process_rows,
+                target_id,
+                tree_state,
+                search_auto_expand,
+            )
+            return
+        if record_count > ASYNC_SEARCH_THRESHOLD:
+            # A content-only save must not replace the live tree with a
+            # preview model.  Keep the current nodes visible while the server
+            # result is processed, then update those nodes in place.
+            self.start_record_search(
+                request_id,
+                row_loader,
+                process_rows,
+                target_id,
+                tree_state,
+                search_auto_expand,
+            )
             return
 
         rows = process_rows(row_loader(), lambda: False)
-        self.apply_record_rows(rows, target_id)
+        self.apply_record_rows(
+            rows,
+            target_id,
+            tree_state,
+            search_auto_expand=search_auto_expand,
+        )
 
-    def start_record_search(self, request_id, row_loader, row_processor, target_id):
+    def start_record_search(
+        self,
+        request_id,
+        row_loader,
+        row_processor,
+        target_id,
+        tree_state,
+        search_auto_expand,
+    ):
         thread = QThread(self)
         worker = CustomerSearchWorker(
             request_id,
@@ -137,7 +198,11 @@ class SearchControllerMixin:
         thread.started.connect(worker.run)
         worker.finished.connect(
             lambda completed_id, rows: self.handle_record_search_ready(
-                completed_id, rows, target_id
+                completed_id,
+                rows,
+                target_id,
+                tree_state,
+                search_auto_expand,
             )
         )
         worker.failed.connect(self.handle_record_search_failure)
@@ -148,11 +213,27 @@ class SearchControllerMixin:
         self.statusBar().showMessage("正在背景搜尋資料…")
         thread.start()
 
-    def handle_record_search_ready(self, request_id, rows, target_id):
+    def handle_record_search_ready(
+        self,
+        request_id,
+        rows,
+        target_id,
+        tree_state,
+        search_auto_expand,
+    ):
         if request_id != self.record_search_request_id:
             return
-        self.apply_record_rows(rows, target_id)
-        self.statusBar().showMessage(f"搜尋完成，共 {len(rows)} 筆。", 3000)
+        self.apply_record_rows(
+            rows,
+            target_id,
+            tree_state,
+            search_auto_expand=search_auto_expand,
+        )
+        self.statusBar().showMessage(
+            f"搜尋完成：土地 {self.table_model.total_count} 筆／"
+            f"持分 {self.table_model.ownership_total_count} 筆。",
+            3000,
+        )
 
     def handle_record_search_failure(self, request_id, message):
         if request_id != self.record_search_request_id:
@@ -165,10 +246,37 @@ class SearchControllerMixin:
             thread, _worker = search
             thread.deleteLater()
 
-    def apply_record_rows(self, rows, target_id):
-        self.table_model.set_rows(rows)
+    def apply_record_rows(
+        self,
+        rows,
+        target_id,
+        tree_state=None,
+        *,
+        search_auto_expand=None,
+    ):
+        if tree_state is None:
+            tree_state = self.capture_land_tree_view_state()
+        updated_in_place = self.table_model.update_rows_in_place(rows)
+        if not updated_in_place:
+            self.table_model.set_rows(rows)
         self.apply_table_preferences()
-        if target_id is not None and self.select_record_in_table(target_id):
+        self.update_land_page_status()
+        if search_auto_expand is None:
+            search_auto_expand = bool(
+                self.search_input.text().strip()
+                or self.show_checked_only
+                or any(
+                    str(value or "").strip()
+                    for value in self.advanced_search_criteria.values()
+                )
+            )
+        self._land_search_auto_expand = bool(search_auto_expand)
+        selection_restored = self.restore_land_tree_view_state(
+            tree_state,
+            search_auto_expand=bool(search_auto_expand),
+            fallback_record_id=target_id,
+        )
+        if selection_restored:
             return
 
         if not rows:

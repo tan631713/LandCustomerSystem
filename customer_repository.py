@@ -69,6 +69,24 @@ class CustomerRepository:
             )
         ), '') AS tag_names,
         COALESCE((
+            SELECT JSON_GROUP_ARRAY(
+                JSON_OBJECT(
+                    'tag_id', tag_id,
+                    'name', tag_name,
+                    'color', tag_color
+                )
+            )
+            FROM (
+                SELECT t.id AS tag_id,
+                       t.name AS tag_name,
+                       COALESCE(t.color, '') AS tag_color
+                FROM customer_tags ct
+                JOIN tags t ON t.id = ct.tag_id
+                WHERE ct.customer_id = customers.id
+                ORDER BY t.name COLLATE NOCASE, t.id
+            )
+        ), '[]') AS tag_items,
+        COALESCE((
             SELECT t.color
             FROM customer_tags ct
             JOIN tags t ON t.id = ct.tag_id

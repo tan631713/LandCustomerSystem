@@ -13,21 +13,27 @@ class SelectionWorkflowMixin:
     def selected_table_record_ids(self):
         if self.table_view is None or self.table_view.selectionModel() is None:
             return []
-        selected_rows = sorted(
-            {
-                index.row()
-                for index in self.table_view.selectionModel().selectedIndexes()
-                if index.isValid()
-            }
-        )
-        record_ids = []
-        for row_number in selected_rows:
-            row = self.table_model.row_record(row_number)
-            if row is not None:
-                record_ids.append(row["id"])
+        record_ids = set()
+        seen_nodes = set()
+        for proxy_index in self.table_view.selectionModel().selectedIndexes():
+            if not proxy_index.isValid():
+                continue
+            source_index = self.source_table_index(proxy_index)
+            node = self.table_model.node_for_index(source_index)
+            if node is None:
+                continue
+            node_key = (
+                node.kind,
+                node.group.state_id,
+                None if node.record is None else int(node.record["id"]),
+            )
+            if node_key in seen_nodes:
+                continue
+            seen_nodes.add(node_key)
+            record_ids.update(self.table_model.record_ids_for_index(source_index))
         if not record_ids and self.selected_record_id is not None:
-            record_ids.append(self.selected_record_id)
-        return record_ids
+            record_ids.add(self.selected_record_id)
+        return sorted(record_ids)
 
     def current_result_record_ids(self):
         if self.table_model is None:
@@ -115,11 +121,25 @@ class SelectionWorkflowMixin:
         if message:
             self.statusBar().showMessage(message, 3500)
             return
-        selected_count = len(self.selected_table_record_ids())
+        selected_land_ids = set()
+        selected_ownership_ids = set()
+        for proxy_index in self.table_view.selectionModel().selectedIndexes():
+            if not proxy_index.isValid() or proxy_index.column() != 0:
+                continue
+            source_index = self.source_table_index(proxy_index)
+            node = self.table_model.node_for_index(source_index)
+            if node is None:
+                continue
+            if node.kind == "land":
+                selected_land_ids.add(node.group.state_id)
+            else:
+                selected_ownership_ids.add(int(node.record["id"]))
         checked_count = len(self.checked_record_ids)
-        if selected_count or checked_count:
+        if selected_land_ids or selected_ownership_ids or checked_count:
             self.statusBar().showMessage(
-                f"已選取 {selected_count} 筆；已勾選 {checked_count} 筆",
+                f"已選取土地 {len(selected_land_ids)} 筆／"
+                f"持分 {len(selected_ownership_ids)} 筆；"
+                f"已勾選持分 {checked_count} 筆",
                 2500,
             )
 

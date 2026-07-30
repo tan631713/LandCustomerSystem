@@ -109,6 +109,7 @@ class CustomerApiTests(unittest.TestCase):
         self.assertEqual(health.status_code, 200)
         self.assertEqual(health.json()["backend"], "sqlite")
         self.assertEqual(health.json()["schema_version"], 9)
+        self.assertEqual(health.json()["mobile_asset_version"], 25)
 
         bad_login = self.client.post(
             "/api/v1/auth/login",
@@ -173,7 +174,13 @@ class CustomerApiTests(unittest.TestCase):
         self.assertEqual(page.status_code, 200)
         self.assertIn("地主開發助手", page.text)
         self.assertIn('src="./field-visit.js?v=2"', page.text)
-        self.assertIn('src="./app.js?v=21"', page.text)
+        self.assertIn('src="./app.js?v=25"', page.text)
+        self.assertIn('id="login-connection-check"', page.text)
+        self.assertIn('id="login-connection-retry"', page.text)
+        self.assertIn('id="connection-banner-retry"', page.text)
+        self.assertIn('id="app-update-banner"', page.text)
+        self.assertIn('id="app-update-apply"', page.text)
+        self.assertIn('id="app-update-defer"', page.text)
         self.assertIn('id="field-location-panel"', page.text)
         self.assertIn('id="field-location-button"', page.text)
         self.assertIn('id="page-field"', page.text)
@@ -222,9 +229,9 @@ class CustomerApiTests(unittest.TestCase):
         service_worker = self.client.get("/mobile/service-worker.js")
         self.assertEqual(service_worker.status_code, 200)
         self.assertIn('url.pathname.startsWith("/api/")', service_worker.text)
-        self.assertIn('land-customer-mobile-v21', service_worker.text)
+        self.assertIn('land-customer-mobile-v25', service_worker.text)
         self.assertIn('/mobile/field-visit.js?v=2', service_worker.text)
-        self.assertIn('/mobile/app.js?v=21', service_worker.text)
+        self.assertIn('/mobile/app.js?v=25', service_worker.text)
         self.assertIn('fetch(event.request, { cache: "no-store" })', service_worker.text)
         self.assertIn("no-store", service_worker.headers["cache-control"])
 
@@ -243,10 +250,42 @@ class CustomerApiTests(unittest.TestCase):
         self.assertIn("window.isSecureContext === false", field_visit_script.text)
         self.assertIn("navigator.geolocation.getCurrentPosition(", field_visit_script.text)
 
-        app_script = self.client.get("/mobile/app.js?v=21")
+        app_script = self.client.get("/mobile/app.js?v=25")
         self.assertEqual(app_script.status_code, 200)
         self.assertEqual(app_script.headers["cache-control"], "no-store")
         self.assertIn("function maskIdentity(value)", app_script.text)
+        self.assertIn("const MOBILE_ASSET_VERSION = 25", app_script.text)
+        self.assertIn("function checkMobileAssetVersion(", app_script.text)
+        self.assertIn("health.mobile_asset_version", app_script.text)
+        self.assertIn("async function registerMobileServiceWorker(", app_script.text)
+        self.assertIn('registration.addEventListener("updatefound"', app_script.text)
+        self.assertIn('navigator.serviceWorker.addEventListener("controllerchange"', app_script.text)
+        self.assertIn("await registration.update()", app_script.text)
+        self.assertIn("function applyMobileUpdate()", app_script.text)
+        self.assertIn("window.location.reload()", app_script.text)
+        self.assertIn("function deferMobileUpdate()", app_script.text)
+        self.assertIn("function mobileUpdateBlockReason()", app_script.text)
+        self.assertIn("state.attachmentProcessing", app_script.text)
+        self.assertIn("state.pendingAttachmentFiles.length", app_script.text)
+        self.assertIn("state.fieldPlanSelection.size", app_script.text)
+        self.assertIn("state.fieldPlanOrderDirty", app_script.text)
+        self.assertIn('const MOBILE_UPDATE_RESUME_KEY = "lcs_mobile_update_resume"', app_script.text)
+        self.assertIn("function captureMobileUpdateResume()", app_script.text)
+        self.assertIn("function prepareMobileUpdateResume()", app_script.text)
+        self.assertIn("async function finishMobileUpdateResume()", app_script.text)
+        self.assertIn("field_visit_item_id: currentItem ? Number(currentItem.id) : null", app_script.text)
+        self.assertIn("resume.record_field_visit_item_id || null", app_script.text)
+        self.assertIn("resume.field_action_item_id", app_script.text)
+        self.assertIn("resume.field_plan_query", app_script.text)
+        self.assertIn("findIndex(item => Number(item.id) === resumeItemId)", app_script.text)
+        self.assertIn('"手機網頁已更新，並回到原本畫面"', app_script.text)
+        self.assertIn("async function checkServerConnection(", app_script.text)
+        self.assertIn('fetch("/health"', app_script.text)
+        self.assertIn('navigator.onLine === false', app_script.text)
+        self.assertIn('controller.abort()', app_script.text)
+        self.assertIn('"網路伺服器可以使用"', app_script.text)
+        self.assertIn('"請先開啟 NetBird', app_script.text)
+        self.assertIn('await checkServerConnection()', app_script.text)
         self.assertIn('characters.slice(0, 4)', app_script.text)
         self.assertIn('maskIdentity(owner.external_id)', app_script.text)
         self.assertIn('key === "external_id" ? maskIdentity(record[key])', app_script.text)
@@ -721,12 +760,24 @@ class CustomerApiTests(unittest.TestCase):
         ).json()
         self.assertEqual(record_tags["tag_ids"], [tag_id])
         self.assertEqual(record_tags["items"][0]["name"], "近期拜訪")
+        self.assertEqual(record_tags["items"][0]["tag_id"], tag_id)
+        self.assertEqual(record_tags["items"][0]["color"], "#0088ff")
+        record_detail = self.client.get(
+            f"/api/v1/records/{self.record_id}", headers=admin_headers
+        ).json()
         self.assertEqual(
-            self.client.get(
-                f"/api/v1/records/{self.record_id}", headers=admin_headers
-            ).json()["tag_names"],
+            record_detail["tag_names"],
             "近期拜訪",
         )
+        self.assertEqual(
+            record_detail["tag_items"],
+            [{"tag_id": tag_id, "name": "近期拜訪", "color": "#0088ff"}],
+        )
+        self.assertEqual(record_detail["tags"], record_detail["tag_items"])
+        list_item = self.client.get(
+            "/api/v1/records", headers=admin_headers
+        ).json()["items"][0]
+        self.assertEqual(list_item["tag_items"], record_detail["tag_items"])
         bulk = self.client.put(
             "/api/v1/tags/assignments",
             headers=admin_headers,

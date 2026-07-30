@@ -39,16 +39,27 @@ class ExportControllerMixin:
     def selected_table_rows(self):
         if self.table_view is None or self.table_view.selectionModel() is None:
             return []
-        selected_indexes = self.table_view.selectionModel().selectedIndexes()
-        selected_row_numbers = sorted(
-            {index.row() for index in selected_indexes if index.isValid()}
-        )
-        rows = []
-        for row_number in selected_row_numbers:
-            row = self.table_model.row_record(row_number)
-            if row:
-                rows.append(row)
-        return rows
+        rows_by_id = {}
+        seen_nodes = set()
+        for proxy_index in self.table_view.selectionModel().selectedIndexes():
+            if not proxy_index.isValid():
+                continue
+            source_index = self.source_table_index(proxy_index)
+            node = self.table_model.node_for_index(source_index)
+            if node is None:
+                continue
+            node_key = (
+                node.kind,
+                node.group.state_id,
+                None if node.record is None else int(node.record["id"]),
+            )
+            if node_key in seen_nodes:
+                continue
+            seen_nodes.add(node_key)
+            records = node.group.records if node.kind == "land" else [node.record]
+            for record in records:
+                rows_by_id[int(record["id"])] = record
+        return list(rows_by_id.values())
 
     def copy_selected_cells(self):
         if self.table_view is None or self.table_view.selectionModel() is None:
@@ -65,8 +76,17 @@ class ExportControllerMixin:
             self.statusBar().showMessage("沒有可複製的儲存格。", 2500)
             return
 
-        selected_positions = {(index.row(), index.column()) for index in selected_indexes}
-        selected_rows = sorted({index.row() for index in selected_indexes})
+        def tree_position(index):
+            parent = index.parent()
+            return (
+                parent.row() if parent.isValid() else index.row(),
+                1 if parent.isValid() else 0,
+                index.row(),
+            )
+
+        selected_row_keys = sorted(
+            {tree_position(index) for index in selected_indexes}
+        )
         header = self.table_view.horizontalHeader()
         selected_columns = sorted(
             {index.column() for index in selected_indexes},
@@ -74,20 +94,26 @@ class ExportControllerMixin:
         )
 
         copied_lines = []
-        for row_number in selected_rows:
+        view_model = self.table_view.model()
+        for parent_row, depth, row_number in selected_row_keys:
             values = []
             for column_number in selected_columns:
-                if (row_number, column_number) not in selected_positions:
+                matching = [
+                    index
+                    for index in selected_indexes
+                    if tree_position(index) == (parent_row, depth, row_number)
+                    and index.column() == column_number
+                ]
+                if not matching:
                     values.append("")
                     continue
-                model_index = self.table_model.index(row_number, column_number)
-                value = self.table_model.data(model_index, Qt.DisplayRole)
+                value = view_model.data(matching[0], Qt.DisplayRole)
                 values.append(str(value or ""))
             copied_lines.append("\t".join(values))
 
         QApplication.clipboard().setText("\n".join(copied_lines))
         self.statusBar().showMessage(
-            f"已複製 {len(selected_rows)} 列、{len(selected_columns)} 欄。",
+            f"已複製 {len(selected_row_keys)} 列、{len(selected_columns)} 欄。",
             2500,
         )
 

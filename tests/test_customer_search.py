@@ -145,6 +145,10 @@ class CustomerSearchWorkerTests(unittest.TestCase):
             "case_names": "Priority Case",
             "tag_names": "Urgent、Visited",
             "primary_tag_color": "#ff0000",
+            "tag_items": [
+                {"tag_id": 1, "name": "Urgent", "color": "#ff0000"},
+                {"tag_id": 2, "name": "Visited", "color": "#00ff00"},
+            ],
             "attachment_count": 2,
             "custom_values": "Channel：phone",
             "last_contact": "2026-07-10 phone／answered",
@@ -174,7 +178,14 @@ class CustomerSearchWorkerTests(unittest.TestCase):
 
         self.assertEqual(record["raw"]["tag_names"], "Urgent、Visited")
         self.assertEqual(record["raw"]["attachment_count"], "2")
-        self.assertEqual(record["tag_color"], "#ff0000")
+        self.assertEqual(record["tag_color"], "#FF0000")
+        self.assertEqual(
+            record["tags"],
+            [
+                {"tag_id": 1, "name": "Urgent", "color": "#FF0000"},
+                {"tag_id": 2, "name": "Visited", "color": "#00FF00"},
+            ],
+        )
         self.assertTrue(record["is_overdue"])
         self.assertEqual(record["background"], "overdue")
         self.assertEqual(processor.process([row]), [record])

@@ -106,6 +106,10 @@ class DesktopStateMixin:
                 event.ignore()
                 return
         self.selection_save_timer.stop()
+        if getattr(self, "splitter_save_timer", None) is not None:
+            self.splitter_save_timer.stop()
+        if hasattr(self, "save_main_splitter_sizes"):
+            self.save_main_splitter_sizes()
         self.persist_selection_state()
         self.save_table_preferences()
         super().closeEvent(event)

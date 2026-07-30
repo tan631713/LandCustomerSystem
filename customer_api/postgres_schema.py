@@ -38,6 +38,8 @@ IDENTITY_TABLES = (
     "field_visit_routes",
     "field_visit_route_items",
     "field_visit_status_history",
+    "contacts",
+    "owner_contact_relations",
 )
 IDENTITY_PRIMARY_KEY_CONSTRAINTS = frozenset(
     f"{table_name}_pkey" for table_name in IDENTITY_TABLES

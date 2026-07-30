@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -236,6 +237,10 @@ class CustomerRepositoryTests(unittest.TestCase):
         self.assertEqual(row["case_names"], "Priority Case")
         self.assertEqual(row["tag_names"], "Urgent")
         self.assertEqual(row["primary_tag_color"], "#ff0000")
+        self.assertEqual(
+            json.loads(row["tag_items"]),
+            [{"tag_id": urgent_id, "name": "Urgent", "color": "#ff0000"}],
+        )
         self.assertEqual(row["attachment_count"], 1)
         self.assertIn("contract", row["attachment_names"])
         self.assertEqual(row["custom_values"], "Channel：phone")

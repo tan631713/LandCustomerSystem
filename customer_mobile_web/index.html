@@ -22,7 +22,10 @@
   <title>地主開發助手｜管理台</title>
 </head>
 <body>
-  <div id="connection-banner" class="connection-banner" role="status" aria-live="polite">正在連線至自架伺服器…</div>
+  <div id="connection-banner" class="connection-banner" role="status" aria-live="polite">
+    <span id="connection-banner-message">正在連線至網路伺服器…</span>
+    <button id="connection-banner-retry" class="connection-banner-retry" type="button">重新檢查</button>
+  </div>
 
   <main id="login-view" class="login-shell">
     <section class="login-brand" aria-label="系統介紹">
@@ -59,6 +62,16 @@
           <button id="login-button" class="primary-button" type="submit">登入管理台</button>
         </form>
         <p id="login-error" class="form-error" role="alert"></p>
+        <section id="login-connection-check" class="login-connection-check" data-state="checking" aria-live="polite">
+          <div class="login-connection-copy">
+            <span class="login-connection-dot" aria-hidden="true"></span>
+            <div>
+              <strong id="login-connection-title">正在確認網路伺服器</strong>
+              <p id="login-connection-detail">正在檢查手機網路、VPN 與家中伺服器。</p>
+            </div>
+          </div>
+          <button id="login-connection-retry" class="secondary-button" type="button">重新檢查連線</button>
+        </section>
         <details class="install-help">
           <summary>如何加入 iPhone 主畫面？</summary>
           <p>用 Safari 開啟此頁，點「分享」→「加入主畫面」，之後即可像 App 一樣啟動。</p>
@@ -484,8 +497,18 @@
     </div>
   </section>
 
+  <section id="app-update-banner" class="app-update-banner hidden" role="status" aria-live="polite">
+    <div class="app-update-copy">
+      <strong>手機網頁有新版</strong>
+      <span id="app-update-detail">更新後即可使用最新功能與修正。</span>
+    </div>
+    <div class="app-update-actions">
+      <button id="app-update-defer" class="app-update-defer" type="button">稍後</button>
+      <button id="app-update-apply" type="button">立即更新</button>
+    </div>
+  </section>
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
   <script src="./field-visit.js?v=2" defer></script>
-  <script src="./app.js?v=21" defer></script>
+  <script src="./app.js?v=25" defer></script>
 </body>
 </html>

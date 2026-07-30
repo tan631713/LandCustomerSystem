@@ -108,7 +108,7 @@ class UiComponentTests(unittest.TestCase):
             )
             self.assertEqual(alignment, int(Qt.AlignVCenter | Qt.AlignRight), key)
 
-    def test_tag_color_overrides_note_row_background(self):
+    def test_tag_column_keeps_semantic_row_background_and_exposes_tag_roles(self):
         model = RecordTableModel(lambda _record_id, _checked: None)
         display = {key: "" for key, _label in app.TABLE_COLUMNS}
         display.update({"note": "有備註", "tag_names": "優先"})
@@ -121,6 +121,9 @@ class UiComponentTests(unittest.TestCase):
                     "has_note": True,
                     "background": QColor("#564113"),
                     "tag_color": "#ff0000",
+                    "tags": [
+                        {"tag_id": 3, "name": "優先", "color": "#ff0000"}
+                    ],
                     "highlighted_fields": set(),
                     "display": display,
                 }
@@ -133,8 +136,13 @@ class UiComponentTests(unittest.TestCase):
         tag_index = model.index(0, column_indexes["tag_names"])
 
         self.assertEqual(model.data(note_index, Qt.BackgroundRole), QColor("#564113"))
-        self.assertEqual(model.data(tag_index, Qt.BackgroundRole), QColor("#ff0000"))
+        self.assertEqual(model.data(tag_index, Qt.BackgroundRole), QColor("#564113"))
         self.assertEqual(model.data(tag_index, Qt.ForegroundRole), QColor("#f8fafc"))
+        self.assertEqual(
+            model.data(tag_index, Qt.UserRole + 3),
+            [{"tag_id": 3, "name": "優先", "color": "#FF0000"}],
+        )
+        self.assertFalse(model.data(tag_index, Qt.DecorationRole).isNull())
 
     def test_table_model_loads_database_pages_on_demand(self):
         model = RecordTableModel(lambda _record_id, _checked: None)

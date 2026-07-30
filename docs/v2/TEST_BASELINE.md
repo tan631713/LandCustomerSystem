@@ -2,7 +2,7 @@
 
 ## 1. v1.8.9 現況
 
-執行日期：2026-07-22
+執行日期：2026-07-22  
 命令：`python -m unittest discover -s tests -q`
 
 ```text

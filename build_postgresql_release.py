@@ -35,8 +35,13 @@ DOCUMENTS = (
     "簡短版變更紀錄.txt",
     "完整版變更紀錄.txt",
     "README.md",
+    "docs/OWNER_CONTACTS_PHASE1.md",
+    "docs/OWNER_CONTACTS_PHASE1_COMPLETION_REPORT.md",
+    "docs/LAND_TREE_GROUPING_COMPLETION_REPORT.md",
     "release-acceptance-report.json",
     f"release-acceptance-exe-v{APP_VERSION}.json",
+    "postgres/migrations/009_owner_contacts_rollback.sql",
+    "postgres/migrations/010_owner_contacts_enhancement_rollback.sql",
 )
 
 
@@ -147,6 +152,8 @@ def audit_server_bundle(bundle: Path) -> None:
         bundle / PRIMARY_LAUNCHER,
         bundle / "LandCustomerServer" / "LandCustomerServer.exe",
         bundle / "LandCustomerServer" / "_internal" / "postgres" / "schema.sql",
+        bundle / "postgres" / "migrations" / "009_owner_contacts_rollback.sql",
+        bundle / "postgres" / "migrations" / "010_owner_contacts_enhancement_rollback.sql",
         *(bundle / "_server_support" / name for name in SUPPORT_FILES),
     ]
     missing = [str(path.relative_to(bundle)) for path in required if not path.is_file()]
@@ -206,7 +213,9 @@ def package_release() -> tuple[Path, Path]:
         for name in DOCUMENTS:
             source = ROOT / name
             if source.exists():
-                shutil.copy2(source, bundle / name)
+                destination = bundle / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, destination)
 
         manifest = {
             "product": "LandCustomerSystem PostgreSQL",
@@ -215,9 +224,10 @@ def package_release() -> tuple[Path, Path]:
             "packaged_at": datetime.now().astimezone().isoformat(),
             "channel": "formal",
             "official_data_source": "postgresql",
-            "postgresql_schema_version": 8,
+            "postgresql_schema_version": 10,
             "mobile_asset_version": MOBILE_ASSET_VERSION,
             "field_visit_phase_one": True,
+            "owner_contacts_phase_one": True,
             "server_executable": "LandCustomerServer/LandCustomerServer.exe",
             "primary_launcher": PRIMARY_LAUNCHER,
             "root_launcher_count": 1,

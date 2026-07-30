@@ -39,12 +39,16 @@ h3 { font-size: 18px; }
 
 .connection-banner {
   position: fixed; z-index: 150; top: 14px; left: 50%; transform: translateX(-50%);
-  width: max-content; max-width: calc(100% - 28px); padding: 8px 13px; border-radius: 999px;
+  display: flex; align-items: center; gap: 9px;
+  width: max-content; max-width: calc(100% - 28px); padding: 7px 8px 7px 13px; border-radius: 999px;
   color: #fff; background: #56625f; box-shadow: var(--shadow-sm); font-size: 12px; font-weight: 750;
   transition: opacity .2s ease, transform .2s ease;
 }
 .connection-banner.online { opacity: 0; pointer-events: none; transform: translate(-50%, -8px); background: var(--brand); }
 .connection-banner.offline { background: var(--danger); }
+.connection-banner-retry { min-height: 30px; padding: 5px 9px; border-color: rgba(255,255,255,.55); color: #fff; background: rgba(255,255,255,.13); font-size: 11px; }
+.connection-banner-retry:hover { border-color: #fff; color: var(--danger); background: #fff; }
+.connection-banner.online .connection-banner-retry { display: none; }
 
 .login-shell { display: grid; grid-template-columns: minmax(380px, .95fr) minmax(460px, 1.05fr); min-height: 100dvh; }
 .login-brand { position: relative; display: flex; flex-direction: column; justify-content: center; overflow: hidden; padding: clamp(42px, 7vw, 96px); color: #fff; background: var(--brand-deep); }
@@ -82,6 +86,16 @@ button:disabled { cursor: not-allowed; opacity: .5; transform: none; }
 .login-form .primary-button, #login-button { min-height: 50px; margin-top: 8px; }
 .secondary-button { color: var(--brand-dark); border-color: #bdd2cd; background: #fff; }
 .form-error { min-height: 21px; margin: 10px 0 0; color: var(--danger); font-size: 13px; font-weight: 700; }
+.login-connection-check { display: grid; gap: 12px; margin-top: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 13px; background: #f6f8f7; }
+.login-connection-copy { display: grid; grid-template-columns: 10px minmax(0, 1fr); align-items: start; gap: 10px; }
+.login-connection-copy strong { display: block; color: var(--ink); font-size: 13px; }
+.login-connection-copy p { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.login-connection-dot { width: 9px; height: 9px; margin-top: 4px; border-radius: 50%; background: #8c9996; box-shadow: 0 0 0 4px rgba(104,119,115,.11); }
+.login-connection-check[data-state="online"] { border-color: #b9d8d0; background: #eef8f5; }
+.login-connection-check[data-state="online"] .login-connection-dot { background: #2d8a73; box-shadow: 0 0 0 4px rgba(45,138,115,.12); }
+.login-connection-check[data-state="offline"] { border-color: #efc5c0; background: var(--danger-soft); }
+.login-connection-check[data-state="offline"] .login-connection-dot { background: var(--danger); box-shadow: 0 0 0 4px rgba(184,67,58,.12); }
+.login-connection-check .secondary-button { min-height: 38px; padding: 7px 11px; font-size: 12px; }
 .install-help { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
 .install-help summary { color: var(--brand); font-weight: 780; cursor: pointer; }
 .install-help p { margin-bottom: 0; line-height: 1.65; }
@@ -384,6 +398,15 @@ button:disabled { cursor: not-allowed; opacity: .5; transform: none; }
 .modal-card { position: relative; width: min(100%, 470px); margin: 0; padding: 22px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow-lg); }
 .modal-header { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-bottom: 7px; }
 .modal-header h2 { max-width: 330px; overflow: hidden; font-size: 19px; text-overflow: ellipsis; white-space: nowrap; }
+.app-update-banner { position: fixed; z-index: 290; left: 50%; bottom: 24px; transform: translateX(-50%); display: flex; align-items: center; gap: 18px; width: min(560px, calc(100% - 32px)); padding: 14px 15px 14px 18px; border: 1px solid #a8cfc5; border-radius: 15px; color: #fff; background: var(--brand-deep); box-shadow: var(--shadow-lg); }
+.app-update-copy { display: grid; gap: 3px; min-width: 0; }
+.app-update-banner strong { font-size: 14px; }
+.app-update-banner span { color: #c5d8d4; font-size: 12px; line-height: 1.45; }
+.app-update-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.app-update-banner button { flex: 0 0 auto; min-height: 38px; padding: 7px 12px; color: var(--brand-deep); border-color: #fff; background: #fff; font-size: 12px; }
+.app-update-banner button:hover { color: #fff; border-color: #8ec5b9; background: var(--brand); }
+.app-update-banner .app-update-defer { color: #fff; border-color: rgba(255,255,255,.45); background: transparent; }
+.app-update-banner .app-update-defer:hover { border-color: #fff; background: rgba(255,255,255,.1); }
 .toast { position: fixed; z-index: 300; left: 50%; bottom: 28px; transform: translateX(-50%); width: max-content; max-width: calc(100% - 32px); padding: 11px 16px; border-radius: 10px; color: #fff; background: #17211f; box-shadow: var(--shadow-lg); font-size: 13px; font-weight: 700; }
 
 @media (max-width: 1040px) {
@@ -422,6 +445,7 @@ button:disabled { cursor: not-allowed; opacity: .5; transform: none; }
   .mobile-nav button > span { font-size: 17px; }
   .mobile-nav button small { font-size: 10px; font-weight: 760; }
   .mobile-nav button.active { color: var(--brand); background: var(--brand-soft); }
+  .app-update-banner { bottom: calc(76px + env(safe-area-inset-bottom)); }
   .sheet-card { inset: 7vh 0 0; width: 100%; padding: 21px 17px calc(28px + env(safe-area-inset-bottom)); border-radius: 22px 22px 0 0; animation-name: rise-in; }
   @keyframes rise-in { from { transform: translateY(24px); opacity: .5; } }
   .sheet-header { top: -21px; margin: -21px -17px 17px; padding: 19px 17px 14px; border-radius: 22px 22px 0 0; }
@@ -472,6 +496,9 @@ button:disabled { cursor: not-allowed; opacity: .5; transform: none; }
   .field-plan-footer button { width: 100%; }
   .field-plan-current-item { grid-template-columns: 28px minmax(0, 1fr); }
   .field-plan-current-controls { grid-column: 1 / -1; justify-content: flex-end; }
+  .app-update-banner { align-items: stretch; flex-direction: column; gap: 10px; }
+  .app-update-actions { width: 100%; margin-left: 0; }
+  .app-update-actions button { flex: 1; }
   .photo-viewer-stage { grid-template-columns: 42px minmax(0, 1fr) 42px; padding: 8px; }
   .photo-nav { width: 36px; height: 50px; }
   .photo-viewer-footer { grid-template-columns: 1fr auto; padding-inline: 15px; }
