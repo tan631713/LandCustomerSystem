@@ -18,6 +18,7 @@ from customer_api.routes_core import register_core_routes
 from customer_api.routes_desktop_features import register_desktop_feature_routes
 from customer_api.routes_field_visits import register_field_visit_routes
 from customer_api.routes_followups import register_followup_routes
+from customer_api.routes_owner_contacts import register_owner_contact_routes
 from customer_api.routes_projects import register_project_routes
 from customer_api.routes_records import register_record_routes
 from customer_api.routes_remote_operations import register_remote_operation_routes
@@ -77,6 +78,7 @@ def create_app(
         register_tag_routes,
         register_desktop_feature_routes,
         register_field_visit_routes,
+        register_owner_contact_routes,
         register_remote_operation_routes,
     ):
         registrar(

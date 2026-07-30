@@ -8,7 +8,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 
 from customer_api.auth import ApiSession
 from customer_api.schemas import LoginRequest
-from customer_version import APP_VERSION
+from customer_version import APP_VERSION, MOBILE_ASSET_VERSION
 
 
 def register_core_routes(app, *, source, sessions, throttle, bearer, current_session):
@@ -17,6 +17,7 @@ def register_core_routes(app, *, source, sessions, throttle, bearer, current_ses
         return {
             "name": "土地資料系統 API",
             "version": APP_VERSION,
+            "mobile_asset_version": MOBILE_ASSET_VERSION,
             "docs": "/docs",
             "mobile": "/mobile/",
         }
@@ -24,7 +25,11 @@ def register_core_routes(app, *, source, sessions, throttle, bearer, current_ses
     @app.get("/health")
     def health():
         try:
-            return {**source.health(), "version": APP_VERSION}
+            return {
+                **source.health(),
+                "version": APP_VERSION,
+                "mobile_asset_version": MOBILE_ASSET_VERSION,
+            }
         except Exception as exc:
             raise HTTPException(status_code=503, detail="資料庫目前無法使用。") from exc
 

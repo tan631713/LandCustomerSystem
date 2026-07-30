@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date, datetime
 from pathlib import Path
 from typing import Protocol
@@ -88,6 +89,65 @@ class CustomerDataSource(Protocol):
     def delete_contact_log(
         self, user: AuthenticatedUser, record_id: int, log_id: int
     ) -> bool: ...
+
+    def list_owner_contacts(
+        self,
+        user: AuthenticatedUser,
+        record_id: int,
+        include_inactive: bool = False,
+    ) -> dict: ...
+
+    def get_owner_contact_relation(
+        self, user: AuthenticatedUser, record_id: int, relation_id: int
+    ) -> dict: ...
+
+    def search_owner_contacts(
+        self, user: AuthenticatedUser, query: str, limit: int = 50
+    ) -> list[dict]: ...
+
+    def find_owner_contact_duplicates(
+        self,
+        user: AuthenticatedUser,
+        *,
+        name: str = "",
+        mobile_phone: str = "",
+        home_phone: str = "",
+        registered_address: str = "",
+        contact_address: str = "",
+        limit: int = 20,
+    ) -> list[dict]: ...
+
+    def create_owner_contact(
+        self, user: AuthenticatedUser, record_id: int, values: dict
+    ) -> dict: ...
+
+    def link_owner_contact(
+        self, user: AuthenticatedUser, record_id: int, values: dict
+    ) -> dict: ...
+
+    def update_owner_contact(
+        self,
+        user: AuthenticatedUser,
+        record_id: int,
+        relation_id: int,
+        values: dict,
+    ) -> dict: ...
+
+    def deactivate_owner_contact(
+        self,
+        user: AuthenticatedUser,
+        record_id: int,
+        relation_id: int,
+        values: dict | None = None,
+    ) -> dict: ...
+
+    def reactivate_owner_contact(
+        self,
+        user: AuthenticatedUser,
+        record_id: int,
+        relation_id: int,
+        values: dict | None = None,
+    ) -> dict: ...
 
     def get_follow_up(
         self, user: AuthenticatedUser, record_id: int
@@ -268,6 +328,29 @@ def _row_dict(row):
 
 def _decrypt_record(row, user):
     values = _row_dict(row)
+    raw_tag_items = values.get("tag_items", values.get("tags", []))
+    if isinstance(raw_tag_items, str):
+        try:
+            raw_tag_items = json.loads(raw_tag_items)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            raw_tag_items = []
+    tag_items = []
+    for item in raw_tag_items if isinstance(raw_tag_items, list) else []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            tag_id = int(item.get("tag_id", item.get("id")))
+        except (TypeError, ValueError):
+            continue
+        tag_items.append(
+            {
+                "tag_id": tag_id,
+                "name": str(item.get("name") or ""),
+                "color": str(item.get("color") or ""),
+            }
+        )
+    values["tag_items"] = tag_items
+    values["tags"] = tag_items
     fernet = make_fernet(user.data_key)
     for field in ENCRYPTED_FIELDS:
         if field in values:

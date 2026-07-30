@@ -6,7 +6,10 @@ from customer_api.data_source_base import _row_dict
 class SQLiteTagMixin:
     def list_tags(self, user):
         del user
-        return [_row_dict(row) for row in self.repository.list_tags()]
+        return [
+            {**_row_dict(row), "tag_id": int(row["id"])}
+            for row in self.repository.list_tags()
+        ]
 
     def save_tag(self, user, name, color="", tag_id=None):
         self.repository.current_actor = user.username

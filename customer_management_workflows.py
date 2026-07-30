@@ -10,6 +10,22 @@ from PySide6.QtWidgets import QDialog
 
 
 class ManagementWorkflowMixin:
+    def refresh_after_management_content_update(
+        self,
+        tree_state,
+        record_to_select=None,
+    ):
+        """Refresh changed display data without re-expanding or replacing the tree."""
+
+        self.refresh_records(
+            self.selected_record_id
+            if record_to_select is None
+            else record_to_select,
+            tree_state=tree_state,
+            auto_expand_search_matches=False,
+            preserve_existing_model=True,
+        )
+
     def add_selected_records_to_field_visit(self):
         if not getattr(self, "api_mode", False):
             self._app_component("QMessageBox").information(
@@ -188,6 +204,7 @@ class ManagementWorkflowMixin:
         dialog = self._app_component("BatchCustomerTagsDialog")(tags, len(record_ids), self)
         if dialog.exec() != QDialog.Accepted:
             return
+        tree_state = self.capture_land_tree_view_state()
         try:
             processed = repository.set_customers_tags(
                 record_ids,
@@ -203,7 +220,7 @@ class ManagementWorkflowMixin:
                 f"處理 {processed} 筆資料",
                 f"mode={dialog.mode()} / tags={dialog.selected_ids()}",
             )
-        self.refresh_records(self.selected_record_id)
+        self.refresh_after_management_content_update(tree_state)
         self._app_component("QMessageBox").information(self, "完成", f"已更新 {processed} 筆資料的標籤。")
 
     def batch_edit_custom_values(self):
@@ -248,6 +265,7 @@ class ManagementWorkflowMixin:
             return
         if not self.ensure_can_modify("標籤管理"):
             return
+        tree_state = self.capture_land_tree_view_state()
         try:
             if dialog.action == "save":
                 tag_id = repository.save_tag(
@@ -264,7 +282,7 @@ class ManagementWorkflowMixin:
         except (sqlite3.IntegrityError, ValueError, DesktopApiError) as exc:
             self._app_component("QMessageBox").warning(self, "標籤管理失敗", str(exc))
             return
-        self.refresh_records(self.selected_record_id)
+        self.refresh_after_management_content_update(tree_state)
 
     def edit_customer_tags(self):
         if not self.ensure_can_modify("設定標籤"):
@@ -294,6 +312,7 @@ class ManagementWorkflowMixin:
         )
         if dialog.exec() != QDialog.Accepted:
             return
+        tree_state = self.capture_land_tree_view_state()
         try:
             count = repository.set_customer_tags(
                 self.selected_record_id, dialog.selected_ids()
@@ -307,7 +326,7 @@ class ManagementWorkflowMixin:
                 self.record_label(self.selected_record_id, plain_data),
                 f"{count} 個標籤",
             )
-        self.refresh_records(self.selected_record_id)
+        self.refresh_after_management_content_update(tree_state)
 
     def manage_attachments(self):
         repository = self.active_record_repository()

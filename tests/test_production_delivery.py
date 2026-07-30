@@ -282,6 +282,11 @@ class ProductionLauncherTests(unittest.TestCase):
 
         packager = (root / "build_postgresql_release.py").read_text(encoding="utf-8")
         self.assertIn("'postgres' / 'schema.sql'", packager)
+        self.assertIn('"postgres/migrations/009_owner_contacts_rollback.sql"', packager)
+        self.assertIn(
+            '"postgres/migrations/010_owner_contacts_enhancement_rollback.sql"',
+            packager,
+        )
         self.assertIn('"standalone_migration_import"', packager)
         self.assertIn('"migration_preserves_server_accounts": True', packager)
 

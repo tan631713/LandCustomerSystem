@@ -5,6 +5,7 @@ from customer_api.postgres_attachments import PostgreSQLAttachmentMixin
 from customer_api.postgres_collaboration import PostgreSQLCollaborationMixin
 from customer_api.postgres_desktop_features import PostgreSQLDesktopFeatureMixin
 from customer_api.postgres_field_visits import PostgreSQLFieldVisitMixin
+from customer_api.postgres_owner_contacts import PostgreSQLOwnerContactMixin
 from customer_api.postgres_projects import PostgreSQLProjectMixin
 from customer_api.postgres_records import PostgreSQLRecordMixin
 from customer_api.postgres_remote_operations import PostgreSQLRemoteOperationMixin
@@ -22,6 +23,7 @@ class PostgreSQLCustomerDataSource(
     PostgreSQLAttachmentMixin,
     PostgreSQLDesktopFeatureMixin,
     PostgreSQLFieldVisitMixin,
+    PostgreSQLOwnerContactMixin,
     PostgreSQLRemoteOperationMixin,
 ):
     backend_name = "postgresql"
@@ -29,6 +31,9 @@ class PostgreSQLCustomerDataSource(
 
     RECORD_SELECT = """
         SELECT ownership.id,
+               ownership.id AS ownership_id,
+               land.id AS land_id,
+               owner.id AS owner_id,
                land.district, land.section, ownership.registration_order,
                land.land_number, land.area, land.declared_value,
                ownership.numerator, ownership.denominator, ownership.ping,
@@ -52,6 +57,19 @@ class PostgreSQLCustomerDataSource(
                    JOIN tags tag ON tag.id = link.tag_id
                    WHERE link.ownership_id = ownership.id
                ), '') AS tag_names,
+               COALESCE((
+                   SELECT JSONB_AGG(
+                       JSONB_BUILD_OBJECT(
+                           'tag_id', tag.id,
+                           'name', tag.name,
+                           'color', COALESCE(tag.color, '')
+                       )
+                       ORDER BY tag.name, tag.id
+                   )
+                   FROM ownership_tags link
+                   JOIN tags tag ON tag.id = link.tag_id
+                   WHERE link.ownership_id = ownership.id
+               ), '[]'::jsonb) AS tag_items,
                COALESCE((
                    SELECT tag.color
                    FROM ownership_tags link

@@ -13,8 +13,10 @@ from customer_domain import (
     parse_number,
     split_search_terms,
 )
+from customer_land_tree import group_land_records, ownership_area
 from customer_repository import normalize_watch_name
 from customer_security import decrypt_value
+from customer_tag_display import normalize_tag_items, tag_names
 from PySide6.QtCore import QObject, QThread, Signal, Slot
 
 
@@ -121,9 +123,29 @@ class CustomerRecordProcessor:
         except (AttributeError, KeyError, TypeError):
             return default
 
+    @staticmethod
+    def custom_value_map(value):
+        result = {}
+        for item in str(value or "").split("；"):
+            label, separator, text = item.partition("：")
+            if separator and label.strip() and text.strip():
+                result[label.strip().casefold()] = text.strip()
+        return result
+
+    @staticmethod
+    def first_custom_value(values, labels):
+        for label in labels:
+            value = values.get(label.casefold())
+            if value:
+                return value
+        return ""
+
     def build_record(self, row, include_search_text=None):
         include_search_text = bool(self.keyword) if include_search_text is None else include_search_text
         record_id = row["id"]
+        ownership_id = self.row_value(row, "ownership_id", record_id) or record_id
+        land_id = self.row_value(row, "land_id", None)
+        owner_id = self.row_value(row, "owner_id", None)
         if self.decryption_cache is None:
             sensitive = {
                 key: decrypt_value(self.fernet, row[key] or "")
@@ -164,8 +186,16 @@ class CustomerRecordProcessor:
         elif has_note:
             background = self.note_color
 
+        tags = normalize_tag_items(
+            self.row_value(row, "tag_items") or self.row_value(row, "tags"),
+            names=self.row_value(row, "tag_names"),
+            primary_color=self.row_value(row, "primary_tag_color"),
+        )
         raw = {
             "rowid": str(record_id),
+            "ownership_id": ownership_id,
+            "land_id": land_id,
+            "owner_id": owner_id,
             "district": row["district"] or "",
             "section": row["section"] or "",
             "registration_order": row["registration_order"] or "",
@@ -183,7 +213,8 @@ class CustomerRecordProcessor:
             "note": note,
             "visit_log": visit_log,
             "case_names": self.row_value(row, "case_names") or "",
-            "tag_names": self.row_value(row, "tag_names") or "",
+            "tag_names": tag_names(tags),
+            "tag_items": tags,
             "attachment_count": str(self.row_value(row, "attachment_count", 0) or 0),
             "attachment_names": self.row_value(row, "attachment_names") or "",
             "custom_values": self.row_value(row, "custom_values") or "",
@@ -191,6 +222,44 @@ class CustomerRecordProcessor:
             "next_follow_up": next_follow_up,
             "follow_up_status": follow_up_status,
         }
+        custom_values = self.custom_value_map(raw["custom_values"])
+        raw["full_land_number"] = " ".join(
+            part
+            for part in (
+                str(raw["district"]).strip(),
+                str(raw["section"]).strip(),
+                str(raw["land_number"]).strip(),
+            )
+            if part
+        )
+        raw["share"] = (
+            f"{raw['numerator']}/{raw['denominator']}"
+            if raw["numerator"] or raw["denominator"]
+            else ""
+        )
+        area_value = ownership_area({"raw": raw})
+        raw["ownership_area"] = (
+            "" if area_value is None else f"{area_value:,.2f} ㎡"
+        )
+        raw["phone"] = self.row_value(row, "phone") or self.first_custom_value(
+            custom_values,
+            ("電話", "手機", "市話", "聯絡電話"),
+        )
+        raw["customer_status"] = follow_up_status or self.first_custom_value(
+            custom_values,
+            ("客戶狀態", "開發狀態", "地主狀態"),
+        )
+        note_text = str(note or "").strip().replace("\n", " ")
+        raw["note_summary"] = (
+            note_text if len(note_text) <= 40 else note_text[:39] + "…"
+        )
+        raw["owner_count"] = ""
+        raw["ownership_count"] = ""
+        raw["land_use"] = self.row_value(row, "land_use") or self.first_custom_value(
+            custom_values,
+            ("地目", "使用分區", "土地使用分區"),
+        )
+        raw["status_summary"] = ""
         display = {
             **raw,
             "checked": "",
@@ -202,11 +271,15 @@ class CustomerRecordProcessor:
         }
         return {
             "id": record_id,
+            "ownership_id": int(ownership_id),
+            "land_id": int(land_id) if land_id not in (None, "") else None,
+            "owner_id": int(owner_id) if owner_id not in (None, "") else None,
             "checked": is_checked,
             "is_watchlist": is_watchlist,
             "has_note": has_note,
             "is_overdue": is_overdue,
-            "tag_color": self.row_value(row, "primary_tag_color") or "",
+            "tags": tags,
+            "tag_color": tags[0]["color"] if tags else "",
             "background": background,
             "highlighted_fields": self.highlighted_fields(raw),
             "raw": raw,
@@ -271,8 +344,11 @@ class CustomerRecordProcessor:
                 rows.append(record)
         if is_cancelled():
             return None
-        rows.sort(key=self.sort_key, reverse=self.reverse)
-        return rows
+        return group_land_records(
+            rows,
+            sort_field=self.sort_field,
+            reverse=self.reverse,
+        )
 
 
 class CustomerSearchWorker(QObject):

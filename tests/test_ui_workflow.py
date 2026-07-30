@@ -7,13 +7,22 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QEventLoop, QItemSelectionModel, Qt, QTimer
-from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
+from cryptography.fernet import Fernet
+from PySide6.QtCore import QEventLoop, QItemSelectionModel, QSettings, Qt, QTimer
+from PySide6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QLineEdit,
+    QMessageBox,
+    QPlainTextEdit,
+    QSizePolicy,
+)
 
 import customer_ui_qt as app
 import customer_auth
 import customer_import_controller as import_controller
 import customer_backup_status as backup_status_module
+import customer_window_ui as window_ui_module
 from customer_database import CustomerDatabase
 from customer_repository import CustomerRepository
 from customer_security import decrypt_value
@@ -60,6 +69,78 @@ class UiWorkflowTests(unittest.TestCase):
         loop.exec()
         poll_timer.stop()
         self.assertFalse(window.record_searches, "背景搜尋未在時限內結束")
+
+    def test_main_splitter_can_narrow_detail_panel_and_restores_qsettings_sizes(self):
+        settings = QSettings(
+            str(self.root / "desktop-layout.ini"),
+            QSettings.IniFormat,
+        )
+        with patch.object(window_ui_module, "QSettings", return_value=settings):
+            window = app.LandApp(Fernet.generate_key())
+            try:
+                window.show()
+                self.application.processEvents()
+                window.resize(1200, 760)
+                self.application.processEvents()
+
+                self.assertEqual(
+                    window.list_frame.minimumWidth(),
+                    window_ui_module.LAND_LIST_MINIMUM_WIDTH,
+                )
+                self.assertEqual(
+                    window.form_frame.minimumWidth(),
+                    window_ui_module.DETAIL_PANEL_MINIMUM_WIDTH,
+                )
+                self.assertLessEqual(
+                    window.owner_contacts_widget.minimumSizeHint().width(),
+                    window_ui_module.DETAIL_PANEL_MINIMUM_WIDTH,
+                )
+                self.assertEqual(
+                    window.list_frame.sizePolicy().horizontalStretch(),
+                    3,
+                )
+                self.assertEqual(
+                    window.form_frame.sizePolicy().horizontalStretch(),
+                    2,
+                )
+                self.assertEqual(window.detail_tabs.count(), 2)
+
+                window.main_splitter.setSizes([700, 460])
+                self.application.processEvents()
+                narrowed = window.main_splitter.sizes()
+                self.assertGreaterEqual(
+                    narrowed[0],
+                    window_ui_module.LAND_LIST_MINIMUM_WIDTH,
+                )
+                self.assertGreaterEqual(
+                    narrowed[1],
+                    window_ui_module.DETAIL_PANEL_MINIMUM_WIDTH,
+                )
+                self.assertLessEqual(narrowed[1], 480)
+
+                for widget in window.fields.values():
+                    if isinstance(widget, (QLineEdit, QPlainTextEdit)):
+                        self.assertEqual(
+                            widget.sizePolicy().horizontalPolicy(),
+                            QSizePolicy.Expanding,
+                        )
+
+                window.main_splitter.setSizes([640, 520])
+                self.application.processEvents()
+                saved_sizes = window.main_splitter.sizes()
+                self.assertTrue(window.save_main_splitter_sizes())
+                window.main_splitter.setSizes([700, 460])
+                self.application.processEvents()
+                self.assertTrue(window.restore_main_splitter_sizes())
+                restored_sizes = window.main_splitter.sizes()
+                self.assertLessEqual(abs(restored_sizes[0] - saved_sizes[0]), 2)
+                self.assertLessEqual(abs(restored_sizes[1] - saved_sizes[1]), 2)
+
+                self.assertIsNotNone(window.table_model)
+                self.assertIsNotNone(window.table_proxy_model)
+                self.assertEqual(window.table_model.rowCount(), 0)
+            finally:
+                window.close()
 
     def test_postgresql_login_uses_api_account_not_legacy_sqlite_account(self):
         class FakeApiClient:
@@ -147,7 +228,34 @@ class UiWorkflowTests(unittest.TestCase):
                 window.refresh_records(record_id)
                 window.load_record(record_id)
                 window.set_field_text("address", "台北市新地址")
-                window.save_record()
+                with (
+                    patch.object(
+                        window,
+                        "refresh_records",
+                        wraps=window.refresh_records,
+                    ) as refresh_records,
+                    patch.object(
+                        window.table_model,
+                        "set_rows",
+                        wraps=window.table_model.set_rows,
+                    ) as reset_model,
+                ):
+                    window.save_record()
+                refresh_records.assert_called_once()
+                self.assertFalse(
+                    refresh_records.call_args.kwargs[
+                        "auto_expand_search_matches"
+                    ]
+                )
+                self.assertTrue(
+                    refresh_records.call_args.kwargs[
+                        "preserve_existing_model"
+                    ]
+                )
+                self.assertIsNotNone(
+                    refresh_records.call_args.kwargs["tree_state"]
+                )
+                reset_model.assert_not_called()
                 with app.connect() as conn:
                     encrypted_address = conn.execute(
                         "SELECT address FROM customers WHERE id = ?", (record_id,)
@@ -424,6 +532,139 @@ class UiWorkflowTests(unittest.TestCase):
             self.assertTrue(warning.called)
         finally:
             app.set_setting(app.READONLY_MODE_SETTING_KEY, "0")
+            window.close()
+
+    def test_tag_assignment_preserves_tree_model_and_expansion_state(self):
+        app.REPOSITORY.create_admin_user("test-password")
+        encryption_key = app.REPOSITORY.authenticate_user(
+            "admin",
+            "test-password",
+        )
+        window = app.LandApp(encryption_key)
+        try:
+            first_id = app.REPOSITORY.save_customer(
+                app.encrypt_record(
+                    window.fernet,
+                    window.normalize_record_data(
+                        {
+                            "district": "桃園區",
+                            "section": "中路段",
+                            "land_number": "10",
+                            "owner_name": "Owner A",
+                        }
+                    ),
+                )
+            )
+            second_id = app.REPOSITORY.save_customer(
+                app.encrypt_record(
+                    window.fernet,
+                    window.normalize_record_data(
+                        {
+                            "district": "桃園區",
+                            "section": "中路段",
+                            "land_number": "20",
+                            "owner_name": "Owner B",
+                        }
+                    ),
+                )
+            )
+            tag_id = app.REPOSITORY.save_tag("重要地主", "#2563EB")
+            window.refresh_records(first_id)
+            self.application.processEvents()
+
+            first_child = window.table_model.index_for_record_id(first_id)
+            second_child = window.table_model.index_for_record_id(second_id)
+            window.table_view.setExpanded(
+                window.proxy_table_index(first_child.parent()),
+                True,
+            )
+            window.table_view.setExpanded(
+                window.proxy_table_index(second_child.parent()),
+                False,
+            )
+            window.table_view.selectionModel().setCurrentIndex(
+                window.proxy_table_index(first_child),
+                QItemSelectionModel.ClearAndSelect
+                | QItemSelectionModel.Rows,
+            )
+            self.application.processEvents()
+            window.search_input.setText("Owner")
+            original_root_nodes = list(window.table_model._root_nodes)
+
+            class FakeCustomerTagsDialog:
+                def __init__(
+                    self,
+                    tags,
+                    selected_ids,
+                    record_label,
+                    parent,
+                ):
+                    self.tags = tags
+                    self.selected_ids_before = selected_ids
+                    self.record_label = record_label
+                    self.parent = parent
+
+                def exec(self):
+                    return QDialog.Accepted
+
+                def selected_ids(self):
+                    return [tag_id]
+
+            with (
+                patch.object(
+                    app,
+                    "CustomerTagsDialog",
+                    FakeCustomerTagsDialog,
+                ),
+                patch.object(
+                    window,
+                    "refresh_records",
+                    wraps=window.refresh_records,
+                ) as refresh_records,
+                patch.object(
+                    window.table_model,
+                    "set_rows",
+                    wraps=window.table_model.set_rows,
+                ) as reset_model,
+            ):
+                window.edit_customer_tags()
+
+            refresh_records.assert_called_once()
+            self.assertFalse(
+                refresh_records.call_args.kwargs[
+                    "auto_expand_search_matches"
+                ]
+            )
+            self.assertTrue(
+                refresh_records.call_args.kwargs[
+                    "preserve_existing_model"
+                ]
+            )
+            reset_model.assert_not_called()
+            self.assertEqual(window.table_model._root_nodes, original_root_nodes)
+
+            first_child = window.table_model.index_for_record_id(first_id)
+            second_child = window.table_model.index_for_record_id(second_id)
+            self.assertTrue(
+                window.table_view.isExpanded(
+                    window.proxy_table_index(first_child.parent())
+                )
+            )
+            self.assertFalse(
+                window.table_view.isExpanded(
+                    window.proxy_table_index(second_child.parent())
+                )
+            )
+            first_record = window.table_model.record_for_index(first_child)
+            self.assertEqual(
+                [tag["name"] for tag in first_record.get("tags") or []],
+                ["重要地主"],
+            )
+            self.assertEqual(
+                app.REPOSITORY.get_customer_tag_ids(first_id),
+                {tag_id},
+            )
+        finally:
             window.close()
 
     def test_excel_import_can_update_existing_duplicate_records(self):

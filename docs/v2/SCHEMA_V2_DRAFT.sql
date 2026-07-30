@@ -255,3 +255,4 @@ CREATE TABLE IF NOT EXISTS upgrade_checks (
 -- VALUES (12, 'upgrade validation and rollback evidence')
 
 ROLLBACK;
+

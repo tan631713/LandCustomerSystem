@@ -39,7 +39,10 @@ class FieldVisitSchemaTests(unittest.TestCase):
     def setUpClass(cls):
         cls.schema = SCHEMA_PATH.read_text(encoding="utf-8")
         cls.rollback = ROLLBACK_PATH.read_text(encoding="utf-8")
-        cls.version_eight = cls.schema.split("-- Version 8:", 1)[1]
+        cls.version_eight = (
+            cls.schema.split("-- Version 8:", 1)[1]
+            .split("-- Version 9:", 1)[0]
+        )
 
     def test_migration_is_registered_as_schema_version_eight(self):
         self.assertIn(

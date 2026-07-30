@@ -19,7 +19,10 @@ class PostgreSQLTagMixin:
                 ORDER BY LOWER(tag.name), tag.id
                 """
             ).fetchall()
-        return [_row_dict(row) for row in rows]
+        return [
+            {**_row_dict(row), "tag_id": int(row["id"])}
+            for row in rows
+        ]
 
     def save_tag(self, user, name, color="", tag_id=None):
         name = str(name or "").strip()

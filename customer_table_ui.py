@@ -1,26 +1,186 @@
 """Desktop record table and action-menu construction."""
 
-from customer_models import RecordTableModel
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QKeySequence
-from PySide6.QtWidgets import QAbstractItemView, QHeaderView, QMenu, QTableView
+from customer_models import LandTreeProxyModel, RecordTableModel, TAGS_ROLE
+from customer_tag_display import safe_tag_qcolor, tag_text_qcolor
+from PySide6.QtCore import QRect, QSize, Qt
+from PySide6.QtGui import QAction, QKeySequence, QPainter
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QMenu,
+    QPushButton,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
+    QTreeView,
+)
+
+
+def apply_land_tree_visual_style(tree, row_height=28):
+    """Apply a uniform structural colour while preserving semantic model colours."""
+
+    row_height = max(20, int(row_height))
+    tree.setAlternatingRowColors(False)
+    tree.setStyleSheet(
+        "QTreeView { background-color: #2d2d2d; alternate-background-color: #2d2d2d; }"
+        "QTreeView::item {"
+        f" min-height: {row_height}px;"
+        " border-bottom: 1px solid #374151;"
+        " }"
+        "QTreeView::item:selected { background-color: #365d8d; color: #ffffff; }"
+    )
+
+
+class _TreeVerticalHeaderAdapter:
+    """Compatibility shim for the old table row-height setting."""
+
+    def __init__(self, tree):
+        self.tree = tree
+        self.default_size = 28
+
+    def setVisible(self, _visible):
+        return None
+
+    def setDefaultSectionSize(self, size):
+        self.default_size = max(20, int(size))
+        apply_land_tree_visual_style(self.tree, self.default_size)
+
+
+class LandTreeView(QTreeView):
+    """QTreeView with the narrow QTableView compatibility used elsewhere."""
+
+    def __init__(self, parent=None):
+        self._tag_delegate = None
+        self._tag_column = None
+        super().__init__(parent)
+        self._vertical_header_adapter = _TreeVerticalHeaderAdapter(self)
+
+    def setModel(self, model):
+        super().setModel(model)
+        self._reinstall_tag_delegate()
+
+    def configure_tag_delegate(self, delegate, column):
+        self._tag_delegate = delegate
+        self._tag_column = int(column)
+        self._reinstall_tag_delegate()
+
+    def _reinstall_tag_delegate(self):
+        if self._tag_delegate is not None and self._tag_column is not None:
+            self.setItemDelegateForColumn(self._tag_column, self._tag_delegate)
+
+    def horizontalHeader(self):
+        return self.header()
+
+    def verticalHeader(self):
+        return self._vertical_header_adapter
+
+
+class TagPillDelegate(QStyledItemDelegate):
+    """Paint complete tag metadata as readable, individually coloured pills."""
+
+    HORIZONTAL_PADDING = 8
+    PILL_SPACING = 5
+    VERTICAL_PADDING = 3
+
+    def paint(self, painter, option, index):
+        tags = list(index.data(TAGS_ROLE) or [])
+        if not tags:
+            super().paint(painter, option, index)
+            return
+
+        base = QStyleOptionViewItem(option)
+        self.initStyleOption(base, index)
+        base.text = ""
+        base.icon = type(base.icon)()
+        style = base.widget.style() if base.widget else None
+        if style is not None:
+            style.drawControl(QStyle.CE_ItemViewItem, base, painter, base.widget)
+
+        painter.save()
+        try:
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            painter.setClipRect(option.rect)
+            metrics = option.fontMetrics
+            pill_height = min(
+                max(metrics.height() + self.VERTICAL_PADDING * 2, 20),
+                max(20, option.rect.height() - 4),
+            )
+            x = option.rect.left() + 6
+            y = option.rect.top() + max(2, (option.rect.height() - pill_height) // 2)
+            right = option.rect.right() - 5
+            for position, tag in enumerate(tags):
+                name = str(tag.get("name") or "").strip()
+                if not name:
+                    continue
+                width = metrics.horizontalAdvance(name) + self.HORIZONTAL_PADDING * 2
+                if x + width > right:
+                    remaining = len(tags) - position
+                    overflow = f"+{remaining}"
+                    width = metrics.horizontalAdvance(overflow) + self.HORIZONTAL_PADDING * 2
+                    if x + width <= right:
+                        rect = QRect(x, y, width, pill_height)
+                        painter.setPen(Qt.NoPen)
+                        painter.setBrush(safe_tag_qcolor("#64748B"))
+                        painter.drawRoundedRect(rect, pill_height // 2, pill_height // 2)
+                        painter.setPen(tag_text_qcolor("#64748B"))
+                        painter.drawText(rect, int(Qt.AlignCenter), overflow)
+                    break
+                color = safe_tag_qcolor(tag.get("color"))
+                rect = QRect(x, y, width, pill_height)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(color)
+                painter.drawRoundedRect(rect, pill_height // 2, pill_height // 2)
+                painter.setPen(tag_text_qcolor(color.name()))
+                painter.drawText(rect, int(Qt.AlignCenter), name)
+                x += width + self.PILL_SPACING
+        finally:
+            painter.restore()
+
+    def sizeHint(self, option, index):
+        base = super().sizeHint(option, index)
+        tags = list(index.data(TAGS_ROLE) or [])
+        if not tags:
+            return base
+        metrics = option.fontMetrics
+        width = 12 + sum(
+            metrics.horizontalAdvance(str(tag.get("name") or ""))
+            + self.HORIZONTAL_PADDING * 2
+            for tag in tags
+        ) + self.PILL_SPACING * max(0, len(tags) - 1)
+        height = max(base.height(), metrics.height() + self.VERTICAL_PADDING * 2 + 4)
+        return QSize(width, height)
 
 
 def _build_record_table(self, parent_layout, TABLE_COLUMNS, TABLE_WIDTHS):
+    self.table_column_indexes = {
+        key: index for index, (key, _label) in enumerate(TABLE_COLUMNS)
+    }
     self.table_model = RecordTableModel(self.on_checked_state_changed, self)
-    self.table_view = QTableView()
-    self.table_view.setModel(self.table_model)
+    self.table_proxy_model = LandTreeProxyModel(self)
+    self.table_proxy_model.setSourceModel(self.table_model)
+    self.table_view = LandTreeView()
+    self.table_view.setModel(self.table_proxy_model)
+    self.tag_pill_delegate = TagPillDelegate(self.table_view)
+    self.table_view.configure_tag_delegate(
+        self.tag_pill_delegate,
+        self.table_column_indexes["tag_names"],
+    )
     self.table_view.setSelectionBehavior(QAbstractItemView.SelectRows)
-    self.table_view.setSelectionMode(QTableView.ExtendedSelection)
-    self.table_view.setAlternatingRowColors(True)
+    self.table_view.setSelectionMode(QAbstractItemView.ExtendedSelection)
+    # Use one structural base colour for every land/ownership row. Semantic
+    # colours supplied by the model (checked, overdue, note, tag, search) stay.
+    apply_land_tree_visual_style(self.table_view)
     self.table_view.setWordWrap(False)
-    self.table_view.setSortingEnabled(False)
-    self.table_view.setShowGrid(True)
-    self.table_view.setCornerButtonEnabled(False)
+    self.table_view.setUniformRowHeights(True)
+    self.table_view.setAllColumnsShowFocus(True)
+    self.table_view.setRootIsDecorated(True)
+    self.table_view.setItemsExpandable(True)
+    self.table_view.setExpandsOnDoubleClick(False)
+    self.table_view.setIndentation(22)
     self.table_view.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
     self.table_view.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
-    self.table_view.verticalHeader().setVisible(False)
-    self.table_view.verticalHeader().setDefaultSectionSize(28)
     self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
     self.table_view.horizontalHeader().setStretchLastSection(False)
     self.table_view.horizontalHeader().setSectionsMovable(True)
@@ -46,9 +206,30 @@ def _build_record_table(self, parent_layout, TABLE_COLUMNS, TABLE_WIDTHS):
     self.table_view.selectionModel().selectionChanged.connect(
         lambda _selected, _deselected: self.update_selection_status()
     )
-    self.table_view.clicked.connect(self.on_table_clicked)
+    self.table_view.doubleClicked.connect(self.on_tree_double_clicked)
+    self.table_view.expanded.connect(self.on_land_group_expanded)
+    self.table_view.collapsed.connect(self.on_land_group_collapsed)
 
     parent_layout.addWidget(self.table_view)
+    paging = QHBoxLayout()
+    self.expand_all_button = QPushButton("全部展開")
+    self.expand_all_button.clicked.connect(self.expand_all_land_groups)
+    paging.addWidget(self.expand_all_button)
+    self.collapse_all_button = QPushButton("全部收合")
+    self.collapse_all_button.clicked.connect(self.collapse_all_land_groups)
+    paging.addWidget(self.collapse_all_button)
+    paging.addStretch(1)
+    self.land_count_label = QLabel("土地 0 筆｜地主／所有權資料 0 筆")
+    paging.addWidget(self.land_count_label)
+    self.previous_land_page_button = QPushButton("上一頁")
+    self.previous_land_page_button.clicked.connect(self.previous_land_page)
+    paging.addWidget(self.previous_land_page_button)
+    self.land_page_label = QLabel("第 1 / 1 頁")
+    paging.addWidget(self.land_page_label)
+    self.next_land_page_button = QPushButton("下一頁")
+    self.next_land_page_button.clicked.connect(self.next_land_page)
+    paging.addWidget(self.next_land_page_button)
+    parent_layout.addLayout(paging)
 
 
 
@@ -100,6 +281,25 @@ def _build_record_menu(self):
     delete_action = QAction("刪除資料", self)
     delete_action.triggered.connect(self.delete_record)
     self.record_menu.addAction(delete_action)
+
+    self.land_menu = QMenu(self)
+    open_land_action = QAction("開啟土地詳細資料", self)
+    open_land_action.triggered.connect(self.open_selected_land_detail)
+    self.land_menu.addAction(open_land_action)
+    edit_land_action = QAction("以代表持分編輯土地資料", self)
+    edit_land_action.triggered.connect(self.edit_selected_land)
+    edit_land_action.setEnabled(
+        self.current_user.get("role") in {"admin", "editor"}
+        and not self.is_readonly_mode()
+    )
+    self.land_menu.addAction(edit_land_action)
+    self.land_menu.addSeparator()
+    check_land_action = QAction("勾選此土地全部地主／持分", self)
+    check_land_action.triggered.connect(self.check_selected_rows)
+    self.land_menu.addAction(check_land_action)
+    uncheck_land_action = QAction("取消勾選此土地全部地主／持分", self)
+    uncheck_land_action.triggered.connect(self.uncheck_selected_rows)
+    self.land_menu.addAction(uncheck_land_action)
 
     self.api_preview_context_actions = (
         context_case_manage_action,

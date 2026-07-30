@@ -123,6 +123,12 @@ class DesktopApiClient:
     def _error_detail(payload, fallback):
         if isinstance(payload, dict):
             detail = payload.get("detail")
+            if isinstance(detail, dict):
+                return str(
+                    detail.get("message")
+                    or detail.get("detail")
+                    or fallback
+                )
             if isinstance(detail, list):
                 extra_fields = []
                 messages = []
@@ -416,6 +422,120 @@ class DesktopApiClient:
             f"/api/v1/records/{int(record_id)}/contact-logs/{int(log_id)}",
         )
         return True
+
+    def list_owner_contacts(self, record_id, *, include_inactive=False):
+        result = self._request(
+            "GET",
+            f"/api/v1/records/{int(record_id)}/owner-contacts",
+            params={"include_inactive": bool(include_inactive)},
+        )
+        return list(result.get("items") or [])
+
+    def get_owner_contact(self, record_id, relation_id):
+        result = self._request(
+            "GET",
+            f"/api/v1/records/{int(record_id)}/owner-contacts/{int(relation_id)}",
+        )
+        return dict(result.get("item") or {})
+
+    def search_owner_contacts(self, query, *, limit=50):
+        result = self._request(
+            "GET",
+            "/api/v1/contacts/search",
+            params={"q": str(query or "").strip(), "limit": int(limit)},
+        )
+        return list(result.get("items") or [])
+
+    def find_owner_contact_duplicates(
+        self,
+        *,
+        name="",
+        mobile="",
+        mobile_phone=None,
+        home_phone="",
+        registered_address="",
+        contact_address="",
+        limit=20,
+    ):
+        if mobile_phone is None:
+            mobile_phone = mobile
+        result = self._request(
+            "POST",
+            "/api/v1/contacts/duplicate-check",
+            payload={
+                "name": str(name or "").strip(),
+                "mobile_phone": str(mobile_phone or "").strip(),
+                "home_phone": str(home_phone or "").strip(),
+                "registered_address": str(registered_address or "").strip(),
+                "contact_address": str(contact_address or "").strip(),
+                "limit": int(limit),
+            },
+        )
+        return list(result.get("items") or [])
+
+    def create_owner_contact(self, record_id, values):
+        result = self._request(
+            "POST",
+            f"/api/v1/records/{int(record_id)}/owner-contacts",
+            payload=dict(values),
+        )
+        return dict(result.get("item") or {})
+
+    def link_owner_contact(self, record_id, values):
+        result = self._request(
+            "POST",
+            f"/api/v1/records/{int(record_id)}/owner-contacts/link",
+            payload=dict(values),
+        )
+        return dict(result.get("item") or {})
+
+    def update_owner_contact(self, record_id, relation_id, values):
+        result = self._request(
+            "PUT",
+            f"/api/v1/records/{int(record_id)}/owner-contacts/{int(relation_id)}",
+            payload=dict(values),
+        )
+        return dict(result.get("item") or {})
+
+    def deactivate_owner_contact(
+        self,
+        record_id,
+        relation_id,
+        *,
+        reason="",
+        expected_relation_updated_at=None,
+    ):
+        result = self._request(
+            "POST",
+            (
+                f"/api/v1/records/{int(record_id)}/owner-contacts/"
+                f"{int(relation_id)}/deactivate"
+            ),
+            payload={
+                "reason": str(reason or "").strip(),
+                "expected_relation_updated_at": expected_relation_updated_at,
+            },
+        )
+        return dict(result.get("item") or {})
+
+    def reactivate_owner_contact(
+        self,
+        record_id,
+        relation_id,
+        *,
+        expected_relation_updated_at=None,
+    ):
+        result = self._request(
+            "POST",
+            (
+                f"/api/v1/records/{int(record_id)}/owner-contacts/"
+                f"{int(relation_id)}/reactivate"
+            ),
+            payload={
+                "expected_relation_updated_at": expected_relation_updated_at,
+            },
+        )
+        return dict(result.get("item") or {})
 
     def get_follow_up(self, record_id):
         result = self._request(
@@ -1246,6 +1366,55 @@ class DesktopApiRecordRepository:
         self._contact_log_record_ids.pop(log_id, None)
         self._invalidate()
         return int(bool(deleted))
+
+    def list_owner_contacts(self, record_id, *, include_inactive=False):
+        return self.client.list_owner_contacts(
+            int(record_id), include_inactive=bool(include_inactive)
+        )
+
+    def get_owner_contact(self, record_id, relation_id):
+        return self.client.get_owner_contact(int(record_id), int(relation_id))
+
+    def search_owner_contacts(self, query, *, limit=50):
+        return self.client.search_owner_contacts(query, limit=limit)
+
+    def find_owner_contact_duplicates(self, **values):
+        return self.client.find_owner_contact_duplicates(**values)
+
+    def create_owner_contact(self, record_id, values):
+        result = self.client.create_owner_contact(int(record_id), values)
+        self._invalidate()
+        return result
+
+    def link_owner_contact(self, record_id, values):
+        result = self.client.link_owner_contact(int(record_id), values)
+        self._invalidate()
+        return result
+
+    def update_owner_contact(self, record_id, relation_id, values):
+        result = self.client.update_owner_contact(
+            int(record_id), int(relation_id), values
+        )
+        self._invalidate()
+        return result
+
+    def deactivate_owner_contact(
+        self, record_id, relation_id, **values
+    ):
+        result = self.client.deactivate_owner_contact(
+            int(record_id), int(relation_id), **values
+        )
+        self._invalidate()
+        return result
+
+    def reactivate_owner_contact(
+        self, record_id, relation_id, **values
+    ):
+        result = self.client.reactivate_owner_contact(
+            int(record_id), int(relation_id), **values
+        )
+        self._invalidate()
+        return result
 
     def get_follow_up_reminder(self, record_id):
         reminder = self.client.get_follow_up(int(record_id))

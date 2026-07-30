@@ -28,12 +28,21 @@ const state = {
   contactSubmittedSignature: "",
   contactSubmittedPayload: null,
   fieldPlanSelection: new Set(),
-  fieldPlanOrder: []
+  fieldPlanOrder: [],
+  connectionCheckRunning: false,
+  lastHealth: null,
+  fieldPlanOrderDirty: false,
+  mobileUpdateDeferred: false,
+  mobileUpdateResume: null,
+  mobileUpdateCompleted: false
 };
 
 const MAX_ATTACHMENT_SIZE = 50 * 1024 * 1024;
 const PHOTO_COMPRESSION_THRESHOLD = 1.5 * 1024 * 1024;
 const PHOTO_MAX_DIMENSION = 2048;
+const MOBILE_ASSET_VERSION = 25;
+const MOBILE_UPDATE_RESUME_KEY = "lcs_mobile_update_resume";
+const MOBILE_UPDATE_RESUME_MAX_AGE_MS = 15 * 60 * 1000;
 
 const pages = {
   home: "總覽",
@@ -209,10 +218,268 @@ function updateConnection(online, message = "") {
   const banner = $("#connection-banner");
   banner.classList.toggle("online", online);
   banner.classList.toggle("offline", !online);
-  banner.textContent = message || (online ? "已連線 PostgreSQL" : "目前離線");
+  $("#connection-banner-message").textContent = message || (online ? "已連線 PostgreSQL" : "目前離線");
   const status = $("#sidebar-status");
   if (status) status.textContent = online ? "PostgreSQL 已連線" : "目前無法連線";
   document.body.classList.toggle("is-offline", !online);
+}
+
+function renderConnectionCheck(status, title, detail) {
+  const panel = $("#login-connection-check");
+  if (!panel) return;
+  panel.dataset.state = status;
+  $("#login-connection-title").textContent = title;
+  $("#login-connection-detail").textContent = detail;
+}
+
+function setConnectionCheckBusy(busy) {
+  setButtonBusy($("#login-connection-retry"), busy, "檢查中…");
+  setButtonBusy($("#connection-banner-retry"), busy, "檢查中…");
+}
+
+function showMobileUpdate(detail = "更新後即可使用最新功能與修正。") {
+  if (state.mobileUpdateDeferred) return;
+  $("#app-update-detail").textContent = detail;
+  $("#app-update-banner").classList.remove("hidden");
+}
+
+function checkMobileAssetVersion(serverVersion) {
+  const version = Number(serverVersion);
+  if (!Number.isInteger(version) || version <= MOBILE_ASSET_VERSION) return false;
+  showMobileUpdate(`伺服器已有新版手機畫面（v${version}），更新後即可套用。`);
+  return true;
+}
+
+function deferMobileUpdate() {
+  state.mobileUpdateDeferred = true;
+  $("#app-update-banner").classList.add("hidden");
+  toast("已暫緩更新，下次重新開啟時會再提醒");
+}
+
+function activeMobilePage() {
+  const active = $(".page.active");
+  const page = active && String(active.id || "").replace(/^page-/, "");
+  return pages[page] ? page : "home";
+}
+
+function captureMobileUpdateResume() {
+  const routeItems = (state.fieldVisitRoute && state.fieldVisitRoute.items) || [];
+  const currentItem = routeItems[state.fieldVisitIndex] || null;
+  const recordSheetOpen = !$("#record-sheet").classList.contains("hidden");
+  const fieldActionOpen = !$("#field-action-dialog").classList.contains("hidden");
+  const fieldPlanOpen = !$("#field-plan-dialog").classList.contains("hidden");
+  const highlightedSection = $(".sheet-section.record-section-highlight");
+  return {
+    saved_at: Date.now(),
+    page: activeMobilePage(),
+    field_visit_item_id: currentItem ? Number(currentItem.id) : null,
+    record_id: recordSheetOpen && state.currentRecordId ? Number(state.currentRecordId) : null,
+    record_section: recordSheetOpen && highlightedSection ? highlightedSection.id : "",
+    record_field_visit_item_id: recordSheetOpen && state.currentFieldVisitItemId
+      ? Number(state.currentFieldVisitItemId)
+      : null,
+    field_action: fieldActionOpen ? $("#field-action-name").value : "",
+    field_action_item_id: fieldActionOpen ? Number($("#field-action-item-id").value) || null : null,
+    field_plan_open: fieldPlanOpen,
+    field_plan_query: fieldPlanOpen ? $("#field-plan-query").value.trim() : "",
+    field_plan_title: fieldPlanOpen ? $("#field-plan-title").value.trim() : ""
+  };
+}
+
+function readMobileUpdateResume() {
+  const value = readSessionDraft(MOBILE_UPDATE_RESUME_KEY);
+  if (!value || typeof value !== "object") return null;
+  const savedAt = Number(value.saved_at);
+  if (
+    !Number.isFinite(savedAt)
+    || Date.now() - savedAt < 0
+    || Date.now() - savedAt > MOBILE_UPDATE_RESUME_MAX_AGE_MS
+    || !pages[value.page]
+  ) {
+    sessionStorage.removeItem(MOBILE_UPDATE_RESUME_KEY);
+    return null;
+  }
+  return value;
+}
+
+function prepareMobileUpdateResume() {
+  try {
+    if (sessionStorage.getItem("lcs_mobile_just_updated") !== "1") return;
+    sessionStorage.removeItem("lcs_mobile_just_updated");
+    state.mobileUpdateCompleted = true;
+    state.mobileUpdateResume = readMobileUpdateResume();
+  } catch (_error) {
+    state.mobileUpdateCompleted = false;
+    state.mobileUpdateResume = null;
+  }
+}
+
+async function finishMobileUpdateResume() {
+  const resume = state.mobileUpdateResume;
+  state.mobileUpdateResume = null;
+  try {
+    sessionStorage.removeItem(MOBILE_UPDATE_RESUME_KEY);
+  } catch (_error) {
+    // The restored screen can continue even if Safari rejects session storage.
+  }
+
+  if (resume) {
+    if (resume.record_id) {
+      await openRecord(
+        resume.record_id,
+        resume.record_section || "",
+        resume.record_field_visit_item_id || null
+      );
+    } else if (resume.field_action && resume.field_action_item_id) {
+      openFieldAction(resume.field_action, resume.field_action_item_id);
+    } else if (resume.field_plan_open && resume.page === "field") {
+      openFieldPlan();
+      if (!$("#field-plan-dialog").classList.contains("hidden")) {
+        if (resume.field_plan_title) $("#field-plan-title").value = resume.field_plan_title;
+        if (resume.field_plan_query) {
+          $("#field-plan-query").value = resume.field_plan_query;
+          await searchFieldPlanRecords();
+        }
+      }
+    } else if (resume.page === "field" && resume.field_visit_item_id) {
+      requestAnimationFrame(() => {
+        $("#field-visit-current").scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+  }
+
+  if (state.mobileUpdateCompleted) {
+    state.mobileUpdateCompleted = false;
+    toast(resume ? "手機網頁已更新，並回到原本畫面" : "手機網頁已更新完成");
+  }
+}
+
+function mobileUpdateBlockReason() {
+  if (state.attachmentProcessing) {
+    return "照片或附件正在上傳，請等待上傳完成。";
+  }
+  if (state.pendingAttachmentFiles.length > 0) {
+    return `尚有 ${state.pendingAttachmentFiles.length} 個照片或附件未上傳，請先完成上傳或取消選取。`;
+  }
+  if (state.fieldPlanSelection.size > 0) {
+    return `尚有 ${state.fieldPlanSelection.size} 筆地主只在選取中，請先加入行程或取消選取。`;
+  }
+  if (state.fieldPlanOrderDirty) {
+    return "今日行程順序尚未儲存，請先儲存順序或關閉行程編輯。";
+  }
+  return "";
+}
+
+function applyMobileUpdate() {
+  const button = $("#app-update-apply");
+  const blocked = mobileUpdateBlockReason();
+  if (blocked) {
+    $("#app-update-detail").textContent = blocked;
+    toast("目前有尚未完成的內容，暫不更新");
+    return;
+  }
+  setButtonBusy(button, true, "更新中…");
+  try {
+    writeSessionDraft(MOBILE_UPDATE_RESUME_KEY, captureMobileUpdateResume());
+    sessionStorage.setItem("lcs_mobile_just_updated", "1");
+  } catch (_error) {
+    // Reload still works if Safari temporarily rejects session storage.
+  }
+  window.location.reload();
+}
+
+async function registerMobileServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  const hadController = Boolean(navigator.serviceWorker.controller);
+  try {
+    const registration = await navigator.serviceWorker.register(
+      "./service-worker.js",
+      { scope: "/mobile/" }
+    );
+    registration.addEventListener("updatefound", () => {
+      const worker = registration.installing;
+      if (!worker) return;
+      worker.addEventListener("statechange", () => {
+        if (worker.state === "installed" && navigator.serviceWorker.controller) {
+          showMobileUpdate("新版手機畫面已下載完成，請立即更新套用。");
+        }
+      });
+    });
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (hadController) {
+        showMobileUpdate("新版手機畫面已準備完成，請立即更新套用。");
+      }
+    });
+    await registration.update().catch(() => {});
+  } catch (_error) {
+    // The connection preflight already explains server/network failures.
+  }
+}
+
+async function checkServerConnection({ announce = false, timeoutMs = 8000 } = {}) {
+  if (state.connectionCheckRunning) return state.lastHealth;
+  state.connectionCheckRunning = true;
+  state.lastHealth = null;
+  setConnectionCheckBusy(true);
+  renderConnectionCheck("checking", "正在確認網路伺服器", "正在檢查手機網路、VPN 與家中伺服器。");
+
+  if (navigator.onLine === false) {
+    const detail = "手機目前沒有網路。請先開啟 Wi-Fi 或行動網路，再重新檢查。";
+    updateConnection(false, "手機目前沒有網路");
+    renderConnectionCheck("offline", "手機尚未連上網路", detail);
+    state.connectionCheckRunning = false;
+    setConnectionCheckBusy(false);
+    return null;
+  }
+
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch("/health", {
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+      signal: controller.signal
+    });
+    const health = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(`伺服器回應 ${response.status}`);
+    if (health.backend !== "postgresql") {
+      updateConnection(false, "伺服器資料庫尚未就緒");
+      renderConnectionCheck(
+        "offline",
+        "已連到主機，但資料庫尚未就緒",
+        "請在家中主機查看伺服器啟動視窗，確認 PostgreSQL 顯示正常。"
+      );
+      return null;
+    }
+
+    state.lastHealth = health;
+    checkMobileAssetVersion(health.mobile_asset_version);
+    const version = health.version ? ` v${health.version}` : "";
+    updateConnection(true, `已連線 PostgreSQL${version ? `・${version.trim()}` : ""}`);
+    renderConnectionCheck(
+      "online",
+      "網路伺服器可以使用",
+      `家中伺服器${version} 與 PostgreSQL 均已連線，可以安全登入。`
+    );
+    if (announce) toast("連線檢查正常");
+    return health;
+  } catch (error) {
+    const timedOut = error && error.name === "AbortError";
+    const detail = timedOut
+      ? "伺服器等待逾時。請確認 NetBird 已連線，並確認家中主機的伺服器視窗仍保持開啟。"
+      : "請先開啟 NetBird，再確認家中主機的「啟動家中伺服器」視窗仍保持開啟。";
+    updateConnection(false, timedOut ? "網路伺服器回應逾時" : "無法連線至網路伺服器");
+    renderConnectionCheck(
+      "offline",
+      timedOut ? "網路伺服器回應逾時" : "目前無法連到網路伺服器",
+      detail
+    );
+    return null;
+  } finally {
+    window.clearTimeout(timer);
+    state.connectionCheckRunning = false;
+    setConnectionCheckBusy(false);
+  }
 }
 
 let toastTimer = null;
@@ -341,7 +608,13 @@ function showApp(user) {
     year: "numeric", month: "long", day: "numeric", weekday: "long"
   }).format(new Date());
   applyRole();
-  navigate("home", true);
+  const resumePage = state.mobileUpdateResume && pages[state.mobileUpdateResume.page]
+    ? state.mobileUpdateResume.page
+    : "home";
+  navigate(resumePage, true);
+  if (resumePage !== "field") {
+    window.setTimeout(() => finishMobileUpdateResume(), 0);
+  }
 }
 
 async function login(event) {
@@ -350,6 +623,11 @@ async function login(event) {
   setButtonBusy(button, true, "登入中…");
   $("#login-error").textContent = "";
   try {
+    const health = await checkServerConnection();
+    if (!health) {
+      $("#login-error").textContent = "請先依照連線提示處理，再重新登入。";
+      return;
+    }
     const payload = await request("/api/v1/auth/login", {
       method: "POST",
       body: JSON.stringify({
@@ -720,7 +998,13 @@ async function loadFieldVisit(options = {}) {
   try {
     const result = await request(`/api/v1/field-visits/today?visit_date=${localDateISO()}`);
     state.fieldVisitRoute = result.item || null;
-    state.fieldVisitIndex = routeItemIndex(state.fieldVisitRoute);
+    const resumeItemId = state.mobileUpdateResume && state.mobileUpdateResume.page === "field"
+      ? Number(state.mobileUpdateResume.field_visit_item_id)
+      : null;
+    const resumeIndex = resumeItemId && state.fieldVisitRoute
+      ? (state.fieldVisitRoute.items || []).findIndex(item => Number(item.id) === resumeItemId)
+      : -1;
+    state.fieldVisitIndex = resumeIndex >= 0 ? resumeIndex : routeItemIndex(state.fieldVisitRoute);
     if (!state.fieldVisitRoute) {
       $("#field-visit-empty-message").textContent = canEdit()
         ? "今天尚未建立拜訪行程，可以直接從手機安排。"
@@ -735,6 +1019,9 @@ async function loadFieldVisit(options = {}) {
     $("#field-visit-workspace").classList.add("hidden");
   } finally {
     setButtonBusy(refreshButton, false);
+    if (state.mobileUpdateResume && state.mobileUpdateResume.page === "field") {
+      await finishMobileUpdateResume();
+    }
   }
 }
 
@@ -756,6 +1043,7 @@ function resetFieldPlanOrder() {
     .slice()
     .sort((left, right) => Number(left.route_order) - Number(right.route_order))
     .map(item => Number(item.id));
+  state.fieldPlanOrderDirty = false;
 }
 
 function renderFieldPlanCurrent() {
@@ -872,6 +1160,7 @@ function moveFieldPlanItem(itemId, direction) {
     state.fieldPlanOrder[target],
     state.fieldPlanOrder[index]
   ];
+  state.fieldPlanOrderDirty = true;
   renderFieldPlanCurrent();
 }
 
@@ -1125,6 +1414,7 @@ function closeFieldPlan() {
   document.body.style.overflow = "";
   state.fieldPlanSelection.clear();
   state.fieldPlanOrder = [];
+  state.fieldPlanOrderDirty = false;
   updateFieldPlanSelection();
   if (fieldPlanLastFocusedElement && document.contains(fieldPlanLastFocusedElement)) {
     fieldPlanLastFocusedElement.focus();
@@ -2362,10 +2652,8 @@ async function submitFollowup(event) {
 }
 
 async function restoreSession() {
-  try {
-    const health = await request("/health");
-    updateConnection(true, health.backend === "postgresql" ? `已連線 PostgreSQL・v${health.version}` : "伺服器不是 PostgreSQL 模式");
-  } catch (_error) {
+  const health = await checkServerConnection();
+  if (!health) {
     showLogin();
     return;
   }
@@ -2383,6 +2671,10 @@ async function restoreSession() {
 
 function bindEvents() {
   $("#login-form").addEventListener("submit", login);
+  $("#app-update-apply").addEventListener("click", applyMobileUpdate);
+  $("#app-update-defer").addEventListener("click", deferMobileUpdate);
+  $("#login-connection-retry").addEventListener("click", () => checkServerConnection({ announce: true }));
+  $("#connection-banner-retry").addEventListener("click", () => checkServerConnection({ announce: true }));
   $("#user-button").addEventListener("click", logout);
   $("#owner-search-form").addEventListener("submit", searchOwners);
   $("#land-search-form").addEventListener("submit", searchLands);
@@ -2496,8 +2788,15 @@ function bindEvents() {
       );
     }
   });
-  window.addEventListener("online", () => updateConnection(true));
-  window.addEventListener("offline", () => updateConnection(false, "手機目前離線，資料不會寫入"));
+  window.addEventListener("online", () => checkServerConnection({ announce: true }));
+  window.addEventListener("offline", () => {
+    updateConnection(false, "手機目前離線，資料不會寫入");
+    renderConnectionCheck(
+      "offline",
+      "手機尚未連上網路",
+      "請先開啟 Wi-Fi 或行動網路，再重新檢查。"
+    );
+  });
   let photoTouchStart = null;
   $("#photo-viewer").addEventListener("touchstart", event => {
     photoTouchStart = event.changedTouches[0]?.clientX ?? null;
@@ -2520,9 +2819,8 @@ function bindEvents() {
   $("#contact-date").value = new Date().toISOString().slice(0, 10);
 }
 
+prepareMobileUpdateResume();
 bindEvents();
 restoreSession();
 
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => navigator.serviceWorker.register("./service-worker.js", { scope: "/mobile/" }).catch(() => {}));
-}
+window.addEventListener("load", registerMobileServiceWorker);

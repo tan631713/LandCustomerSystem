@@ -263,7 +263,17 @@ REPOSITORY = CustomerRepository(
 TABLE_COLUMNS = [
     ("checked", "選取"),
     ("rowid", "系統ID"),
+    ("full_land_number", "完整地號"),
+    ("owner_count", "地主數"),
+    ("ownership_count", "持分筆數"),
+    ("land_use", "地目／使用分區"),
+    ("status_summary", "狀態摘要"),
     *LAND_FIELDS,
+    ("share", "持分"),
+    ("ownership_area", "權利範圍面積"),
+    ("phone", "電話"),
+    ("customer_status", "客戶狀態"),
+    ("note_summary", "備註摘要"),
     *MANAGEMENT_FIELDS,
 ]
 
@@ -295,6 +305,11 @@ SORTABLE_FIELDS = [
     ("ping", "坪數"),
     ("total_declared_value", "總現值/元"),
     ("owner_name", "姓名"),
+    ("owner_count", "地主數量"),
+    ("ownership_count", "持分筆數"),
+    ("share", "持分"),
+    ("ownership_area", "權利範圍面積"),
+    ("customer_status", "客戶狀態"),
     ("case_names", "案件"),
     ("tag_names", "標籤"),
     ("attachment_count", "附件數"),
@@ -303,13 +318,18 @@ SORTABLE_FIELDS = [
     ("follow_up_status", "追蹤狀態"),
 ]
 
-TABLE_BATCH_SIZE = 200
+TABLE_BATCH_SIZE = 100
 ASYNC_SEARCH_THRESHOLD = 500
 SELECTION_SAVE_DELAY_MS = 300
 
 TABLE_WIDTHS = {
     "checked": 52,
     "rowid": 68,
+    "full_land_number": 250,
+    "owner_count": 78,
+    "ownership_count": 88,
+    "land_use": 130,
+    "status_summary": 170,
     "district": 95,
     "section": 100,
     "registration_order": 82,
@@ -334,6 +354,11 @@ TABLE_WIDTHS = {
     "last_contact": 170,
     "next_follow_up": 105,
     "follow_up_status": 95,
+    "share": 90,
+    "ownership_area": 120,
+    "phone": 120,
+    "customer_status": 100,
+    "note_summary": 180,
 }
 
 ADVANCED_SEARCH_FIELDS = [
@@ -527,7 +552,7 @@ def apply_app_style(app):
         QLabel {
             color: #e5e7eb;
         }
-        QLineEdit, QPlainTextEdit, QComboBox, QTableView, QTableWidget {
+        QLineEdit, QPlainTextEdit, QComboBox, QTableView, QTreeView, QTableWidget {
             background-color: #2d2d2d;
             color: #f9fafb;
             border: 1px solid #454545;
@@ -540,7 +565,7 @@ def apply_app_style(app):
         QPlainTextEdit {
             padding: 6px 8px;
         }
-        QLineEdit:focus, QPlainTextEdit:focus, QComboBox:focus, QTableView:focus, QTableWidget:focus {
+        QLineEdit:focus, QPlainTextEdit:focus, QComboBox:focus, QTableView:focus, QTreeView:focus, QTableWidget:focus {
             border: 1px solid #6ea8ff;
         }
         QLineEdit[readOnly="true"], QPlainTextEdit[readOnly="true"] {
@@ -597,10 +622,14 @@ def apply_app_style(app):
             gridline-color: #3e3e3e;
             alternate-background-color: #292929;
         }
+        QTreeView {
+            background-color: #2d2d2d;
+            alternate-background-color: #2d2d2d;
+        }
         QTableView::item {
             padding: 4px 6px;
         }
-        QTableView::item:selected, QTableWidget::item:selected {
+        QTableView::item:selected, QTreeView::item:selected, QTableWidget::item:selected {
             background-color: #88addc;
             color: #111827;
         }
@@ -1041,7 +1070,17 @@ class LandApp(
         self.settings_button = None
         self.table_view = None
         self.table_model = None
+        self.table_proxy_model = None
         self.record_menu = None
+        self.land_menu = None
+        self.expanded_land_ids = set()
+        self._applying_land_expansion = False
+        self._land_search_auto_expand = False
+        self.selected_land_state_id = None
+        self.land_count_label = None
+        self.land_page_label = None
+        self.previous_land_page_button = None
+        self.next_land_page_button = None
         self.data_menu = None
         self.tools_menu = None
         self.tool_submenus = {}
