@@ -33,6 +33,10 @@ class ServerRouteInventoryTests(unittest.TestCase):
             ("POST", "/api/v1/records/{record_id}/owner-contacts"),
             ("POST", "/api/v1/records/{record_id}/owner-contacts/link"),
             ("GET", "/api/v1/records/{record_id}/owner-contacts/{relation_id}"),
+            (
+                "GET",
+                "/api/v1/records/{record_id}/owner-contacts/{relation_id}/identity",
+            ),
             ("PUT", "/api/v1/records/{record_id}/owner-contacts/{relation_id}"),
             (
                 "POST",
@@ -50,6 +54,10 @@ class ServerRouteInventoryTests(unittest.TestCase):
             ("POST", "/api/v1/owners/{owner_id}/contacts"),
             ("POST", "/api/v1/owners/{owner_id}/contacts/link"),
             ("GET", "/api/v1/owners/{owner_id}/contacts/{relation_id}"),
+            (
+                "GET",
+                "/api/v1/owners/{owner_id}/contacts/{relation_id}/identity",
+            ),
             ("PUT", "/api/v1/owners/{owner_id}/contacts/{relation_id}"),
             (
                 "POST",

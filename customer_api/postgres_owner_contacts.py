@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import re
 
+from customer_domain import mask_identity_text
+from customer_security import decrypt_value, encrypt_value, make_fernet
 from customer_api.owner_contact_service import (
     OwnerContactConcurrentUpdate,
     OwnerContactConflict,
@@ -39,13 +41,14 @@ class ContactRepository:
         row = self.conn.execute(
             """
             INSERT INTO contacts (
-                name, mobile_phone, home_phone, registered_address,
+                name, external_id, mobile_phone, home_phone, registered_address,
                 contact_address, work_address, identity_note, notes
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
             (
                 values["name"],
+                values.get("external_id") or None,
                 values["mobile_phone"] or None,
                 values["home_phone"] or None,
                 values["registered_address"] or None,
@@ -61,7 +64,7 @@ class ContactRepository:
         return _dict(
             self.conn.execute(
                 """
-                SELECT id, name, mobile_phone, home_phone,
+                SELECT id, name, external_id, mobile_phone, home_phone,
                        registered_address, contact_address, work_address,
                        identity_note, notes, is_active, created_at, updated_at
                 FROM contacts WHERE id = %s
@@ -81,6 +84,7 @@ class ContactRepository:
     def update(self, contact_id, values, *, expected_updated_at=None):
         parameters = [
             values["name"],
+            values.get("external_id") or None,
             values["mobile_phone"] or None,
             values["home_phone"] or None,
             values["registered_address"] or None,
@@ -97,7 +101,8 @@ class ContactRepository:
         row = self.conn.execute(
             f"""
             UPDATE contacts SET
-                name = %s, mobile_phone = %s, home_phone = %s,
+                name = %s, external_id = %s,
+                mobile_phone = %s, home_phone = %s,
                 registered_address = %s, contact_address = %s,
                 work_address = %s, identity_note = %s, notes = %s,
                 updated_at = CURRENT_TIMESTAMP
@@ -122,7 +127,8 @@ class ContactRepository:
         phone_pattern = f"%{phone_query}%"
         rows = self.conn.execute(
             """
-            SELECT contact.id, contact.name, contact.mobile_phone,
+            SELECT contact.id, contact.name, contact.external_id,
+                   contact.mobile_phone,
                    contact.home_phone, contact.registered_address,
                    contact.contact_address, contact.work_address,
                    contact.identity_note, contact.notes,
@@ -187,7 +193,8 @@ class ContactRepository:
             return []
         rows = self.conn.execute(
             """
-            SELECT contact.id, contact.name, contact.mobile_phone,
+            SELECT contact.id, contact.name, contact.external_id,
+                   contact.mobile_phone,
                    contact.home_phone, contact.registered_address,
                    contact.contact_address, contact.work_address,
                    contact.identity_note, contact.notes,
@@ -275,7 +282,8 @@ class ContactRepository:
 class OwnerContactRelationRepository:
     VIEW_SELECT = """
         SELECT relation.id AS relation_id, relation.owner_id,
-               relation.contact_id, contact.name, relation.relationship_type,
+               relation.contact_id, contact.name, contact.external_id,
+               relation.relationship_type,
                relation.relationship_note, contact.mobile_phone,
                contact.home_phone, contact.registered_address,
                contact.contact_address, contact.work_address,
@@ -513,6 +521,19 @@ class OwnerContactRelationRepository:
 
 class PostgreSQLOwnerContactMixin:
     @staticmethod
+    def _present_owner_contact(user, item, *, reveal_identity=False):
+        values = dict(item or {})
+        plain_external_id = decrypt_value(
+            make_fernet(user.data_key), values.get("external_id")
+        )
+        values["external_id"] = (
+            plain_external_id
+            if reveal_identity
+            else mask_identity_text(plain_external_id)
+        )
+        return values
+
+    @staticmethod
     def _owner_id_for_record(conn, record_id):
         row = conn.execute(
             "SELECT owner_id FROM ownerships WHERE id = %s", (int(record_id),)
@@ -558,7 +579,7 @@ class PostgreSQLOwnerContactMixin:
             ),
         )
 
-    def _owner_contact_service(self, conn):
+    def _owner_contact_service(self, conn, user):
         return OwnerContactService(
             ContactRepository(conn),
             OwnerContactRelationRepository(conn),
@@ -573,6 +594,7 @@ class PostgreSQLOwnerContactMixin:
                     before,
                     after,
                 ),
+            lambda value: encrypt_value(make_fernet(user.data_key), value),
         )
 
     def list_owner_contacts(self, user, record_id, include_inactive=False):
@@ -581,7 +603,12 @@ class PostgreSQLOwnerContactMixin:
             items = OwnerContactRelationRepository(conn).list(
                 owner_id, include_inactive=include_inactive
             )
-        return {"owner_id": owner_id, "items": items}
+        return {
+            "owner_id": owner_id,
+            "items": [
+                self._present_owner_contact(user, item) for item in items
+            ],
+        }
 
     def get_owner_contact_relation(self, user, record_id, relation_id):
         with self._connect() as conn:
@@ -589,7 +616,18 @@ class PostgreSQLOwnerContactMixin:
             item = OwnerContactRelationRepository(conn).get(owner_id, relation_id)
         if item is None:
             raise OwnerContactNotFound("關係不存在。")
-        return item
+        return self._present_owner_contact(user, item)
+
+    def reveal_owner_contact_identity(self, user, record_id, relation_id):
+        with self._connect() as conn:
+            owner_id = self._owner_id_for_record(conn, record_id)
+            item = OwnerContactRelationRepository(conn).get(owner_id, relation_id)
+        if item is None:
+            raise OwnerContactNotFound("關係不存在。")
+        presented = self._present_owner_contact(
+            user, item, reveal_identity=True
+        )
+        return {"external_id": presented.get("external_id") or ""}
 
     def list_owner_contacts_by_owner(
         self, user, owner_id, include_inactive=False
@@ -600,7 +638,12 @@ class PostgreSQLOwnerContactMixin:
             items = relations.list(
                 owner_id, include_inactive=include_inactive
             )
-        return {"owner_id": int(owner_id), "items": items}
+        return {
+            "owner_id": int(owner_id),
+            "items": [
+                self._present_owner_contact(user, item) for item in items
+            ],
+        }
 
     def get_owner_contact_relation_by_owner(
         self, user, owner_id, relation_id
@@ -611,11 +654,26 @@ class PostgreSQLOwnerContactMixin:
             item = relations.get(owner_id, relation_id)
         if item is None:
             raise OwnerContactNotFound("關係不存在。")
-        return item
+        return self._present_owner_contact(user, item)
+
+    def reveal_owner_contact_identity_by_owner(
+        self, user, owner_id, relation_id
+    ):
+        with self._connect() as conn:
+            relations = OwnerContactRelationRepository(conn)
+            relations.require_owner(owner_id)
+            item = relations.get(owner_id, relation_id)
+        if item is None:
+            raise OwnerContactNotFound("關係不存在。")
+        presented = self._present_owner_contact(
+            user, item, reveal_identity=True
+        )
+        return {"external_id": presented.get("external_id") or ""}
 
     def search_owner_contacts(self, user, query, limit=50):
         with self._connect() as conn:
-            return ContactRepository(conn).search(query, limit=limit)
+            items = ContactRepository(conn).search(query, limit=limit)
+        return [self._present_owner_contact(user, item) for item in items]
 
     def find_owner_contact_duplicates(
         self,
@@ -628,7 +686,7 @@ class PostgreSQLOwnerContactMixin:
         limit=20,
     ):
         with self._connect() as conn:
-            return ContactRepository(conn).possible_duplicates(
+            items = ContactRepository(conn).possible_duplicates(
                 name=name,
                 mobile_phone=mobile_phone,
                 home_phone=home_phone,
@@ -636,29 +694,32 @@ class PostgreSQLOwnerContactMixin:
                 contact_address=contact_address,
                 limit=limit,
             )
+        return [self._present_owner_contact(user, item) for item in items]
 
     def create_owner_contact(self, user, record_id, values):
         try:
             with self._connect() as conn:
                 owner_id = self._owner_id_for_record(conn, record_id)
-                return self._owner_contact_service(conn).create_new(
+                result = self._owner_contact_service(conn, user).create_new(
                     owner_id,
                     user,
                     values["contact"],
                     values["relation"],
                 )
+            return self._present_owner_contact(user, result)
         except self._psycopg.errors.UniqueViolation as exc:
             raise OwnerContactConflict("該關係人已連結此地主。") from exc
 
     def create_owner_contact_by_owner(self, user, owner_id, values):
         try:
             with self._connect() as conn:
-                return self._owner_contact_service(conn).create_new(
+                result = self._owner_contact_service(conn, user).create_new(
                     owner_id,
                     user,
                     values["contact"],
                     values["relation"],
                 )
+            return self._present_owner_contact(user, result)
         except self._psycopg.errors.UniqueViolation as exc:
             raise OwnerContactConflict("該關係人已連結此地主。") from exc
 
@@ -666,24 +727,26 @@ class PostgreSQLOwnerContactMixin:
         try:
             with self._connect() as conn:
                 owner_id = self._owner_id_for_record(conn, record_id)
-                return self._owner_contact_service(conn).link_existing(
+                result = self._owner_contact_service(conn, user).link_existing(
                     owner_id,
                     user,
                     values["contact_id"],
                     values["relation"],
                 )
+            return self._present_owner_contact(user, result)
         except self._psycopg.errors.UniqueViolation as exc:
             raise OwnerContactConflict("該關係人已連結此地主。") from exc
 
     def link_owner_contact_by_owner(self, user, owner_id, values):
         try:
             with self._connect() as conn:
-                return self._owner_contact_service(conn).link_existing(
+                result = self._owner_contact_service(conn, user).link_existing(
                     owner_id,
                     user,
                     values["contact_id"],
                     values["relation"],
                 )
+            return self._present_owner_contact(user, result)
         except self._psycopg.errors.UniqueViolation as exc:
             raise OwnerContactConflict("該關係人已連結此地主。") from exc
 
@@ -691,7 +754,7 @@ class PostgreSQLOwnerContactMixin:
         try:
             with self._connect() as conn:
                 owner_id = self._owner_id_for_record(conn, record_id)
-                return self._owner_contact_service(conn).update(
+                result = self._owner_contact_service(conn, user).update(
                     owner_id,
                     relation_id,
                     user,
@@ -704,6 +767,7 @@ class PostgreSQLOwnerContactMixin:
                         "expected_relation_updated_at"
                     ),
                 )
+            return self._present_owner_contact(user, result)
         except self._psycopg.errors.UniqueViolation as exc:
             raise OwnerContactConflict(
                 "同一地主只能有一位主要關係人，請重新整理後再試。"
@@ -714,7 +778,7 @@ class PostgreSQLOwnerContactMixin:
     ):
         try:
             with self._connect() as conn:
-                return self._owner_contact_service(conn).update(
+                result = self._owner_contact_service(conn, user).update(
                     owner_id,
                     relation_id,
                     user,
@@ -727,6 +791,7 @@ class PostgreSQLOwnerContactMixin:
                         "expected_relation_updated_at"
                     ),
                 )
+            return self._present_owner_contact(user, result)
         except self._psycopg.errors.UniqueViolation as exc:
             raise OwnerContactConflict(
                 "同一地主只能有一位主要關係人，請重新整理後再試。"
@@ -738,7 +803,7 @@ class PostgreSQLOwnerContactMixin:
         values = dict(values or {})
         with self._connect() as conn:
             owner_id = self._owner_id_for_record(conn, record_id)
-            return self._owner_contact_service(conn).deactivate(
+            result = self._owner_contact_service(conn, user).deactivate(
                 owner_id,
                 relation_id,
                 user,
@@ -747,13 +812,14 @@ class PostgreSQLOwnerContactMixin:
                     "expected_relation_updated_at"
                 ),
             )
+        return self._present_owner_contact(user, result)
 
     def deactivate_owner_contact_by_owner(
         self, user, owner_id, relation_id, values=None
     ):
         values = dict(values or {})
         with self._connect() as conn:
-            return self._owner_contact_service(conn).deactivate(
+            result = self._owner_contact_service(conn, user).deactivate(
                 owner_id,
                 relation_id,
                 user,
@@ -762,6 +828,7 @@ class PostgreSQLOwnerContactMixin:
                     "expected_relation_updated_at"
                 ),
             )
+        return self._present_owner_contact(user, result)
 
     def reactivate_owner_contact(
         self, user, record_id, relation_id, values=None
@@ -770,7 +837,7 @@ class PostgreSQLOwnerContactMixin:
         try:
             with self._connect() as conn:
                 owner_id = self._owner_id_for_record(conn, record_id)
-                return self._owner_contact_service(conn).reactivate(
+                result = self._owner_contact_service(conn, user).reactivate(
                     owner_id,
                     relation_id,
                     user,
@@ -778,6 +845,7 @@ class PostgreSQLOwnerContactMixin:
                         "expected_relation_updated_at"
                     ),
                 )
+            return self._present_owner_contact(user, result)
         except self._psycopg.errors.UniqueViolation as exc:
             raise OwnerContactConflict("該關係人已連結此地主。") from exc
 
@@ -787,7 +855,7 @@ class PostgreSQLOwnerContactMixin:
         values = dict(values or {})
         try:
             with self._connect() as conn:
-                return self._owner_contact_service(conn).reactivate(
+                result = self._owner_contact_service(conn, user).reactivate(
                     owner_id,
                     relation_id,
                     user,
@@ -795,5 +863,6 @@ class PostgreSQLOwnerContactMixin:
                         "expected_relation_updated_at"
                     ),
                 )
+            return self._present_owner_contact(user, result)
         except self._psycopg.errors.UniqueViolation as exc:
             raise OwnerContactConflict("該關係人已連結此地主。") from exc

@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
 from customer_owner_contacts import (
     DeactivateRelationDialog,
+    OwnerContactDialog,
     OwnerContactsWidget,
     address_choices,
     phone_choices,
@@ -26,6 +27,7 @@ class _Repository:
                 "owner_id": 2,
                 "contact_id": 3,
                 "name": "王小明",
+                "external_id": "A123*****9",
                 "relationship_type": "兒子",
                 "relationship_note": "長子",
                 "mobile_phone": "0912",
@@ -46,6 +48,7 @@ class _Repository:
                 "owner_id": 2,
                 "contact_id": 4,
                 "name": "王小華",
+                "external_id": "",
                 "relationship_type": "女兒",
                 "relationship_note": "",
                 "mobile_phone": "0922",
@@ -78,6 +81,10 @@ class _Repository:
         return next(
             dict(row) for row in self.rows if row["relation_id"] == relation_id
         )
+
+    def reveal_owner_contact_identity(self, record_id, relation_id):
+        self.calls.append(("reveal", record_id, relation_id))
+        return "A123456789"
 
     def search_owner_contacts(self, query, limit=50):
         self.calls.append(("search", query, limit))
@@ -196,6 +203,25 @@ class OwnerContactUiTests(unittest.TestCase):
         self.assertEqual(widget.table.rowCount(), 0)
         self.assertFalse(widget.add_button.isEnabled())
         self.assertFalse(widget.refresh_button.isEnabled())
+
+    def test_identity_is_masked_revealed_and_preserved_when_unchanged(self):
+        existing = dict(self.repository.rows[0])
+        dialog = OwnerContactDialog(
+            self.repository,
+            7,
+            existing=existing,
+        )
+        self.assertEqual(dialog.edit_external_id.text(), "A123*****9")
+        self.assertIsNone(dialog.result_values()["contact"]["external_id"])
+        dialog._toggle_identity("edit")
+        self.assertEqual(dialog.edit_external_id.text(), "A123456789")
+        self.assertIn(("reveal", 7, 1), self.repository.calls)
+        self.assertIsNone(dialog.result_values()["contact"]["external_id"])
+        dialog._identity_text_edited("edit", "h100059743")
+        self.assertEqual(dialog.edit_external_id.text(), "H100059743")
+        self.assertEqual(
+            dialog.result_values()["contact"]["external_id"], "H100059743"
+        )
 
     def test_viewer_can_view_but_write_buttons_are_disabled(self):
         widget = OwnerContactsWidget(self.repository, current_role="viewer")

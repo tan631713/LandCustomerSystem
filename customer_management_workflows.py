@@ -22,7 +22,6 @@ class ManagementWorkflowMixin:
             if record_to_select is None
             else record_to_select,
             tree_state=tree_state,
-            auto_expand_search_matches=False,
             preserve_existing_model=True,
         )
 
@@ -267,9 +266,14 @@ class ManagementWorkflowMixin:
             return
         tree_state = self.capture_land_tree_view_state()
         try:
-            if dialog.action == "save":
+            if dialog.action in {"create", "update", "save"}:
+                requested_tag_id = values.get("tag_id")
+                if dialog.action == "create":
+                    requested_tag_id = None
+                elif dialog.action == "update" and requested_tag_id is None:
+                    raise ValueError("編輯標籤時缺少標籤 ID。")
                 tag_id = repository.save_tag(
-                    values["name"], values["color"], values["tag_id"]
+                    values["name"], values["color"], requested_tag_id
                 )
                 if not self.api_mode:
                     self._log_operation("標籤管理", f"儲存標籤 {tag_id}", values["name"])

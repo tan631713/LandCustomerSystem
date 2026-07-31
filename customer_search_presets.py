@@ -60,7 +60,7 @@ class SearchPresetMixin:
             ADVANCED_SEARCH_SETTING_KEY,
             ENCODE_PREFERENCES(self.advanced_search_criteria),
         )
-        self.refresh_records()
+        self.refresh_records_for_search()
 
     def persist_saved_searches(self):
         SET_SETTING(
@@ -119,7 +119,7 @@ class SearchPresetMixin:
             ADVANCED_SEARCH_SETTING_KEY,
             ENCODE_PREFERENCES(self.advanced_search_criteria),
         )
-        self.refresh_records()
+        self.refresh_records_for_search()
         condition_count = self.get_active_advanced_search_count()
         if condition_count:
             self.statusBar().showMessage(
@@ -139,4 +139,4 @@ class SearchPresetMixin:
             self.sort_field_combo.setCurrentIndex(0)
         if self.sort_order_combo is not None:
             self.sort_order_combo.setCurrentIndex(0)
-        self.refresh_records()
+        self.refresh_records_for_search()

@@ -1,6 +1,11 @@
 """Desktop record table and action-menu construction."""
 
-from customer_models import LandTreeProxyModel, RecordTableModel, TAGS_ROLE
+from customer_models import (
+    CHECK_COLUMN,
+    LandTreeProxyModel,
+    RecordTableModel,
+    TAGS_ROLE,
+)
 from customer_tag_display import safe_tag_qcolor, tag_text_qcolor
 from PySide6.QtCore import QRect, QSize, Qt
 from PySide6.QtGui import QAction, QKeySequence, QPainter
@@ -157,6 +162,8 @@ def _build_record_table(self, parent_layout, TABLE_COLUMNS, TABLE_WIDTHS):
     self.table_column_indexes = {
         key: index for index, (key, _label) in enumerate(TABLE_COLUMNS)
     }
+    if self.table_column_indexes.get("checked") != CHECK_COLUMN:
+        raise RuntimeError("土地清單 checkbox 欄位設定不一致。")
     self.table_model = RecordTableModel(self.on_checked_state_changed, self)
     self.table_proxy_model = LandTreeProxyModel(self)
     self.table_proxy_model.setSourceModel(self.table_model)

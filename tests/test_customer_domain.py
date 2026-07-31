@@ -5,6 +5,7 @@ from customer_domain import (
     calculate_ping,
     calculate_total_declared_value,
     mask_identity_text,
+    normalize_taiwan_identity,
     normalize_search_text,
     parse_number,
     parse_rights_scope,
@@ -36,6 +37,11 @@ class CustomerDomainTests(unittest.TestCase):
     def test_identity_mask_and_duplicate_signature(self):
         self.assertEqual(mask_identity_text("A123456789"), "A123*****9")
         self.assertEqual(mask_identity_text("A1234"), "A1234")
+        self.assertEqual(
+            normalize_taiwan_identity(" a123456789 "), "A123456789"
+        )
+        with self.assertRaisesRegex(ValueError, "格式不正確"):
+            normalize_taiwan_identity("A123456788")
         first = {
             "district": " 中正區 ",
             "section": "一段",

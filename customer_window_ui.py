@@ -42,12 +42,14 @@ class DesktopWindowMixin:
         toolbar.addWidget(QLabel("搜尋"))
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("輸入關鍵字")
-        self.search_input.returnPressed.connect(self.refresh_records)
+        self.search_input.returnPressed.connect(self.refresh_records_for_search)
         self.search_input.setMinimumWidth(300)
         toolbar.addWidget(self.search_input)
 
         search_button = QPushButton("搜尋")
-        search_button.clicked.connect(lambda _checked=False: self.refresh_records())
+        search_button.clicked.connect(
+            lambda _checked=False: self.refresh_records_for_search()
+        )
         toolbar.addWidget(search_button)
 
         toolbar.addWidget(QLabel("篩選"))
@@ -55,7 +57,9 @@ class DesktopWindowMixin:
         for key, label in self.filterable_fields:
             self.filter_field_combo.addItem(label, key)
         self.filter_field_combo.setCurrentIndex(0)
-        self.filter_field_combo.currentIndexChanged.connect(lambda _index: self.refresh_records())
+        self.filter_field_combo.currentIndexChanged.connect(
+            lambda _index: self.refresh_records_for_search()
+        )
         toolbar.addWidget(self.filter_field_combo)
 
         toolbar.addWidget(QLabel("排序"))

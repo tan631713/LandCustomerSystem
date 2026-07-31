@@ -65,6 +65,21 @@ def register_owner_contact_routes(
         except OwnerContactError as exc:
             _owner_contact_error(exc)
 
+    @app.get(
+        "/api/v1/records/{record_id}/owner-contacts/{relation_id}/identity"
+    )
+    def reveal_owner_contact_identity(
+        record_id: int,
+        relation_id: int,
+        user=Depends(editor_user),
+    ):
+        try:
+            return source.reveal_owner_contact_identity(
+                user, record_id, relation_id
+            )
+        except OwnerContactError as exc:
+            _owner_contact_error(exc)
+
     @app.get("/api/v1/contacts/search")
     @app.get("/api/v1/owner-contacts/search", include_in_schema=False)
     def search_owner_contacts(
@@ -235,6 +250,21 @@ def register_owner_contact_routes(
                     session.user, owner_id, relation_id
                 )
             }
+        except OwnerContactError as exc:
+            _owner_contact_error(exc)
+
+    @app.get(
+        "/api/v1/owners/{owner_id}/contacts/{relation_id}/identity"
+    )
+    def reveal_owner_contact_identity_by_owner(
+        owner_id: int,
+        relation_id: int,
+        user=Depends(editor_user),
+    ):
+        try:
+            return source.reveal_owner_contact_identity_by_owner(
+                user, owner_id, relation_id
+            )
         except OwnerContactError as exc:
             _owner_contact_error(exc)
 

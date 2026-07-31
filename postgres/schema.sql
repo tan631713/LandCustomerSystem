@@ -809,3 +809,15 @@ ON owner_contact_relations(deactivated_by);
 INSERT INTO schema_migrations (version, name)
 VALUES (10, 'owner contact addresses phone lookup and deactivation metadata')
 ON CONFLICT (version) DO NOTHING;
+
+-- Version 11: contact identity number.
+--
+-- This column follows owners.external_id exactly: the application stores the
+-- shared Fernet ciphertext and never writes the plaintext identity number.
+
+ALTER TABLE contacts
+ADD COLUMN IF NOT EXISTS external_id TEXT;
+
+INSERT INTO schema_migrations (version, name)
+VALUES (11, 'encrypted owner contact identity number')
+ON CONFLICT (version) DO NOTHING;

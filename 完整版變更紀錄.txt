@@ -1,6 +1,55 @@
 土地資料系統 完整版變更紀錄
 ================================
 
+2026-07-30 家中伺服器 v1.9.27／公司筆電 v1.9.12 關係人身分證
+----------------------------------------------------------------
+1. PostgreSQL schema 11 在 contacts 新增 external_id TEXT；欄位設計與 owners.external_id 一致，沒有新增平行 hash 或 last4 結構。
+2. 關係人身分證使用地主既有 make_fernet、encrypt_value、decrypt_value 及 mask_identity_text，共用相同資料金鑰與 enc:v1 密文格式。
+3. 新增、修改 API 支援 external_id；清單、搜尋、重複提示與明細一律回傳 A123*****9 遮蔽格式。
+4. 新增具 Editor／Admin 權限的身分證揭露端點；Viewer 不得取得完整值。
+5. 未修改既有身分證時，客戶端傳送 None，伺服器保留原始密文；只有輸入新完整值時才重新加密。
+6. 共用台灣身分證驗證會去除前後空白、轉大寫、檢查字母與性別碼格式及檢查碼，錯誤資料無法儲存。
+7. Windows 關係人新增／編輯視窗新增身分證欄位及「顯示／隱藏」按鈕；既有資料預設遮蔽，顯示時才呼叫揭露 API。
+8. migration rollback 只移除 contacts.external_id 與 schema 11 紀錄，不修改地主或其他正式資料表。
+9. 新增加密不含明文、遮蔽、揭露權限、保留舊密文、格式驗證、API、桌面 UI、migration 與 rollback 測試。
+
+2026-07-30 家中伺服器 v1.9.26／公司筆電 v1.9.11 土地 QTreeView checkbox 點擊修正
+----------------------------------------------------------------
+1. 建立唯一 CHECK_COLUMN，TreeModel 的 flags 同時保留 ItemIsUserCheckable、ItemIsEnabled 與 ItemIsSelectable。
+2. CheckStateRole 回傳 Qt.Checked、Qt.Unchecked 或 Qt.PartiallyChecked；父節點依 ownership 子節點計算半選狀態。
+3. 修正 QStyledItemDelegate 寫入 setData() 時傳入原生整數 0／2，舊程式只與 PySide6 enum 比較而永遠判定為未勾選的根本問題。
+4. 新增 set_node_checked() 統一土地父節點與 ownership 子節點的勾選、取消勾選、callback 及 dataChanged。
+5. checkbox callback 與右鍵勾選共用 set_checked_record_id()，保留既有 checked_record_ids 與批次功能。
+6. 標籤 TagPillDelegate 只以 setItemDelegateForColumn() 安裝於標籤欄，沒有 editorEvent() 攔截 checkbox。
+7. eventFilter 不攔截滑鼠；checkbox 欄 clicked 路徑直接返回，不做第二次反向切換。
+8. checkbox 點擊不呼叫 refresh_records()、setModel()、beginResetModel() 或 endResetModel()，只局部發出 dataChanged。
+9. 新增真實滑鼠點擊、勾選／取消、父節點半選、Delegate 欄位隔離及不刷新 Model 測試。
+10. 未修改 PostgreSQL schema、FastAPI 資料格式、手機 Web 或 LINE Bot。
+
+2026-07-30 家中伺服器 v1.9.26／公司筆電 v1.9.10 土地清單自動展開修正
+----------------------------------------------------------------
+1. 新增 user_expanded_land_ids: set[int]，只接受使用者手動展開／收合及全部展開／收合操作修改。
+2. QTreeView expanded/collapsed 訊號接入使用者集合；restoring_tree_state 與 applying_programmatic_expansion 會阻擋程式操作誤寫集合。
+3. 新增 search_expanded_land_ids，搜尋命中的暫時展開不再寫入使用者集合，清除搜尋後恢復原使用者狀態。
+4. Model 重建、分頁切換、選取還原與 setExpanded 均在程式還原旗標內執行。
+5. 一般儲存、標籤、關係人、附件、聯絡紀錄及管理刷新使用保留模式，不再把「有搜尋條件」誤判成每次都要全部展開。
+6. 移除選取／編輯記錄時自動展開父土地的邏輯；不得因目前編輯筆或選取筆強制展開。
+7. 全部展開寫入所有目前土地 ID；全部收合清空使用者與暫時搜尋集合，不再呼叫 expandAll() 或 collapseAll()。
+8. 新土地沒有使用者展開記錄時保持收合；刪除最後一筆 ownership 時同步移除已失效的土地展開 ID。
+9. 新增全部收合後標籤更新、A／B 手動展開後儲存與批量標籤、搜尋 C 暫時展開、資料新增及刪除等自動化測試。
+10. PostgreSQL schema、FastAPI response 與手機 Web 均未修改。
+
+2026-07-30 家中伺服器 v1.9.26／公司筆電 v1.9.9 多標籤建立修正
+----------------------------------------------------------------
+1. 標籤管理 Dialog 新增獨立 current_tag_id、selected_tag 與 edit_mode，不再用 QTableWidget.currentRow() 猜測新增或編輯。
+2. 開啟標籤管理預設為新增模式，即使清單已有第一筆標籤，也不會自動帶入該標籤 ID。
+3. 「新增標籤」按鈕會清除標籤 ID、選取物件、清單選取狀態、名稱及顏色。
+4. 明確選取既有標籤後才進入編輯模式，儲存按鈕同步顯示為「儲存修改」。
+5. manage_tags() 明確分流 create 與 update；create 強制使用 tag_id=None，update 缺少 ID 時直接阻止操作。
+6. Desktop API 維持 tag_id=None 使用 POST、有 ID 使用 PUT；FastAPI create/update 路由及 PostgreSQL save_tag 分流經確認無誤。
+7. 新增 Dialog 狀態、桌面工作流程資料庫及 FastAPI 三層測試，確認 A、B 同時存在，編輯 A 不新增第三筆。
+8. PostgreSQL schema 未修改，土地樹狀清單展開、選取與捲動狀態保存流程未變更。
+
 2026-07-30 家中伺服器 v1.9.26／公司筆電 v1.9.8 標籤操作展開狀態修正
 ----------------------------------------------------------------
 1. 單筆設定標籤在 API 寫入前保存土地樹狀清單狀態，完成後以局部 Model 更新刷新標籤。

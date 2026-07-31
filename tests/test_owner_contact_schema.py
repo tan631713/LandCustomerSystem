@@ -24,6 +24,12 @@ class OwnerContactSchemaTests(unittest.TestCase):
             / "migrations"
             / "010_owner_contacts_enhancement_rollback.sql"
         ).read_text(encoding="utf-8")
+        self.identity_rollback = (
+            ROOT
+            / "postgres"
+            / "migrations"
+            / "011_owner_contact_identity_rollback.sql"
+        ).read_text(encoding="utf-8")
 
     def test_additive_schema_contains_tables_foreign_keys_and_version(self):
         self.assertIn("CREATE TABLE IF NOT EXISTS contacts", self.schema)
@@ -44,6 +50,14 @@ class OwnerContactSchemaTests(unittest.TestCase):
         )
         self.assertIn(
             "VALUES (10, 'owner contact addresses phone lookup and deactivation metadata')",
+            self.schema,
+        )
+        self.assertIn(
+            "VALUES (11, 'encrypted owner contact identity number')",
+            self.schema,
+        )
+        self.assertIn(
+            "ALTER TABLE contacts\nADD COLUMN IF NOT EXISTS external_id TEXT",
             self.schema,
         )
         for column in (
@@ -111,6 +125,17 @@ class OwnerContactSchemaTests(unittest.TestCase):
             self.enhancement_rollback,
         )
 
+    def test_identity_rollback_only_removes_contact_identity_column(self):
+        self.assertIn(
+            "ALTER TABLE contacts\nDROP COLUMN IF EXISTS external_id",
+            self.identity_rollback,
+        )
+        self.assertIn(
+            "DELETE FROM schema_migrations WHERE version = 11",
+            self.identity_rollback,
+        )
+        self.assertNotIn("ALTER TABLE owners", self.identity_rollback)
+
     def test_enhancement_migration_tolerates_missing_legacy_address_column(self):
         version_ten = self.schema[self.schema.index("-- Version 10:") :]
         self.assertIn("information_schema.columns", version_ten)
@@ -146,7 +171,7 @@ class OwnerContactSchemaTests(unittest.TestCase):
             def execute(self, statement, _parameters=()):
                 self.statements.append(str(statement))
                 if "SELECT COALESCE(MAX(version), 0)" in str(statement):
-                    return type("Result", (), {"fetchone": lambda _self: (10,)})()
+                    return type("Result", (), {"fetchone": lambda _self: (11,)})()
                 return type("Result", (), {"fetchone": lambda _self: None})()
 
         connection = Connection()
@@ -156,7 +181,7 @@ class OwnerContactSchemaTests(unittest.TestCase):
             return_value={},
         ):
             version = ensure_postgres_schema("test-dsn")
-        self.assertEqual(version, 10)
+        self.assertEqual(version, 11)
         self.assertTrue(connection.committed)
         self.assertFalse(connection.rolled_back)
         executed = "\n".join(connection.statements)

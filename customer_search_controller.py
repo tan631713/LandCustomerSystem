@@ -23,6 +23,24 @@ def configure_search_controller(**dependencies):
 
 
 class SearchControllerMixin:
+    def land_search_is_active(self):
+        return bool(
+            self.search_input.text().strip()
+            or self.show_checked_only
+            or any(
+                str(value or "").strip()
+                for value in self.advanced_search_criteria.values()
+            )
+        )
+
+    def refresh_records_for_search(self, record_to_select=None):
+        """Run an explicit search and manage only temporary search expansion."""
+
+        self.refresh_records(
+            record_to_select,
+            auto_expand_search_matches=self.land_search_is_active(),
+        )
+
     def active_record_repository(self):
         data_access = getattr(self, "data_access", None)
         if data_access is not None:
@@ -85,16 +103,10 @@ class SearchControllerMixin:
         sort_field = self.get_sort_field()
         reverse = self.get_sort_reverse()
         target_id = record_to_select if record_to_select is not None else self.selected_record_id
-        search_active = bool(
-            keyword
-            or self.show_checked_only
-            or any(
-                str(value or "").strip()
-                for value in self.advanced_search_criteria.values()
-            )
-        )
+        # Tri-state: True starts temporary search expansion, False clears it,
+        # and None preserves whatever explicit search previously established.
         search_auto_expand = (
-            search_active
+            None
             if auto_expand_search_matches is None
             else bool(auto_expand_search_matches)
         )
@@ -131,7 +143,8 @@ class SearchControllerMixin:
                 sort_field=sort_field,
                 reverse=reverse,
             )
-            self.table_model.set_rows(preview)
+            with self._programmatic_land_expansion(restoring=True):
+                self.table_model.set_rows(preview)
             self.table_model.total_count = record_count
             self.table_model.ownership_total_count = record_count
             # Legacy views/tests may ask whether more preview data exists.
@@ -141,7 +154,6 @@ class SearchControllerMixin:
             self.table_model._background_preview_pending = True
             self.apply_table_preferences()
             self.update_land_page_status()
-            self._land_search_auto_expand = search_auto_expand
             self.restore_land_tree_view_state(
                 tree_state,
                 search_auto_expand=search_auto_expand,
@@ -258,22 +270,13 @@ class SearchControllerMixin:
             tree_state = self.capture_land_tree_view_state()
         updated_in_place = self.table_model.update_rows_in_place(rows)
         if not updated_in_place:
-            self.table_model.set_rows(rows)
+            with self._programmatic_land_expansion(restoring=True):
+                self.table_model.set_rows(rows)
         self.apply_table_preferences()
         self.update_land_page_status()
-        if search_auto_expand is None:
-            search_auto_expand = bool(
-                self.search_input.text().strip()
-                or self.show_checked_only
-                or any(
-                    str(value or "").strip()
-                    for value in self.advanced_search_criteria.values()
-                )
-            )
-        self._land_search_auto_expand = bool(search_auto_expand)
         selection_restored = self.restore_land_tree_view_state(
             tree_state,
-            search_auto_expand=bool(search_auto_expand),
+            search_auto_expand=search_auto_expand,
             fallback_record_id=target_id,
         )
         if selection_restored:

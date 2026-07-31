@@ -11,16 +11,27 @@ from customer_land_tree import (
     normalized_land_number_key,
     ownership_area,
 )
-from customer_models import LandTreeProxyModel, RecordTableModel
+from customer_models import CHECK_COLUMN, LandTreeProxyModel, RecordTableModel
 from customer_api.postgres_source import PostgreSQLCustomerDataSource
 from customer_record_workflows import RecordWorkflowMixin
 from customer_search_controller import SearchControllerMixin
 from customer_selection_workflows import SelectionWorkflowMixin
 from customer_search import CustomerRecordProcessor
 from customer_security import make_fernet
-from customer_table_ui import apply_land_tree_visual_style
+from customer_table_ui import (
+    LandTreeView,
+    TagPillDelegate,
+    apply_land_tree_visual_style,
+)
 from PySide6.QtCore import QItemSelectionModel, QPoint, Qt
-from PySide6.QtWidgets import QApplication, QLineEdit, QTreeView
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import (
+    QApplication,
+    QLineEdit,
+    QStyle,
+    QStyleOptionViewItem,
+    QTreeView,
+)
 
 
 def record(
@@ -148,6 +159,9 @@ class _WorkflowHarness(
         self.table_view.expanded.connect(self.on_land_group_expanded)
         self.table_view.collapsed.connect(self.on_land_group_collapsed)
         self.expanded_land_ids = set()
+        self.search_expanded_land_ids = set()
+        self.restoring_tree_state = False
+        self.applying_programmatic_expansion = False
         self._applying_land_expansion = False
         self._land_search_auto_expand = False
         self._land_tree_restore_generation = 0
@@ -371,6 +385,176 @@ class LandTreeGroupingTests(unittest.TestCase):
             (node_data["land_id"], node_data["owner_id"], node_data["ownership_id"]),
             (9, 2, 22),
         )
+
+    def test_checkbox_set_data_checks_unchecks_and_parent_becomes_partial(self):
+        changes = []
+        model = RecordTableModel(
+            lambda record_id, checked: changes.append((record_id, checked))
+        )
+        model.set_rows(
+            [
+                record(31, land_id=11, owner_id=1),
+                record(32, land_id=11, owner_id=2),
+            ]
+        )
+        parent = model.index(0, CHECK_COLUMN)
+        first_child = model.index(0, CHECK_COLUMN, parent)
+        second_child = model.index(1, CHECK_COLUMN, parent)
+
+        self.assertTrue(
+            model.flags(first_child) & Qt.ItemIsUserCheckable
+        )
+        self.assertTrue(
+            model.setData(
+                first_child,
+                Qt.Checked.value,
+                Qt.CheckStateRole,
+            )
+        )
+        self.assertEqual(
+            model.data(first_child, Qt.CheckStateRole),
+            Qt.Checked,
+        )
+        self.assertEqual(
+            model.data(second_child, Qt.CheckStateRole),
+            Qt.Unchecked,
+        )
+        self.assertEqual(
+            model.data(parent, Qt.CheckStateRole),
+            Qt.PartiallyChecked,
+        )
+        self.assertTrue(
+            model.setData(
+                first_child,
+                Qt.Unchecked.value,
+                Qt.CheckStateRole,
+            )
+        )
+        self.assertEqual(
+            model.data(first_child, Qt.CheckStateRole),
+            Qt.Unchecked,
+        )
+        self.assertTrue(
+            model.setData(
+                parent,
+                Qt.Checked.value,
+                Qt.CheckStateRole,
+            )
+        )
+        self.assertEqual(
+            model.data(first_child, Qt.CheckStateRole),
+            Qt.Checked,
+        )
+        self.assertEqual(
+            model.data(second_child, Qt.CheckStateRole),
+            Qt.Checked,
+        )
+        self.assertEqual(
+            model.data(parent, Qt.CheckStateRole),
+            Qt.Checked,
+        )
+        self.assertEqual(
+            changes,
+            [
+                (31, True),
+                (31, False),
+                (31, True),
+                (32, True),
+            ],
+        )
+
+    def test_real_checkbox_mouse_click_toggles_without_model_reset(self):
+        changes = []
+        model = RecordTableModel(
+            lambda record_id, checked: changes.append((record_id, checked))
+        )
+        model.set_rows([record(33, land_id=12, owner_id=3)])
+        proxy = LandTreeProxyModel()
+        proxy.setSourceModel(model)
+        view = LandTreeView()
+        view.setModel(proxy)
+        view.resize(700, 240)
+        view.show()
+        QApplication.processEvents()
+        reset_count = 0
+
+        def record_reset():
+            nonlocal reset_count
+            reset_count += 1
+
+        model.modelReset.connect(record_reset)
+        try:
+            index = proxy.index(0, CHECK_COLUMN)
+            option = QStyleOptionViewItem()
+            option.initFrom(view)
+            option.rect = view.visualRect(index)
+            option.widget = view
+            view.itemDelegateForIndex(index).initStyleOption(option, index)
+            checkbox_rect = view.style().subElementRect(
+                QStyle.SE_ItemViewItemCheckIndicator,
+                option,
+                view,
+            )
+
+            QTest.mouseClick(
+                view.viewport(),
+                Qt.LeftButton,
+                Qt.NoModifier,
+                checkbox_rect.center(),
+            )
+            QApplication.processEvents()
+
+            self.assertEqual(index.data(Qt.CheckStateRole), Qt.Checked)
+            self.assertEqual(changes, [(33, True)])
+            self.assertEqual(reset_count, 0)
+        finally:
+            view.close()
+
+    def test_tag_delegate_is_only_installed_on_tag_column(self):
+        model = RecordTableModel(lambda *_args: None)
+        model.set_rows([record(34, land_id=13, owner_id=4)])
+        proxy = LandTreeProxyModel()
+        proxy.setSourceModel(model)
+        view = LandTreeView()
+        view.setModel(proxy)
+        delegate = TagPillDelegate(view)
+        tag_column = {
+            key: index for index, (key, _label) in enumerate(app.TABLE_COLUMNS)
+        }["tag_names"]
+
+        view.configure_tag_delegate(delegate, tag_column)
+
+        self.assertIs(view.itemDelegateForColumn(tag_column), delegate)
+        self.assertIsNot(view.itemDelegateForColumn(CHECK_COLUMN), delegate)
+        self.assertNotIn("editorEvent", TagPillDelegate.__dict__)
+        view.close()
+
+    def test_checkbox_callback_updates_checked_ids_without_refresh(self):
+        harness = _WorkflowHarness(
+            [record(35, land_id=14, owner_id=5)]
+        )
+        harness.checked_record_ids = set()
+        harness.show_checked_only = True
+        harness.schedule_selection_state_save = lambda: None
+        harness.update_selection_status = lambda *_args, **_kwargs: None
+        harness.table_model.checked_changed_callback = (
+            harness.on_checked_state_changed
+        )
+        index = harness.table_model.index(0, CHECK_COLUMN)
+
+        with patch(
+            "customer_selection_workflows.QTimer.singleShot"
+        ) as single_shot:
+            self.assertTrue(
+                harness.table_model.setData(
+                    index,
+                    Qt.Checked.value,
+                    Qt.CheckStateRole,
+                )
+            )
+
+        self.assertEqual(harness.checked_record_ids, {35})
+        single_shot.assert_not_called()
 
     def test_batch_selection_expands_land_parent_to_real_ownership_ids(self):
         harness = _WorkflowHarness(
@@ -868,6 +1052,205 @@ class LandTreeGroupingTests(unittest.TestCase):
             )
         )
         self.assertFalse(harness._land_search_auto_expand)
+
+    def test_all_collapsed_stays_collapsed_after_tag_content_refresh(self):
+        harness = _WorkflowHarness(
+            [
+                record(181, land_id=1201, owner_id=121),
+                record(182, land_id=1202, owner_id=122),
+            ]
+        )
+        harness.collapse_all_land_groups()
+        state = harness.capture_land_tree_view_state()
+        changed = list(harness.table_model.all_rows)
+        changed[0]["raw"]["tag_names"] = "重要"
+        changed[0]["display"]["tag_names"] = "重要"
+
+        harness.apply_record_rows(changed, 181, state)
+
+        self.assertEqual(harness.user_expanded_land_ids, set())
+        self.assertEqual(harness.search_expanded_land_ids, set())
+        for row in range(harness.table_model.rowCount()):
+            self.assertFalse(
+                harness.table_view.isExpanded(
+                    harness.proxy_table_index(
+                        harness.table_model.index(row, 0)
+                    )
+                )
+            )
+
+    def test_manual_a_stays_only_expanded_after_owner_save(self):
+        harness = _WorkflowHarness(
+            [
+                record(191, land_id=1301, owner_id=131),
+                record(192, land_id=1302, owner_id=132),
+            ]
+        )
+        a = harness.table_model.index_for_group_state_id(1301)
+        harness.table_view.setExpanded(harness.proxy_table_index(a), True)
+        state = harness.capture_land_tree_view_state()
+        changed = [
+            record(
+                191,
+                land_id=1301,
+                owner_id=131,
+                owner_name="更新姓名",
+                phone="0988000000",
+                address="更新地址",
+            ),
+            record(192, land_id=1302, owner_id=132),
+        ]
+
+        harness.apply_record_rows(changed, 191, state)
+
+        self.assertEqual(harness.user_expanded_land_ids, {1301})
+        for land_id, expected in ((1301, True), (1302, False)):
+            source = harness.table_model.index_for_group_state_id(land_id)
+            self.assertEqual(
+                harness.table_view.isExpanded(
+                    harness.proxy_table_index(source)
+                ),
+                expected,
+            )
+
+    def test_manual_a_b_stay_only_expanded_after_batch_tag_refresh(self):
+        harness = _WorkflowHarness(
+            [
+                record(201, land_id=1401, owner_id=141),
+                record(202, land_id=1402, owner_id=142),
+                record(203, land_id=1403, owner_id=143),
+            ]
+        )
+        for land_id in (1401, 1402):
+            source = harness.table_model.index_for_group_state_id(land_id)
+            harness.table_view.setExpanded(
+                harness.proxy_table_index(source), True
+            )
+        state = harness.capture_land_tree_view_state()
+        changed = list(harness.table_model.all_rows)
+        for row in changed:
+            row["raw"]["tag_names"] = "批量標籤"
+            row["display"]["tag_names"] = "批量標籤"
+
+        harness.apply_record_rows(changed, 201, state)
+
+        self.assertEqual(harness.user_expanded_land_ids, {1401, 1402})
+        for land_id, expected in (
+            (1401, True),
+            (1402, True),
+            (1403, False),
+        ):
+            source = harness.table_model.index_for_group_state_id(land_id)
+            self.assertEqual(
+                harness.table_view.isExpanded(
+                    harness.proxy_table_index(source)
+                ),
+                expected,
+            )
+
+    def test_search_c_is_temporary_and_user_a_b_restore_after_clear(self):
+        harness = _WorkflowHarness(
+            [
+                record(211, land_id=1501, owner_id=151),
+                record(212, land_id=1502, owner_id=152),
+                record(213, land_id=1503, owner_id=153),
+            ]
+        )
+        for land_id in (1501, 1502):
+            source = harness.table_model.index_for_group_state_id(land_id)
+            harness.table_view.setExpanded(
+                harness.proxy_table_index(source), True
+            )
+        state = harness.capture_land_tree_view_state()
+
+        harness.table_model.set_rows(
+            [record(213, land_id=1503, owner_id=153)]
+        )
+        harness.restore_land_tree_view_state(
+            state,
+            search_auto_expand=True,
+        )
+        c = harness.table_model.index_for_group_state_id(1503)
+        self.assertTrue(
+            harness.table_view.isExpanded(harness.proxy_table_index(c))
+        )
+        self.assertEqual(harness.user_expanded_land_ids, {1501, 1502})
+        self.assertEqual(harness.search_expanded_land_ids, {1503})
+
+        harness.table_model.set_rows(
+            [
+                record(211, land_id=1501, owner_id=151),
+                record(212, land_id=1502, owner_id=152),
+                record(213, land_id=1503, owner_id=153),
+            ]
+        )
+        harness.restore_land_tree_view_state(
+            state,
+            search_auto_expand=False,
+        )
+
+        self.assertEqual(harness.search_expanded_land_ids, set())
+        for land_id, expected in (
+            (1501, True),
+            (1502, True),
+            (1503, False),
+        ):
+            source = harness.table_model.index_for_group_state_id(land_id)
+            self.assertEqual(
+                harness.table_view.isExpanded(
+                    harness.proxy_table_index(source)
+                ),
+                expected,
+            )
+
+    def test_new_land_defaults_collapsed(self):
+        harness = _WorkflowHarness(
+            [record(221, land_id=1601, owner_id=161)]
+        )
+        a = harness.table_model.index_for_group_state_id(1601)
+        harness.table_view.setExpanded(harness.proxy_table_index(a), True)
+        state = harness.capture_land_tree_view_state()
+        harness.table_model.set_rows(
+            [
+                record(221, land_id=1601, owner_id=161),
+                record(222, land_id=1602, owner_id=162),
+            ]
+        )
+
+        harness.restore_land_tree_view_state(state)
+
+        self.assertEqual(harness.user_expanded_land_ids, {1601})
+        new_land = harness.table_model.index_for_group_state_id(1602)
+        self.assertFalse(
+            harness.table_view.isExpanded(
+                harness.proxy_table_index(new_land)
+            )
+        )
+
+    def test_deleted_expanded_land_is_removed_from_both_sets(self):
+        harness = _WorkflowHarness(
+            [
+                record(231, land_id=1701, owner_id=171),
+                record(232, land_id=1702, owner_id=172),
+            ]
+        )
+        deleted = harness.table_model.index_for_group_state_id(1701)
+        harness.table_view.setExpanded(
+            harness.proxy_table_index(deleted), True
+        )
+        harness.search_expanded_land_ids.add(1701)
+        state = harness.capture_land_tree_view_state()
+        harness.table_model.set_rows(
+            [record(232, land_id=1702, owner_id=172)]
+        )
+
+        harness.restore_land_tree_view_state(
+            state,
+            search_auto_expand=False,
+        )
+
+        self.assertNotIn(1701, harness.user_expanded_land_ids)
+        self.assertNotIn(1701, harness.search_expanded_land_ids)
 
 
 if __name__ == "__main__":

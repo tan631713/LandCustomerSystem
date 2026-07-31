@@ -450,6 +450,56 @@ class UiComponentTests(unittest.TestCase):
             for dialog in dialogs:
                 dialog.close()
 
+    def test_tag_management_dialog_separates_create_and_edit_modes(self):
+        tags = [
+            {
+                "id": 2,
+                "name": "標籤 A",
+                "color": "#FF0000",
+                "customer_count": 0,
+            }
+        ]
+        create_dialog = TagManagementDialog(tags)
+        edit_dialog = TagManagementDialog(tags)
+        try:
+            self.assertFalse(create_dialog.edit_mode)
+            self.assertIsNone(create_dialog.current_tag_id)
+            self.assertIsNone(create_dialog.selected_tag)
+            self.assertIsNone(create_dialog.values()["tag_id"])
+
+            create_dialog.table.selectRow(0)
+            QApplication.processEvents()
+            self.assertTrue(create_dialog.edit_mode)
+            self.assertEqual(create_dialog.current_tag_id, 2)
+            self.assertEqual(create_dialog.selected_tag["name"], "標籤 A")
+
+            create_dialog.begin_new_tag()
+            self.assertFalse(create_dialog.edit_mode)
+            self.assertIsNone(create_dialog.current_tag_id)
+            self.assertIsNone(create_dialog.selected_tag)
+            self.assertFalse(create_dialog.table.selectionModel().hasSelection())
+            self.assertEqual(create_dialog.name_edit.text(), "")
+            self.assertEqual(create_dialog.color_edit.text(), "")
+
+            create_dialog.name_edit.setText("標籤 B")
+            create_dialog.color_edit.setText("#00FF00")
+            create_dialog.request_save()
+            self.assertEqual(create_dialog.action, "create")
+            self.assertEqual(
+                create_dialog.values(),
+                {"tag_id": None, "name": "標籤 B", "color": "#00FF00"},
+            )
+
+            edit_dialog.table.selectRow(0)
+            QApplication.processEvents()
+            edit_dialog.name_edit.setText("標籤 A（更新）")
+            edit_dialog.request_save()
+            self.assertEqual(edit_dialog.action, "update")
+            self.assertEqual(edit_dialog.values()["tag_id"], 2)
+        finally:
+            create_dialog.close()
+            edit_dialog.close()
+
         with tempfile.TemporaryDirectory() as temp_dir:
             output_path = os.path.join(temp_dir, "records.docx")
             row_count = write_records_docx(

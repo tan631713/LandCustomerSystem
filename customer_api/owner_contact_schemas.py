@@ -2,8 +2,9 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from customer_domain import normalize_taiwan_identity
 from customer_owner_contact_types import RELATIONSHIP_TYPES
 
 
@@ -11,6 +12,7 @@ class ContactWrite(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     name: str = Field(min_length=1, max_length=100)
+    external_id: str | None = Field(default=None, max_length=100)
     mobile_phone: str = Field(default="", max_length=30)
     home_phone: str = Field(default="", max_length=30)
     registered_address: str = Field(default="", max_length=500)
@@ -18,6 +20,13 @@ class ContactWrite(BaseModel):
     work_address: str = Field(default="", max_length=500)
     identity_note: str = Field(default="", max_length=300)
     notes: str = Field(default="", max_length=2000)
+
+    @field_validator("external_id")
+    @classmethod
+    def validate_external_id(cls, value):
+        if value is None:
+            return None
+        return normalize_taiwan_identity(value)
 
 
 class OwnerRelationWrite(BaseModel):

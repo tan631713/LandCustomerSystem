@@ -269,6 +269,9 @@ class TagManagementDialog(QDialog):
         super().__init__(parent)
         self.tags = [dict(row) for row in tags]
         self.action = None
+        self.current_tag_id = None
+        self.selected_tag = None
+        self.edit_mode = False
         self.setWindowTitle("標籤管理")
         self.resize(620, 420)
         self.table = QTableWidget(0, 4)
@@ -297,26 +300,27 @@ class TagManagementDialog(QDialog):
         form.addLayout(color_row, 1, 1)
         layout.addLayout(form)
         buttons = QHBoxLayout()
-        clear_button = QPushButton("清空")
-        clear_button.clicked.connect(self.clear_form)
-        save_button = QPushButton("新增/更新")
-        save_button.clicked.connect(self.request_save)
+        self.new_button = QPushButton("新增標籤")
+        self.new_button.clicked.connect(self.begin_new_tag)
+        self.save_button = QPushButton("新增標籤")
+        self.save_button.clicked.connect(self.request_save)
         delete_button = QPushButton("刪除選取標籤")
         delete_button.clicked.connect(self.request_delete)
         view_button = QPushButton("顯示標籤資料")
         view_button.clicked.connect(self.request_view)
         close_button = QPushButton("關閉")
         close_button.clicked.connect(self.reject)
-        buttons.addWidget(clear_button)
+        buttons.addWidget(self.new_button)
         buttons.addWidget(view_button)
         buttons.addStretch(1)
         buttons.addWidget(delete_button)
         buttons.addWidget(close_button)
-        buttons.addWidget(save_button)
+        buttons.addWidget(self.save_button)
         layout.addLayout(buttons)
         self.load_rows()
 
     def load_rows(self):
+        previous = self.table.blockSignals(True)
         self.table.setRowCount(len(self.tags))
         for row_number, tag in enumerate(self.tags):
             _set_row_values(
@@ -332,6 +336,8 @@ class TagManagementDialog(QDialog):
                 item.setForeground(
                     QColor("#111827") if color.lightness() >= 150 else QColor("#f8fafc")
                 )
+        self.table.blockSignals(previous)
+        self.begin_new_tag()
 
     def choose_color(self):
         initial = QColor(self.color_edit.text().strip())
@@ -344,21 +350,48 @@ class TagManagementDialog(QDialog):
             self.color_edit.setText(color.name())
 
     def selected_tag_id(self):
-        row_number = self.table.currentRow()
-        return None if row_number < 0 else _row_id(self.table, row_number)
+        if not self.edit_mode:
+            return None
+        return self.current_tag_id
 
     def load_current_tag(self):
-        tag_id = self.selected_tag_id()
+        selected_rows = self.table.selectionModel().selectedRows()
+        if not selected_rows:
+            self.current_tag_id = None
+            self.selected_tag = None
+            self.edit_mode = False
+            self.save_button.setText("新增標籤")
+            return
+        row_number = selected_rows[0].row()
+        tag_id = _row_id(self.table, row_number)
         for tag in self.tags:
             if tag.get("id") == tag_id:
+                self.current_tag_id = tag_id
+                self.selected_tag = dict(tag)
+                self.edit_mode = True
                 self.name_edit.setText(tag.get("name") or "")
                 self.color_edit.setText(tag.get("color") or "")
+                self.save_button.setText("儲存修改")
                 return
+        self.current_tag_id = None
+        self.selected_tag = None
+        self.edit_mode = False
+        self.save_button.setText("新增標籤")
 
-    def clear_form(self):
+    def begin_new_tag(self):
+        previous = self.table.blockSignals(True)
         self.table.clearSelection()
+        self.table.setCurrentCell(-1, -1)
+        self.table.blockSignals(previous)
+        self.current_tag_id = None
+        self.selected_tag = None
+        self.edit_mode = False
         self.name_edit.clear()
         self.color_edit.clear()
+        self.save_button.setText("新增標籤")
+
+    def clear_form(self):
+        self.begin_new_tag()
 
     def values(self):
         return {
@@ -375,7 +408,11 @@ class TagManagementDialog(QDialog):
         if color_text and not QColor(color_text).isValid():
             QMessageBox.warning(self, "顏色格式錯誤", "請使用 #RRGGBB 格式，或按「選色」。")
             return
-        self.action = "save"
+        self.action = (
+            "update"
+            if self.edit_mode and self.current_tag_id is not None
+            else "create"
+        )
         self.accept()
 
     def request_delete(self):
