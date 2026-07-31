@@ -1073,7 +1073,14 @@ class LandApp(
         self.table_proxy_model = None
         self.record_menu = None
         self.land_menu = None
-        self.expanded_land_ids = set()
+        # Only explicit user actions may change this set.  Search expansion is
+        # temporary and deliberately tracked separately.
+        self.user_expanded_land_ids: set[int] = set()
+        self.search_expanded_land_ids: set[int] = set()
+        self.restoring_tree_state = False
+        self.applying_programmatic_expansion = False
+        # Kept for compatibility with older tests/extensions.  New code checks
+        # the two explicit flags above.
         self._applying_land_expansion = False
         self._land_search_auto_expand = False
         self.selected_land_state_id = None

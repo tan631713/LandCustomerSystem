@@ -5,6 +5,17 @@ from PySide6.QtCore import QTimer
 
 
 class SelectionWorkflowMixin:
+    def set_checked_record_id(self, record_id, checked):
+        """Single checked-ID update shared by checkbox and context actions."""
+
+        record_id = int(record_id)
+        already_checked = record_id in self.checked_record_ids
+        if checked:
+            self.checked_record_ids.add(record_id)
+        else:
+            self.checked_record_ids.discard(record_id)
+        return already_checked != bool(checked)
+
     def selected_or_checked_record_ids(self):
         ids = set(self.checked_record_ids)
         ids.update(self.selected_table_record_ids())
@@ -47,12 +58,7 @@ class SelectionWorkflowMixin:
             return 0
         changed = 0
         for record_id in ids:
-            already_checked = record_id in self.checked_record_ids
-            if checked and not already_checked:
-                self.checked_record_ids.add(record_id)
-                changed += 1
-            elif not checked and already_checked:
-                self.checked_record_ids.discard(record_id)
+            if self.set_checked_record_id(record_id, checked):
                 changed += 1
             self.table_model.update_checked_state(record_id, record_id in self.checked_record_ids)
         if changed:
@@ -164,22 +170,20 @@ class SelectionWorkflowMixin:
             self.filter_field_combo.setCurrentIndex(index if index >= 0 else 0)
         finally:
             self.filter_field_combo.blockSignals(False)
-        self.refresh_records()
+        self.refresh_records_for_search()
         self.statusBar().showMessage(f"已顯示「{value}」相關資料。", 3500)
 
     def on_checked_state_changed(self, record_id, checked):
-        if checked:
-            self.checked_record_ids.add(record_id)
-        else:
-            self.checked_record_ids.discard(record_id)
+        self.set_checked_record_id(record_id, checked)
         self.schedule_selection_state_save()
         self.update_selection_status()
-        if self.show_checked_only:
-            QTimer.singleShot(0, self.refresh_records)
+        # A native checkbox click must remain an in-place model update.  A
+        # whole-query refresh here destroys the mouse interaction lifecycle
+        # and can reset tree expansion/selection state.
 
     def toggle_checked_only(self, enabled):
         self.show_checked_only = enabled
-        self.refresh_records()
+        self.refresh_records_for_search()
         message = "目前僅顯示勾選資料" if enabled else "已顯示全部符合條件的資料"
         self.statusBar().showMessage(message, 2500)
 

@@ -1,7 +1,9 @@
 """Desktop record editing, selection, and batch-operation workflows."""
 
 import sqlite3
+from contextlib import contextmanager
 from datetime import date
+from hashlib import sha256
 
 from customer_analytics import build_dashboard_stats
 from customer_desktop_api import DesktopApiError
@@ -15,6 +17,7 @@ from customer_domain import (
 )
 from customer_fields import LAND_FIELDS
 from customer_land_details import LandDetailsDialog
+from customer_models import CHECK_COLUMN
 from customer_messages import (
     database_save_failure_message,
     password_change_failure_message,
@@ -27,11 +30,29 @@ from customer_security import (
     encrypt_value,
     make_fernet,
 )
-from PySide6.QtCore import QPoint, QItemSelectionModel, QTimer, Qt
+from PySide6.QtCore import QPoint, QItemSelectionModel, QTimer
 from PySide6.QtWidgets import QAbstractItemView, QDialog, QPlainTextEdit
 
 
 class RecordWorkflowMixin:
+    @property
+    def expanded_land_ids(self):
+        """Backward-compatible alias for the user-owned expansion set."""
+
+        return self.user_expanded_land_ids
+
+    @expanded_land_ids.setter
+    def expanded_land_ids(self, values):
+        normalized = set()
+        for value in values or ():
+            try:
+                land_id = int(value)
+            except (TypeError, ValueError):
+                continue
+            if land_id:
+                normalized.add(land_id)
+        self.user_expanded_land_ids = normalized
+
     def source_table_index(self, index):
         proxy = getattr(self, "table_proxy_model", None)
         if proxy is not None and index.isValid():
@@ -52,6 +73,41 @@ class RecordWorkflowMixin:
             return None
         return result if result > 0 else None
 
+    def _land_group_id(self, group):
+        if group is None:
+            return None
+        land_id = self._positive_relation_id(getattr(group, "land_id", None))
+        if land_id is not None:
+            return land_id
+        # Legacy single-machine rows may not yet have a PostgreSQL land_id.
+        # Keep the public state type set[int] while deriving a stable,
+        # runtime-safe negative key from the complete land identity.  API mode
+        # always takes the real positive land_id branch above.
+        identity = getattr(group, "identity", None)
+        if identity is None:
+            return None
+        digest = sha256(repr(identity).encode("utf-8")).digest()
+        return -int.from_bytes(digest[:8], "big", signed=False) or -1
+
+    @contextmanager
+    def _programmatic_land_expansion(self, *, restoring=False):
+        """Prevent QTreeView signals from being mistaken for user actions."""
+
+        previous_programmatic = getattr(
+            self, "applying_programmatic_expansion", False
+        )
+        previous_restoring = getattr(self, "restoring_tree_state", False)
+        previous_legacy = getattr(self, "_applying_land_expansion", False)
+        self.applying_programmatic_expansion = True
+        self.restoring_tree_state = bool(restoring or previous_restoring)
+        self._applying_land_expansion = True
+        try:
+            yield
+        finally:
+            self.applying_programmatic_expansion = previous_programmatic
+            self.restoring_tree_state = previous_restoring
+            self._applying_land_expansion = previous_legacy
+
     def capture_land_tree_view_state(self):
         """Capture only user-owned tree state before data is refreshed."""
 
@@ -63,24 +119,6 @@ class RecordWorkflowMixin:
                 "vertical_scroll": 0,
                 "horizontal_scroll": 0,
             }
-
-        # Search expansion is temporary.  Never copy those automatically
-        # expanded rows into the normal-list expansion set.
-        if not getattr(self, "_land_search_auto_expand", False):
-            page_state_ids = {
-                group.state_id for group in self.table_model._page_groups()
-            }
-            actual_expanded = set()
-            for row in range(self.table_model.rowCount()):
-                source = self.table_model.index(row, 0)
-                group = self.table_model.group_for_index(source)
-                if group is None:
-                    continue
-                proxy = self.proxy_table_index(source)
-                if self.table_view.isExpanded(proxy):
-                    actual_expanded.add(group.state_id)
-            self.expanded_land_ids.difference_update(page_state_ids)
-            self.expanded_land_ids.update(actual_expanded)
 
         selection = None
         current = self.table_view.currentIndex()
@@ -115,7 +153,11 @@ class RecordWorkflowMixin:
                     )
 
         return {
-            "expanded_land_ids": set(self.expanded_land_ids),
+            # Expansion has one authoritative source.  The snapshot is kept
+            # for diagnostics/backward compatibility, never used to overwrite
+            # the live set during a normal restore.
+            "expanded_land_ids": set(self.user_expanded_land_ids),
+            "user_expanded_land_ids": set(self.user_expanded_land_ids),
             "selection": selection,
             "current_page": int(self.table_model.current_page),
             "vertical_scroll": int(
@@ -172,7 +214,8 @@ class RecordWorkflowMixin:
                 continue
             page = group_index // self.table_model.page_size
             if page != self.table_model.current_page:
-                self.table_model.set_page(page)
+                with self._programmatic_land_expansion(restoring=True):
+                    self.table_model.set_page(page)
             return self.table_model.index_for_group_state_id(group.state_id)
         return None
 
@@ -180,16 +223,12 @@ class RecordWorkflowMixin:
         self,
         state,
         *,
-        search_auto_expand=False,
+        search_auto_expand=None,
         fallback_record_id=None,
     ):
         """Restore expansion, node selection and scroll without forcing parents open."""
 
         state = state or {}
-        self.expanded_land_ids = set(state.get("expanded_land_ids") or ())
-        valid_ids = {group.state_id for group in self.table_model.groups}
-        if not search_auto_expand:
-            self.expanded_land_ids.intersection_update(valid_ids)
 
         selection = state.get("selection")
         if selection is None and fallback_record_id is not None:
@@ -207,7 +246,8 @@ class RecordWorkflowMixin:
         source_index = self._source_index_for_tree_selection(selection)
         if source_index is None or not source_index.isValid():
             wanted_page = max(0, int(state.get("current_page") or 0))
-            self.table_model.set_page(wanted_page)
+            with self._programmatic_land_expansion(restoring=True):
+                self.table_model.set_page(wanted_page)
             source_index = None
 
         self.restore_land_expansion_state(expand_matches=search_auto_expand)
@@ -215,9 +255,11 @@ class RecordWorkflowMixin:
         if source_index is not None and source_index.isValid():
             # index_for_record_id() may have changed page and rebuilt nodes.
             if selection and selection.get("node_type") == "ownership":
-                source_index = self.table_model.index_for_record_id(
-                    selection.get("ownership_id") or selection.get("record_id")
-                )
+                with self._programmatic_land_expansion(restoring=True):
+                    source_index = self.table_model.index_for_record_id(
+                        selection.get("ownership_id")
+                        or selection.get("record_id")
+                    )
             elif selection:
                 source_index = self._source_index_for_tree_selection(selection)
             self.restore_land_expansion_state(expand_matches=search_auto_expand)
@@ -295,29 +337,24 @@ class RecordWorkflowMixin:
             widget.setReadOnly(True)
 
     def select_record_in_table(self, record_id):
-        source_index = self.table_model.index_for_record_id(record_id)
+        with self._programmatic_land_expansion(restoring=True):
+            source_index = self.table_model.index_for_record_id(record_id)
         if not source_index.isValid():
             return False
         self.update_land_page_status()
-        self.restore_land_expansion_state(
-            expand_matches=getattr(self, "_land_search_auto_expand", False)
-        )
+        self.restore_land_expansion_state()
         index = self.proxy_table_index(source_index)
         source_parent = source_index.parent()
-        if source_parent.isValid():
-            group = self.table_model.group_for_index(source_parent)
-            if group is not None:
-                self.expanded_land_ids.add(group.state_id)
-            self.table_view.setExpanded(
-                self.proxy_table_index(source_parent),
-                True,
-            )
         selection_model = self.table_view.selectionModel()
         selection_model.setCurrentIndex(
             index,
             QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows,
         )
-        self.table_view.scrollTo(index, QAbstractItemView.PositionAtCenter)
+        if (
+            not source_parent.isValid()
+            or self.table_view.isExpanded(self.proxy_table_index(source_parent))
+        ):
+            self.table_view.scrollTo(index, QAbstractItemView.PositionAtCenter)
         return True
 
     def on_record_select(self, current, _previous):
@@ -341,15 +378,12 @@ class RecordWorkflowMixin:
         )
 
     def on_table_clicked(self, index):
-        if not index.isValid() or index.column() != 0:
+        if not index.isValid():
             return
-        source = self.source_table_index(index)
-        node = self.table_model.node_for_index(source)
-        if node is None:
+        if index.column() == CHECK_COLUMN:
+            # QStyledItemDelegate already writes the checkbox through
+            # CheckStateRole. Toggling again from clicked() would undo it.
             return
-        state = self.table_model.data(source, Qt.CheckStateRole)
-        new_state = Qt.Unchecked if state == Qt.Checked else Qt.Checked
-        self.table_model.setData(source, new_state, Qt.CheckStateRole)
 
     def show_record_menu(self, position: QPoint):
         proxy_index = self.table_view.indexAt(position)
@@ -406,54 +440,97 @@ class RecordWorkflowMixin:
         )
 
     def on_land_group_expanded(self, proxy_index):
-        if getattr(self, "_applying_land_expansion", False):
+        if (
+            getattr(self, "restoring_tree_state", False)
+            or getattr(self, "applying_programmatic_expansion", False)
+            or getattr(self, "_applying_land_expansion", False)
+        ):
             return
         source = self.source_table_index(proxy_index)
         group = self.table_model.group_for_index(source)
-        if group is not None:
-            self.expanded_land_ids.add(group.state_id)
+        land_id = self._land_group_id(group)
+        if land_id is not None:
+            self.user_expanded_land_ids.add(land_id)
 
     def on_land_group_collapsed(self, proxy_index):
-        if getattr(self, "_applying_land_expansion", False):
+        if (
+            getattr(self, "restoring_tree_state", False)
+            or getattr(self, "applying_programmatic_expansion", False)
+            or getattr(self, "_applying_land_expansion", False)
+        ):
             return
         source = self.source_table_index(proxy_index)
         group = self.table_model.group_for_index(source)
-        if group is not None:
-            self.expanded_land_ids.discard(group.state_id)
+        land_id = self._land_group_id(group)
+        if land_id is not None:
+            self.user_expanded_land_ids.discard(land_id)
 
-    def restore_land_expansion_state(self, *, expand_matches=False):
-        valid = {group.state_id for group in self.table_model.groups}
-        if not expand_matches:
-            self.expanded_land_ids.intersection_update(valid)
-        self._applying_land_expansion = True
-        try:
+    def restore_land_expansion_state(self, *, expand_matches=None):
+        """Apply user and temporary search expansion without cross-contamination.
+
+        ``expand_matches`` is intentionally tri-state:
+        ``True`` starts/replaces temporary search expansion, ``False`` clears
+        it, and ``None`` preserves the current search-expansion session.
+        """
+
+        valid = {
+            land_id
+            for group in self.table_model.groups
+            if (land_id := self._land_group_id(group)) is not None
+        }
+        if expand_matches is True:
+            self.search_expanded_land_ids = set(valid)
+            self._land_search_auto_expand = True
+        elif expand_matches is False:
+            self.search_expanded_land_ids.clear()
+            self._land_search_auto_expand = False
+            self.user_expanded_land_ids.intersection_update(valid)
+        else:
+            self.search_expanded_land_ids.intersection_update(valid)
+            if not getattr(self, "_land_search_auto_expand", False):
+                self.user_expanded_land_ids.intersection_update(valid)
+
+        expanded_ids = (
+            self.user_expanded_land_ids | self.search_expanded_land_ids
+        )
+        with self._programmatic_land_expansion(restoring=True):
             for row in range(self.table_model.rowCount()):
                 source = self.table_model.index(row, 0)
                 group = self.table_model.group_for_index(source)
                 if group is None:
                     continue
                 proxy = self.proxy_table_index(source)
-                should_expand = expand_matches or group.state_id in self.expanded_land_ids
+                land_id = self._land_group_id(group)
+                should_expand = (
+                    land_id is not None and land_id in expanded_ids
+                )
                 self.table_view.setExpanded(proxy, should_expand)
-        finally:
-            self._applying_land_expansion = False
 
     def expand_all_land_groups(self):
-        for row in range(self.table_model.rowCount()):
-            source = self.table_model.index(row, 0)
-            group = self.table_model.group_for_index(source)
-            if group is None:
-                continue
-            self.expanded_land_ids.add(group.state_id)
-            self.table_view.setExpanded(self.proxy_table_index(source), True)
+        self.user_expanded_land_ids.update(
+            land_id
+            for group in self.table_model.groups
+            if (land_id := self._land_group_id(group)) is not None
+        )
+        with self._programmatic_land_expansion():
+            for row in range(self.table_model.rowCount()):
+                source = self.table_model.index(row, 0)
+                group = self.table_model.group_for_index(source)
+                if self._land_group_id(group) is not None:
+                    self.table_view.setExpanded(
+                        self.proxy_table_index(source), True
+                    )
 
     def collapse_all_land_groups(self):
-        for row in range(self.table_model.rowCount()):
-            source = self.table_model.index(row, 0)
-            group = self.table_model.group_for_index(source)
-            if group is not None:
-                self.expanded_land_ids.discard(group.state_id)
-        self.table_view.collapseAll()
+        self.user_expanded_land_ids.clear()
+        self.search_expanded_land_ids.clear()
+        self._land_search_auto_expand = False
+        with self._programmatic_land_expansion():
+            for row in range(self.table_model.rowCount()):
+                source = self.table_model.index(row, 0)
+                self.table_view.setExpanded(
+                    self.proxy_table_index(source), False
+                )
 
     def update_land_page_status(self):
         model = self.table_model
@@ -475,17 +552,17 @@ class RecordWorkflowMixin:
             )
 
     def previous_land_page(self):
-        if self.table_model.previous_page():
-            self.restore_land_expansion_state(
-                expand_matches=getattr(self, "_land_search_auto_expand", False)
-            )
+        with self._programmatic_land_expansion(restoring=True):
+            page_changed = self.table_model.previous_page()
+        if page_changed:
+            self.restore_land_expansion_state()
             self.update_land_page_status()
 
     def next_land_page(self):
-        if self.table_model.next_page():
-            self.restore_land_expansion_state(
-                expand_matches=getattr(self, "_land_search_auto_expand", False)
-            )
+        with self._programmatic_land_expansion(restoring=True):
+            page_changed = self.table_model.next_page()
+        if page_changed:
+            self.restore_land_expansion_state()
             self.update_land_page_status()
 
     def load_record(self, record_id):
@@ -802,7 +879,6 @@ class RecordWorkflowMixin:
             self.refresh_records(
                 self.selected_record_id,
                 tree_state=tree_state,
-                auto_expand_search_matches=False,
                 preserve_existing_model=True,
             )
         action_type = "新增資料" if is_new_record else "修改資料"
@@ -862,12 +938,21 @@ class RecordWorkflowMixin:
         reply = self._app_component("QMessageBox").question(self, "確認刪除", "確定要刪除這筆土地資料嗎？")
         if reply != self._app_component("QMessageBox").Yes:
             return
+        removed_land_ids = {
+            land_id
+            for group in self.table_model.groups
+            if self.selected_record_id in group.record_ids
+            and len(group.record_ids) == 1
+            if (land_id := self._land_group_id(group)) is not None
+        }
         try:
             self.active_record_repository().delete_customers([self.selected_record_id])
         except DesktopApiError as exc:
             self._app_component("QMessageBox").critical(self, "刪除失敗", str(exc))
             return
         self.checked_record_ids.discard(self.selected_record_id)
+        self.user_expanded_land_ids.difference_update(removed_land_ids)
+        self.search_expanded_land_ids.difference_update(removed_land_ids)
         self._log_operation("刪除資料", f"ID {self.selected_record_id}", "")
         self.new_record()
         self.refresh_records()
@@ -885,7 +970,16 @@ class RecordWorkflowMixin:
         if not self.api_mode:
             self.create_safety_backup("delete-selected")
         ids = sorted(self.checked_record_ids)
+        deleted_ids = set(ids)
+        removed_land_ids = {
+            land_id
+            for group in self.table_model.groups
+            if set(group.record_ids).issubset(deleted_ids)
+            if (land_id := self._land_group_id(group)) is not None
+        }
         self.active_record_repository().delete_customers(ids)
+        self.user_expanded_land_ids.difference_update(removed_land_ids)
+        self.search_expanded_land_ids.difference_update(removed_land_ids)
         self.checked_record_ids.clear()
         self._log_operation("清除勾選", f"刪除 {count} 筆", "")
         self.new_record()
@@ -907,6 +1001,8 @@ class RecordWorkflowMixin:
             self.create_safety_backup("delete-all")
         self.active_record_repository().delete_all_customers()
         self.checked_record_ids.clear()
+        self.user_expanded_land_ids.clear()
+        self.search_expanded_land_ids.clear()
         self._log_operation("全部清除", "清空全部資料", "")
         self.new_record()
         self.refresh_records()

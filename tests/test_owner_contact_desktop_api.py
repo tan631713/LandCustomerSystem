@@ -50,6 +50,8 @@ class OwnerContactDesktopApiTests(unittest.TestCase):
                 return _Response({"item": self.item})
             if parsed.path == "/api/v1/records/7/owner-contacts/9":
                 return _Response({"item": self.item})
+            if parsed.path == "/api/v1/records/7/owner-contacts/9/identity":
+                return _Response({"external_id": "A123456789"})
             if parsed.path.endswith("/deactivate"):
                 return _Response({"item": {**self.item, "is_active": False}})
             if parsed.path.endswith("/reactivate"):
@@ -69,6 +71,9 @@ class OwnerContactDesktopApiTests(unittest.TestCase):
             "王小明",
         )
         self.assertEqual(self.client.get_owner_contact(7, 9)["contact_id"], 4)
+        self.assertEqual(
+            self.client.reveal_owner_contact_identity(7, 9), "A123456789"
+        )
         self.assertEqual(
             self.client.search_owner_contacts("0912")[0]["id"], 4
         )
@@ -120,6 +125,9 @@ class OwnerContactDesktopApiTests(unittest.TestCase):
         repository = DesktopApiRecordRepository(self.client, fernet=None)
         repository._rows = [{"id": 1}]
         self.assertEqual(repository.list_owner_contacts(7)[0]["contact_id"], 4)
+        self.assertEqual(
+            repository.reveal_owner_contact_identity(7, 9), "A123456789"
+        )
         repository.create_owner_contact(
             7,
             {

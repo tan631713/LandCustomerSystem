@@ -101,6 +101,10 @@ class CustomerDataSource(Protocol):
         self, user: AuthenticatedUser, record_id: int, relation_id: int
     ) -> dict: ...
 
+    def reveal_owner_contact_identity(
+        self, user: AuthenticatedUser, record_id: int, relation_id: int
+    ) -> dict: ...
+
     def search_owner_contacts(
         self, user: AuthenticatedUser, query: str, limit: int = 50
     ) -> list[dict]: ...

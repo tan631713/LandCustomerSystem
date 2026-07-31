@@ -17,6 +17,7 @@ from PySide6.QtGui import QColor, QFont, QIcon, QPixmap
 
 TABLE_COLUMNS = ()
 TABLE_BATCH_SIZE = 100
+CHECK_COLUMN = 0
 ROW_COLOR_CHECKED = QColor("#1e3a5f")
 ROW_COLOR_WATCHLIST = QColor("#5b2230")
 ROW_COLOR_OVERDUE = QColor("#7c2d12")
@@ -300,7 +301,7 @@ class RecordTableModel(QAbstractItemModel):
                 pixmap = QPixmap(10, 10)
                 pixmap.fill(safe_tag_qcolor(tags[0].get("color")))
                 return QIcon(pixmap)
-        if key == "checked":
+        if index.column() == CHECK_COLUMN:
             if role == Qt.CheckStateRole:
                 if node.kind == "land":
                     return self._parent_check_state(node.group)
@@ -382,7 +383,7 @@ class RecordTableModel(QAbstractItemModel):
         if not index.isValid():
             return Qt.NoItemFlags
         flags = Qt.ItemIsEnabled | Qt.ItemIsSelectable
-        if TABLE_COLUMNS[index.column()][0] == "checked":
+        if index.column() == CHECK_COLUMN:
             flags |= Qt.ItemIsUserCheckable
             if index.internalPointer().kind == "land":
                 flags |= Qt.ItemIsAutoTristate
@@ -391,12 +392,33 @@ class RecordTableModel(QAbstractItemModel):
     def setData(self, index, value, role=Qt.EditRole):
         if (
             not index.isValid()
-            or TABLE_COLUMNS[index.column()][0] != "checked"
+            or index.column() != CHECK_COLUMN
             or role != Qt.CheckStateRole
         ):
             return False
+        return self.set_node_checked(index, self._checked_value(value))
+
+    @staticmethod
+    def _checked_value(value):
+        """Normalize Qt enum and native item-delegate integer check states."""
+
+        if value == Qt.Checked:
+            return True
+        enum_value = getattr(value, "value", value)
+        try:
+            return int(enum_value) == int(Qt.Checked.value)
+        except (TypeError, ValueError):
+            return False
+
+    def set_node_checked(self, index, checked):
+        """Apply the established land-parent or ownership-child semantics."""
+
+        if not index.isValid() or index.column() != CHECK_COLUMN:
+            return False
         node = index.internalPointer()
-        target = value == Qt.Checked
+        if node is None:
+            return False
+        target = bool(checked)
         records = node.group.records if node.kind == "land" else [node.record]
         changed = []
         for record in records:
@@ -407,7 +429,7 @@ class RecordTableModel(QAbstractItemModel):
         for record_id in changed:
             self.checked_changed_callback(record_id, target)
         if changed:
-            left = self.index(node.row, 0, self.parent(index))
+            left = self.index(node.row, CHECK_COLUMN, self.parent(index))
             right = self.index(node.row, self.columnCount() - 1, self.parent(index))
             self.dataChanged.emit(
                 left,
@@ -417,7 +439,7 @@ class RecordTableModel(QAbstractItemModel):
             if node.kind == "ownership":
                 parent_index = self.parent(index)
                 self.dataChanged.emit(
-                    parent_index.siblingAtColumn(0),
+                    parent_index.siblingAtColumn(CHECK_COLUMN),
                     parent_index.siblingAtColumn(self.columnCount() - 1),
                     [Qt.CheckStateRole],
                 )

@@ -1,6 +1,14 @@
 # 土地資料系統
 
-目前正式版：家中伺服器 `v1.9.26`／公司筆電 `v1.9.8`（建置日期：2026-07-30）
+目前正式版：家中伺服器 `v1.9.27`／公司筆電 `v1.9.12`（建置日期：2026-07-30）
+
+v1.9.27／公司筆電 v1.9.12 為關係人新增身分證字號：PostgreSQL `contacts.external_id` 與地主欄位使用相同 Fernet 加密流程，API 清單及明細預設顯示 `A123*****9`，Editor／Admin 可由桌面按鈕暫時顯示完整內容。新增與修改會自動去除空白、轉大寫並驗證台灣身分證檢查碼；既有遮蔽值未修改時會保留原密文。schema 升級至 11，並附獨立 rollback。
+
+公司筆電 v1.9.11 修正土地 QTreeView checkbox 無法直接點擊：建立唯一 `CHECK_COLUMN`，完整保留可勾選、可選取與啟用旗標，並讓 Model 同時接受 Qt enum 與原生 Delegate 傳入的整數勾選值。父土地、子 ownership、右鍵選單與 `checked_record_ids` 共用既有勾選語意；標籤 Delegate 仍只安裝於標籤欄。checkbox 點擊只發出 `dataChanged`，不重建或重設 Model，也不觸發整頁刷新。未修改 PostgreSQL schema、FastAPI 或手機 Web。
+
+公司筆電 v1.9.10 修正土地樹狀清單非預期自動展開：使用者手動展開狀態改由 `user_expanded_land_ids` 單獨保存，程式還原與搜尋暫時展開均有旗標隔離；儲存地主／土地／ownership、單筆或批量標籤、關係人、附件、聯絡紀錄、一般刷新及排序均不再改變展開狀態。搜尋命中使用獨立的 `search_expanded_land_ids`，清除搜尋後只恢復使用者原先展開的土地。「全部展開／全部收合」會同步更新使用者集合，新增土地預設收合，刪除土地會清除失效 ID。未修改 PostgreSQL schema、FastAPI 資料格式及手機 Web。
+
+公司筆電 v1.9.9 修正標籤管理只能保留一個標籤：標籤 Dialog 現在以獨立的 `current_tag_id`、`selected_tag` 與新增／編輯模式決定操作。按「新增標籤」會清除既有 ID、清單選取、名稱與顏色；只有明確選取既有標籤時才進入編輯模式。Repository 與桌面 API 會在 `tag_id=None` 時使用 FastAPI `POST /api/v1/tags`，有 ID 時才使用 `PUT /api/v1/tags/{tag_id}`。新增、編輯及資料庫結果均有自動化測試，PostgreSQL schema 不需修改，土地樹狀清單狀態保存維持不變。
 
 公司筆電 v1.9.8 將標籤操作接入土地樹狀清單的局部更新流程：單筆設定標籤、批量加入／移除／取代標籤，以及標籤名稱、顏色與刪除管理，均會在 API 操作前保存目前展開、收合、選取及捲動狀態；完成後沿用原 TreeModel 更新節點與標籤 Roles，不執行搜尋命中全部展開，也不因標籤內容變化重建 Model。伺服器與 PostgreSQL schema 不需更新。
 

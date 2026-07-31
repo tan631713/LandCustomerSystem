@@ -829,6 +829,54 @@ class CustomerApiTests(unittest.TestCase):
             [],
         )
 
+    def test_tag_create_twice_then_update_keeps_two_database_rows(self):
+        admin_headers = self.login()
+        first = self.client.post(
+            "/api/v1/tags",
+            headers=admin_headers,
+            json={"name": "標籤 A", "color": "#FF0000"},
+        )
+        second = self.client.post(
+            "/api/v1/tags",
+            headers=admin_headers,
+            json={"name": "標籤 B", "color": "#00FF00"},
+        )
+        self.assertEqual(first.status_code, 201, first.text)
+        self.assertEqual(second.status_code, 201, second.text)
+        first_id = int(first.json()["id"])
+        second_id = int(second.json()["id"])
+        self.assertNotEqual(first_id, second_id)
+
+        items = self.client.get(
+            "/api/v1/tags",
+            headers=admin_headers,
+        ).json()["items"]
+        by_id = {int(item["id"]): item for item in items}
+        self.assertEqual(len(by_id), 2)
+        self.assertEqual(by_id[first_id]["name"], "標籤 A")
+        self.assertEqual(by_id[first_id]["color"], "#FF0000")
+        self.assertEqual(by_id[second_id]["name"], "標籤 B")
+        self.assertEqual(by_id[second_id]["color"], "#00FF00")
+
+        updated = self.client.put(
+            f"/api/v1/tags/{first_id}",
+            headers=admin_headers,
+            json={"name": "標籤 A（更新）", "color": "#0000FF"},
+        )
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertEqual(int(updated.json()["id"]), first_id)
+
+        updated_items = self.client.get(
+            "/api/v1/tags",
+            headers=admin_headers,
+        ).json()["items"]
+        updated_by_id = {int(item["id"]): item for item in updated_items}
+        self.assertEqual(len(updated_by_id), 2)
+        self.assertEqual(updated_by_id[first_id]["name"], "標籤 A（更新）")
+        self.assertEqual(updated_by_id[first_id]["color"], "#0000FF")
+        self.assertEqual(updated_by_id[second_id]["name"], "標籤 B")
+        self.assertEqual(updated_by_id[second_id]["color"], "#00FF00")
+
     def test_project_crud_assignments_and_roles(self):
         admin_headers = self.login()
         created = self.client.post(

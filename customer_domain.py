@@ -115,6 +115,61 @@ def mask_identity_text(value):
     return text[:4] + ("*" * (len(text) - 5)) + text[-1]
 
 
+TAIWAN_ID_LETTER_VALUES = {
+    letter: value
+    for letter, value in zip(
+        "ABCDEFGHJKLMNPQRSTUVXYWZIO",
+        (
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+        ),
+    )
+}
+
+
+def normalize_taiwan_identity(value):
+    """Normalize and validate an optional Taiwan national ID number."""
+    text = str(value or "").strip().upper()
+    if not text:
+        return ""
+    if not re.fullmatch(r"[A-Z][12]\d{8}", text):
+        raise ValueError("身分證字號格式不正確。")
+    letter_value = TAIWAN_ID_LETTER_VALUES[text[0]]
+    checksum = (letter_value // 10) + ((letter_value % 10) * 9)
+    checksum += sum(
+        int(digit) * weight
+        for digit, weight in zip(text[1:], range(8, 0, -1))
+    )
+    checksum += int(text[-1])
+    if checksum % 10:
+        raise ValueError("身分證字號格式不正確。")
+    return text
+
+
 def normalize_text(value):
     return str(value or "").strip()
 

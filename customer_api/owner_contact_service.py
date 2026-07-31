@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from customer_domain import normalize_taiwan_identity
 from customer_owner_contact_types import RELATIONSHIP_TYPES
 
 
@@ -30,10 +31,21 @@ def _clean(value, maximum):
     return result
 
 
-def normalize_contact_values(values):
+def normalize_contact_values(values, *, allow_identity_preserve=False):
     source = dict(values or {})
+    raw_external_id = source.get("external_id")
+    if allow_identity_preserve and raw_external_id is None:
+        external_id = None
+    else:
+        try:
+            external_id = normalize_taiwan_identity(raw_external_id)
+        except ValueError as exc:
+            raise OwnerContactError(str(exc)) from exc
+        if "*" in external_id:
+            raise OwnerContactError("請輸入完整且正確的身分證字號。")
     normalized = {
         "name": _clean(source.get("name"), 100),
+        "external_id": external_id,
         "mobile_phone": _clean(source.get("mobile_phone"), 30),
         "home_phone": _clean(source.get("home_phone"), 30),
         "registered_address": _clean(source.get("registered_address"), 500),
@@ -79,6 +91,7 @@ class OwnerContactService:
     contacts: object
     relations: object
     audit: object
+    identity_encoder: object = lambda value: value
 
     def _set_primary(self, owner_id, relation_id, actor):
         previous_items = self.relations.set_primary(owner_id, relation_id) or []
@@ -96,6 +109,7 @@ class OwnerContactService:
     def create_new(self, owner_id, actor, contact_values, relation_values):
         self.relations.require_owner(owner_id)
         contact = normalize_contact_values(contact_values)
+        contact["external_id"] = self.identity_encoder(contact["external_id"])
         relation = normalize_relation_values(relation_values)
         contact_id = self.contacts.create(contact)
         relation_id = self.relations.create(owner_id, contact_id, relation)
@@ -168,7 +182,15 @@ class OwnerContactService:
         before = self.relations.get(owner_id, relation_id)
         if before is None:
             raise OwnerContactNotFound("關係不存在。")
-        contact = normalize_contact_values(contact_values)
+        contact = normalize_contact_values(
+            contact_values, allow_identity_preserve=True
+        )
+        if contact["external_id"] is None:
+            contact["external_id"] = before.get("external_id") or ""
+        else:
+            contact["external_id"] = self.identity_encoder(
+                contact["external_id"]
+            )
         relation = normalize_relation_values(relation_values)
         self.contacts.update(
             before["contact_id"],
@@ -186,6 +208,7 @@ class OwnerContactService:
         result = self.relations.get(owner_id, relation_id)
         contact_before = {
             "name": before.get("name") or "",
+            "external_id": before.get("external_id") or "",
             "mobile_phone": before.get("mobile_phone") or "",
             "home_phone": before.get("home_phone") or "",
             "registered_address": before.get("registered_address") or "",

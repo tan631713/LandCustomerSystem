@@ -101,6 +101,7 @@ class _Relations:
             "relation_id": relation["id"],
             **relation,
             "name": contact["name"],
+            "external_id": contact.get("external_id") or "",
             "mobile_phone": contact["mobile_phone"],
             "home_phone": contact["home_phone"],
             "registered_address": contact["registered_address"],
@@ -179,6 +180,7 @@ class OwnerContactServiceTests(unittest.TestCase):
         self.actor = _Actor()
         self.contact = {
             "name": "王小明",
+            "external_id": "A123456789",
             "mobile_phone": "0912-345-678",
             "home_phone": "",
             "registered_address": "桃園市",
@@ -211,10 +213,44 @@ class OwnerContactServiceTests(unittest.TestCase):
         )
         self.assertEqual(normalized["name"], "王小明")
         self.assertEqual(normalized["contact_address"], "台中市")
+        self.assertEqual(normalized["external_id"], "A123456789")
         with self.assertRaisesRegex(ValueError, "500"):
             normalize_contact_values(
                 {**self.contact, "registered_address": "地" * 501}
             )
+        with self.assertRaisesRegex(ValueError, "格式不正確"):
+            normalize_contact_values(
+                {**self.contact, "external_id": "A123456788"}
+            )
+
+    def test_identity_is_encoded_and_unchanged_update_preserves_ciphertext(self):
+        encoded = []
+        service = OwnerContactService(
+            self.contacts,
+            self.relations,
+            lambda *_values: None,
+            lambda value: encoded.append(value) or f"encrypted:{value}",
+        )
+        created = service.create_new(
+            1, self.actor, self.contact, self.relation
+        )
+        contact_id = created["contact_id"]
+        self.assertEqual(
+            self.contacts.rows[contact_id]["external_id"],
+            "encrypted:A123456789",
+        )
+        service.update(
+            1,
+            created["relation_id"],
+            self.actor,
+            {**self.contact, "external_id": None, "name": "王大明"},
+            self.relation,
+        )
+        self.assertEqual(
+            self.contacts.rows[contact_id]["external_id"],
+            "encrypted:A123456789",
+        )
+        self.assertEqual(encoded, ["A123456789"])
 
     def test_create_new_sets_one_primary_and_audits(self):
         first = self.service.create_new(

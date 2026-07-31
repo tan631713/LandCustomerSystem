@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from customer_domain import mask_identity_text, normalize_taiwan_identity
 from customer_owner_contact_types import RELATIONSHIP_TYPES
 
 
@@ -212,6 +213,7 @@ class OwnerContactDialog(QDialog):
         self._selected_contact = None
         self.edit_requested = False
         self._address_helper_buttons = []
+        self._identity_state = {}
         self.setWindowTitle(
             "查看關係人"
             if self.readonly
@@ -266,6 +268,8 @@ class OwnerContactDialog(QDialog):
         group = QGroupBox(title, self)
         form = QFormLayout(group)
         name = QLineEdit(group)
+        external_id = QLineEdit(group)
+        external_id.setMaxLength(100)
         mobile = QLineEdit(group)
         home = QLineEdit(group)
         registered_address = QLineEdit(group)
@@ -275,6 +279,13 @@ class OwnerContactDialog(QDialog):
         notes = QPlainTextEdit(group)
         notes.setFixedHeight(80)
         form.addRow("姓名 *", name)
+        identity_row = QHBoxLayout()
+        identity_row.addWidget(external_id, 1)
+        identity_button = QPushButton(
+            "👁 顯示" if prefix == "edit" else "👁 隱藏", group
+        )
+        identity_row.addWidget(identity_button)
+        form.addRow("身分證字號", identity_row)
         form.addRow("手機", mobile)
         form.addRow("市話", home)
         form.addRow("戶籍地址", registered_address)
@@ -306,6 +317,8 @@ class OwnerContactDialog(QDialog):
         helpers.addStretch(1)
         form.addRow("快速填入", helpers)
         setattr(self, f"{prefix}_name", name)
+        setattr(self, f"{prefix}_external_id", external_id)
+        setattr(self, f"{prefix}_external_id_button", identity_button)
         setattr(self, f"{prefix}_mobile_phone", mobile)
         setattr(self, f"{prefix}_home_phone", home)
         setattr(self, f"{prefix}_registered_address", registered_address)
@@ -313,7 +326,68 @@ class OwnerContactDialog(QDialog):
         setattr(self, f"{prefix}_work_address", work_address)
         setattr(self, f"{prefix}_identity_note", identity_note)
         setattr(self, f"{prefix}_contact_notes", notes)
+        self._identity_state[prefix] = {
+            "dirty": False,
+            "revealed": prefix != "edit",
+            "masked": "",
+            "pending": "",
+        }
+        external_id.textEdited.connect(
+            lambda text, field_prefix=prefix: self._identity_text_edited(
+                field_prefix, text
+            )
+        )
+        identity_button.clicked.connect(
+            lambda _checked=False, field_prefix=prefix: self._toggle_identity(
+                field_prefix
+            )
+        )
         return group
+
+    def _set_identity_text(self, prefix, value):
+        widget = getattr(self, f"{prefix}_external_id")
+        widget.blockSignals(True)
+        widget.setText(_text(value))
+        widget.blockSignals(False)
+
+    def _identity_text_edited(self, prefix, value):
+        normalized = _text(value).upper()
+        if normalized != value:
+            self._set_identity_text(prefix, normalized)
+        state = self._identity_state[prefix]
+        state["dirty"] = True
+        state["pending"] = normalized
+
+    def _toggle_identity(self, prefix):
+        state = self._identity_state[prefix]
+        button = getattr(self, f"{prefix}_external_id_button")
+        widget = getattr(self, f"{prefix}_external_id")
+        if state["revealed"]:
+            plain = _text(widget.text()).upper()
+            if state["dirty"] or prefix != "edit":
+                state["pending"] = plain
+            self._set_identity_text(prefix, mask_identity_text(plain))
+            state["revealed"] = False
+            button.setText("👁 顯示")
+            return
+        if state["dirty"] or prefix != "edit":
+            plain = state["pending"]
+        else:
+            relation_id = int(self.existing.get("relation_id") or 0)
+            try:
+                plain = self.repository.reveal_owner_contact_identity(
+                    self.record_id, relation_id
+                )
+            except Exception as exc:
+                QMessageBox.warning(
+                    self,
+                    "顯示失敗",
+                    f"無法顯示完整身分證字號：{exc}",
+                )
+                return
+        self._set_identity_text(prefix, plain)
+        state["revealed"] = True
+        button.setText("👁 隱藏")
 
     def _relation_group(self, prefix, *, title="與目前地主的關係"):
         group = QGroupBox(title, self)
@@ -437,6 +511,16 @@ class OwnerContactDialog(QDialog):
 
     def _fill_existing(self, values):
         self.edit_name.setText(_text(values.get("name")))
+        masked_external_id = _text(values.get("external_id"))
+        self._set_identity_text("edit", masked_external_id)
+        self._identity_state["edit"].update(
+            {
+                "dirty": False,
+                "revealed": False,
+                "masked": masked_external_id,
+                "pending": "",
+            }
+        )
         self.edit_mobile_phone.setText(_text(values.get("mobile_phone")))
         self.edit_home_phone.setText(_text(values.get("home_phone")))
         self.edit_registered_address.setText(
@@ -467,10 +551,24 @@ class OwnerContactDialog(QDialog):
                 widget.setEnabled(False)
         for button in self._address_helper_buttons:
             button.setEnabled(False)
+        for prefix in self._identity_state:
+            getattr(self, f"{prefix}_external_id_button").setEnabled(
+                bool(self.allow_edit)
+            )
 
     def _contact_values(self, prefix):
+        identity_state = self._identity_state[prefix]
+        if prefix == "edit" and not identity_state["dirty"]:
+            external_id = None
+        elif identity_state["revealed"]:
+            external_id = getattr(
+                self, f"{prefix}_external_id"
+            ).text().strip().upper()
+        else:
+            external_id = _text(identity_state["pending"]).upper()
         return {
             "name": getattr(self, f"{prefix}_name").text().strip(),
+            "external_id": external_id,
             "mobile_phone": getattr(self, f"{prefix}_mobile_phone").text().strip(),
             "home_phone": getattr(self, f"{prefix}_home_phone").text().strip(),
             "registered_address": getattr(
@@ -539,6 +637,7 @@ class OwnerContactDialog(QDialog):
                 return
             limits = {
                 "name": ("姓名", 100),
+                "external_id": ("身分證字號", 10),
                 "mobile_phone": ("手機", 30),
                 "home_phone": ("市話", 30),
                 "registered_address": ("戶籍地址", 500),
@@ -548,13 +647,24 @@ class OwnerContactDialog(QDialog):
                 "notes": ("人員備註", 2000),
             }
             for key, (label, maximum) in limits.items():
-                if len(values["contact"].get(key, "")) > maximum:
+                if len(values["contact"].get(key) or "") > maximum:
                     QMessageBox.warning(
                         self,
                         "內容過長",
                         f"{label}不可超過 {maximum} 個字。",
                     )
                     return
+            try:
+                values["contact"]["external_id"] = (
+                    None
+                    if values["contact"].get("external_id") is None
+                    else normalize_taiwan_identity(
+                        values["contact"].get("external_id")
+                    )
+                )
+            except ValueError as exc:
+                QMessageBox.warning(self, "格式錯誤", str(exc))
+                return
             relation = values["relation"]
         if not relation["relationship_type"]:
             QMessageBox.warning(self, "資料不完整", "關係類型不可空白。")

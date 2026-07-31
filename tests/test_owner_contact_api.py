@@ -31,6 +31,7 @@ class _OwnerContactApiSource:
             "owner_id": 3,
             "contact_id": 4,
             "name": "王小明",
+            "external_id": "A123*****9",
             "relationship_type": "兒子",
             "relationship_note": "長子",
             "mobile_phone": "0912",
@@ -49,7 +50,7 @@ class _OwnerContactApiSource:
         }
 
     def health(self):
-        return {"status": "ok", "backend": "test", "schema_version": 10}
+        return {"status": "ok", "backend": "test", "schema_version": 11}
 
     def authenticate(self, username, password):
         if password != "correct-password":
@@ -67,6 +68,10 @@ class _OwnerContactApiSource:
         if record_id != 7 or relation_id != 9:
             raise OwnerContactNotFound("關係不存在。")
         return dict(self.item)
+
+    def reveal_owner_contact_identity(self, user, record_id, relation_id):
+        self.calls.append(("reveal", user.role, record_id, relation_id))
+        return {"external_id": "A123456789"}
 
     def search_owner_contacts(self, user, query, limit=50):
         self.calls.append(("search", user.role, query, limit))
@@ -128,6 +133,11 @@ class _OwnerContactApiSource:
     ):
         return self.get_owner_contact_relation(user, 7, relation_id)
 
+    def reveal_owner_contact_identity_by_owner(
+        self, user, owner_id, relation_id
+    ):
+        return self.reveal_owner_contact_identity(user, 7, relation_id)
+
     def create_owner_contact_by_owner(self, user, owner_id, values):
         return self.create_owner_contact(user, owner_id, values)
 
@@ -179,6 +189,7 @@ class OwnerContactApiTests(unittest.TestCase):
         return {
             "contact": {
                 "name": "王小明",
+                "external_id": " a123456789 ",
                 "mobile_phone": "0912",
                 "home_phone": "",
                 "registered_address": "桃園市",
@@ -233,6 +244,11 @@ class OwnerContactApiTests(unittest.TestCase):
             headers=self.login("viewer"),
         )
         self.assertEqual(response.status_code, 403, response.text)
+        reveal = self.client.get(
+            "/api/v1/records/7/owner-contacts/9/identity",
+            headers=self.login("viewer"),
+        )
+        self.assertEqual(reveal.status_code, 403, reveal.text)
 
     def test_editor_can_create_link_update_deactivate_and_reactivate(self):
         headers = self.login("editor")
@@ -242,6 +258,16 @@ class OwnerContactApiTests(unittest.TestCase):
             headers=headers,
         )
         self.assertEqual(created.status_code, 201, created.text)
+        create_call = next(call for call in self.source.calls if call[0] == "create")
+        self.assertEqual(
+            create_call[3]["contact"]["external_id"], "A123456789"
+        )
+        revealed = self.client.get(
+            "/api/v1/records/7/owner-contacts/9/identity",
+            headers=headers,
+        )
+        self.assertEqual(revealed.status_code, 200, revealed.text)
+        self.assertEqual(revealed.json()["external_id"], "A123456789")
 
         linked = self.client.post(
             "/api/v1/records/7/owner-contacts/link",
@@ -323,6 +349,14 @@ class OwnerContactApiTests(unittest.TestCase):
             headers=headers,
         )
         self.assertEqual(rejected.status_code, 422, rejected.text)
+        payload = self.payload()
+        payload["contact"]["external_id"] = "A123456788"
+        invalid_identity = self.client.post(
+            "/api/v1/records/7/owner-contacts",
+            json=payload,
+            headers=headers,
+        )
+        self.assertEqual(invalid_identity.status_code, 422, invalid_identity.text)
 
     def test_canonical_owner_routes_share_the_same_service_boundary(self):
         headers = self.login("editor")

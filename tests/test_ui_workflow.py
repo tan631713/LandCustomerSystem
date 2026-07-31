@@ -242,10 +242,9 @@ class UiWorkflowTests(unittest.TestCase):
                 ):
                     window.save_record()
                 refresh_records.assert_called_once()
-                self.assertFalse(
-                    refresh_records.call_args.kwargs[
-                        "auto_expand_search_matches"
-                    ]
+                self.assertNotIn(
+                    "auto_expand_search_matches",
+                    refresh_records.call_args.kwargs,
                 )
                 self.assertTrue(
                     refresh_records.call_args.kwargs[
@@ -534,6 +533,89 @@ class UiWorkflowTests(unittest.TestCase):
             app.set_setting(app.READONLY_MODE_SETTING_KEY, "0")
             window.close()
 
+    def test_tag_management_creates_two_tags_then_updates_only_selected_tag(self):
+        app.REPOSITORY.create_admin_user("test-password")
+        encryption_key = app.REPOSITORY.authenticate_user(
+            "admin",
+            "test-password",
+        )
+        window = app.LandApp(encryption_key)
+
+        class FakeTagManagementDialog:
+            step = 0
+            first_tag_id = None
+
+            def __init__(self, tags, parent):
+                self.tags = [dict(tag) for tag in tags]
+                self.parent = parent
+                step = type(self).step
+                type(self).step += 1
+                if step == 0:
+                    self.action = "create"
+                    self._values = {
+                        "tag_id": None,
+                        "name": "標籤 A",
+                        "color": "#FF0000",
+                    }
+                elif step == 1:
+                    first_tag = next(
+                        tag for tag in self.tags if tag["name"] == "標籤 A"
+                    )
+                    type(self).first_tag_id = int(first_tag["id"])
+                    self.action = "create"
+                    self._values = {
+                        "tag_id": None,
+                        "name": "標籤 B",
+                        "color": "#00FF00",
+                    }
+                else:
+                    first_tag = next(
+                        tag
+                        for tag in self.tags
+                        if int(tag["id"]) == type(self).first_tag_id
+                    )
+                    self.action = "update"
+                    self._values = {
+                        "tag_id": int(first_tag["id"]),
+                        "name": "標籤 A（更新）",
+                        "color": "#0000FF",
+                    }
+
+            def exec(self):
+                return QDialog.Accepted
+
+            def values(self):
+                return dict(self._values)
+
+        try:
+            with (
+                patch.object(
+                    app,
+                    "TagManagementDialog",
+                    FakeTagManagementDialog,
+                ),
+                patch.object(
+                    window,
+                    "refresh_after_management_content_update",
+                ) as refresh,
+            ):
+                window.manage_tags()
+                window.manage_tags()
+                window.manage_tags()
+
+            tags = [dict(tag) for tag in app.REPOSITORY.list_tags()]
+            self.assertEqual(len(tags), 2)
+            tags_by_id = {int(tag["id"]): tag for tag in tags}
+            first_tag_id = FakeTagManagementDialog.first_tag_id
+            self.assertEqual(tags_by_id[first_tag_id]["name"], "標籤 A（更新）")
+            self.assertEqual(tags_by_id[first_tag_id]["color"], "#0000FF")
+            second_tag = next(tag for tag in tags if tag["name"] == "標籤 B")
+            self.assertEqual(second_tag["color"], "#00FF00")
+            self.assertNotEqual(int(second_tag["id"]), first_tag_id)
+            self.assertEqual(refresh.call_count, 3)
+        finally:
+            window.close()
+
     def test_tag_assignment_preserves_tree_model_and_expansion_state(self):
         app.REPOSITORY.create_admin_user("test-password")
         encryption_key = app.REPOSITORY.authenticate_user(
@@ -630,10 +712,9 @@ class UiWorkflowTests(unittest.TestCase):
                 window.edit_customer_tags()
 
             refresh_records.assert_called_once()
-            self.assertFalse(
-                refresh_records.call_args.kwargs[
-                    "auto_expand_search_matches"
-                ]
+            self.assertNotIn(
+                "auto_expand_search_matches",
+                refresh_records.call_args.kwargs,
             )
             self.assertTrue(
                 refresh_records.call_args.kwargs[
@@ -1258,7 +1339,10 @@ class UiWorkflowTests(unittest.TestCase):
                 },
             )
             self.assertIn("3 個進階條件", window.statusBar().currentMessage())
-            refresh.assert_called_once_with()
+            refresh.assert_called_once_with(
+                None,
+                auto_expand_search_matches=True,
+            )
         finally:
             window.close()
 

@@ -42,6 +42,7 @@ DOCUMENTS = (
     f"release-acceptance-exe-v{APP_VERSION}.json",
     "postgres/migrations/009_owner_contacts_rollback.sql",
     "postgres/migrations/010_owner_contacts_enhancement_rollback.sql",
+    "postgres/migrations/011_owner_contact_identity_rollback.sql",
 )
 
 
@@ -154,6 +155,7 @@ def audit_server_bundle(bundle: Path) -> None:
         bundle / "LandCustomerServer" / "_internal" / "postgres" / "schema.sql",
         bundle / "postgres" / "migrations" / "009_owner_contacts_rollback.sql",
         bundle / "postgres" / "migrations" / "010_owner_contacts_enhancement_rollback.sql",
+        bundle / "postgres" / "migrations" / "011_owner_contact_identity_rollback.sql",
         *(bundle / "_server_support" / name for name in SUPPORT_FILES),
     ]
     missing = [str(path.relative_to(bundle)) for path in required if not path.is_file()]
@@ -224,7 +226,7 @@ def package_release() -> tuple[Path, Path]:
             "packaged_at": datetime.now().astimezone().isoformat(),
             "channel": "formal",
             "official_data_source": "postgresql",
-            "postgresql_schema_version": 10,
+            "postgresql_schema_version": 11,
             "mobile_asset_version": MOBILE_ASSET_VERSION,
             "field_visit_phase_one": True,
             "owner_contacts_phase_one": True,

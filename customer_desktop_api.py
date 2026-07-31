@@ -438,6 +438,16 @@ class DesktopApiClient:
         )
         return dict(result.get("item") or {})
 
+    def reveal_owner_contact_identity(self, record_id, relation_id):
+        result = self._request(
+            "GET",
+            (
+                f"/api/v1/records/{int(record_id)}/owner-contacts/"
+                f"{int(relation_id)}/identity"
+            ),
+        )
+        return str(result.get("external_id") or "")
+
     def search_owner_contacts(self, query, *, limit=50):
         result = self._request(
             "GET",
@@ -1374,6 +1384,11 @@ class DesktopApiRecordRepository:
 
     def get_owner_contact(self, record_id, relation_id):
         return self.client.get_owner_contact(int(record_id), int(relation_id))
+
+    def reveal_owner_contact_identity(self, record_id, relation_id):
+        return self.client.reveal_owner_contact_identity(
+            int(record_id), int(relation_id)
+        )
 
     def search_owner_contacts(self, query, *, limit=50):
         return self.client.search_owner_contacts(query, limit=limit)
