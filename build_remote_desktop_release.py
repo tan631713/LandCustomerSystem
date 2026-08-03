@@ -11,7 +11,7 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-from customer_version import BUILD_DATE, DESKTOP_CLIENT_VERSION
+from customer_version import DESKTOP_CLIENT_BUILD_DATE, DESKTOP_CLIENT_VERSION
 
 
 ROOT = Path(__file__).resolve().parent
@@ -110,7 +110,7 @@ def package_remote_client() -> tuple[Path, Path]:
         manifest = {
             "product": "LandCustomerSystem Company Laptop Client",
             "version": DESKTOP_CLIENT_VERSION,
-            "build_date": BUILD_DATE,
+            "build_date": DESKTOP_CLIENT_BUILD_DATE,
             "packaged_at": datetime.now().astimezone().isoformat(),
             "server_ip_user_configurable": True,
             "server_ip_storage": "%LOCALAPPDATA%/LandCustomerSystem/desktop-client/desktop-client-settings.db",

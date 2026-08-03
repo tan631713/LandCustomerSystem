@@ -142,6 +142,75 @@ class UiWorkflowTests(unittest.TestCase):
             finally:
                 window.close()
 
+    def test_basic_data_form_uses_grouped_responsive_reference_layout(self):
+        window = app.LandApp(Fernet.generate_key())
+        try:
+            layout = window.basic_data_form_layout
+            positions = {}
+            for key, container in window.form_field_containers.items():
+                index = layout.indexOf(container)
+                self.assertGreaterEqual(index, 0, key)
+                positions[key] = layout.getItemPosition(index)
+
+            self.assertEqual(
+                set(window.form_field_containers),
+                {key for key, _label in app.LAND_FIELDS},
+            )
+            self.assertEqual(positions["district"][0], positions["section"][0])
+            self.assertEqual(positions["district"][1:], (0, 1, 3))
+            self.assertEqual(positions["section"][1:], (3, 1, 3))
+
+            compact_row = positions["registration_order"][0]
+            self.assertEqual(positions["numerator"][0], compact_row)
+            self.assertEqual(positions["denominator"][0], compact_row)
+            self.assertEqual(positions["registration_order"][3], 2)
+            self.assertEqual(positions["numerator"][3], 2)
+            self.assertEqual(positions["denominator"][3], 2)
+
+            self.assertEqual(positions["land_number"][3], 6)
+            self.assertEqual(positions["total_declared_value"][3], 6)
+            self.assertEqual(positions["owner_name"][0], positions["external_id"][0])
+            self.assertEqual(positions["owner_name"][3], 3)
+            self.assertEqual(positions["external_id"][3], 3)
+            self.assertEqual(positions["address"][3], 6)
+            self.assertEqual(positions["note"][3], 6)
+
+            self.assertEqual(window.auto_calculation_badge.text(), "自動計算")
+            self.assertTrue(window.fields["total_declared_value"].isReadOnly())
+            self.assertEqual(window.fields["note"].placeholderText(), "尚未填寫")
+        finally:
+            window.close()
+
+    def test_basic_data_form_scrolls_instead_of_clipping_fields(self):
+        application = QApplication.instance()
+        original_font = application.font()
+        window = app.LandApp(Fernet.generate_key())
+        try:
+            window.current_font_size_key = "xlarge"
+            window.apply_saved_font_size()
+            window.resize(1400, 760)
+            window.show()
+            application.processEvents()
+
+            self.assertEqual(
+                window.basic_data_form_layout.sizeConstraint(),
+                window_ui_module.QLayout.SetMinimumSize,
+            )
+            self.assertGreater(
+                window.basic_data_scroll_area.verticalScrollBar().maximum(),
+                0,
+            )
+            for key, container in window.form_field_containers.items():
+                widget = window.fields[key]
+                self.assertLessEqual(
+                    widget.geometry().bottom(),
+                    container.rect().bottom(),
+                    key,
+                )
+        finally:
+            window.close()
+            application.setFont(original_font)
+
     def test_postgresql_login_uses_api_account_not_legacy_sqlite_account(self):
         class FakeApiClient:
             def __init__(self):
