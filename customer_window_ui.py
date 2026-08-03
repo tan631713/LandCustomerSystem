@@ -27,86 +27,6 @@ LAND_LIST_MINIMUM_WIDTH = 540
 DETAIL_PANEL_MINIMUM_WIDTH = 460
 DEFAULT_SPLITTER_SIZES = (760, 480)
 
-# Modern dark, rounded look for buttons and input fields. Applied once to the
-# central widget so it cascades to every QPushButton / QLineEdit /
-# QPlainTextEdit / QComboBox underneath, without touching per-widget
-# setStyleSheet calls used elsewhere for labels/titles.
-CONTROL_STYLESHEET = """
-QPushButton {
-    background-color: #374151;
-    color: #f9fafb;
-    border: 1px solid #4b5563;
-    border-radius: 8px;
-    padding: 6px 16px;
-    font-weight: 500;
-}
-QPushButton:hover {
-    background-color: #4b5563;
-    border-color: #6b7280;
-}
-QPushButton:pressed {
-    background-color: #1f2937;
-}
-QPushButton:disabled {
-    background-color: #1f2937;
-    color: #6b7280;
-    border-color: #374151;
-}
-
-QLineEdit, QPlainTextEdit, QComboBox {
-    background-color: #111827;
-    color: #f9fafb;
-    border: 1px solid #374151;
-    border-radius: 8px;
-    padding: 6px 10px;
-    selection-background-color: #365d8d;
-}
-QLineEdit:focus, QPlainTextEdit:focus, QComboBox:focus {
-    border: 1px solid #3b82f6;
-}
-QLineEdit:disabled, QComboBox:disabled {
-    color: #6b7280;
-    background-color: #1f2937;
-    border-color: #374151;
-}
-
-QComboBox::drop-down {
-    border: none;
-    width: 22px;
-}
-QComboBox QAbstractItemView {
-    background-color: #111827;
-    color: #f9fafb;
-    border: 1px solid #374151;
-    selection-background-color: #365d8d;
-    outline: none;
-}
-
-QMenu {
-    background-color: #1f2937;
-    color: #f9fafb;
-    border: 1px solid #374151;
-    border-radius: 8px;
-    padding: 4px;
-}
-QMenu::item {
-    padding: 6px 22px;
-    border-radius: 6px;
-}
-QMenu::item:selected {
-    background-color: #365d8d;
-    color: #ffffff;
-}
-QMenu::item:disabled {
-    color: #6b7280;
-}
-QMenu::separator {
-    height: 1px;
-    background: #374151;
-    margin: 4px 8px;
-}
-"""
-
 LAND_SECTION_HEADERS = {
     "land": "土地資料",
     "owner": "地主資料",
@@ -134,7 +54,6 @@ OWNER_FORM_ROWS = (
 class DesktopWindowMixin:
     def create_layout(self):
         central = QWidget()
-        self.setStyleSheet(CONTROL_STYLESHEET)
         self.setCentralWidget(central)
 
         root = QVBoxLayout(central)
@@ -404,6 +323,12 @@ class DesktopWindowMixin:
                 background-color: #1b2330;
                 border-color: #3d4759;
             }
+            QWidget#basicDataForm QLineEdit[readOnly="true"] {
+                background-color: #232d3d;
+                border: 1px dashed #6b7a94;
+                color: #b9c4d6;
+                font-style: italic;
+            }
             """
         )
         form_layout = QGridLayout(form_widget)
@@ -462,11 +387,6 @@ class DesktopWindowMixin:
                 widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
                 if key == "total_declared_value":
                     widget.setReadOnly(True)
-                    widget.setStyleSheet(
-                        "background-color: #232d3d; border: 1px dashed #6b7a94; "
-                        "color: #b9c4d6; font-style: italic; border-radius: 10px; "
-                        "padding: 7px 10px; min-height: 34px;"
-                    )
                 self.fields[key] = widget
                 self.field_widgets[key] = widget
                 if key == "declared_value":
@@ -509,8 +429,6 @@ class DesktopWindowMixin:
             )
             return row + 1
 
-        used_keys = set()
-
         def add_field_rows(row, rows):
             for row_fields in rows:
                 for key, column, column_span in row_fields:
@@ -523,26 +441,13 @@ class DesktopWindowMixin:
                         1,
                         column_span,
                     )
-                    used_keys.add(key)
                 row += 1
             return row
 
         row = add_section_header(0, "land")
         row = add_field_rows(row, LAND_FORM_ROWS)
         row = add_section_header(row, "owner", divider=True)
-        row = add_field_rows(row, OWNER_FORM_ROWS)
-
-        for key, _label in self.land_fields:
-            if key in used_keys:
-                continue
-            form_layout.addWidget(
-                build_field_container(key),
-                row,
-                0,
-                1,
-                FORM_COLUMN_COUNT,
-            )
-            row += 1
+        add_field_rows(row, OWNER_FORM_ROWS)
 
         for column in range(FORM_COLUMN_COUNT):
             form_layout.setColumnStretch(column, 1)
