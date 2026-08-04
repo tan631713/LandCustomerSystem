@@ -98,3 +98,13 @@ class SQLiteCollaborationMixin:
             item["follow_up_status"] = item.get("status") or ""
             items.append(item)
         return items
+
+    def list_contact_logs_by_date(self, user, target_date, mine_only=False):
+        del mine_only
+        items = []
+        for row in self.repository.list_contact_logs_by_date(str(target_date)):
+            item = _decrypt_record(row, user)
+            item["note"] = item.pop("log_note", "") or ""
+            item["created_by_name"] = ""
+            items.append(item)
+        return items

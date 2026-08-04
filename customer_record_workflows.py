@@ -716,6 +716,13 @@ class RecordWorkflowMixin:
             data["is_overdue"] = False
         return data
 
+    def plain_daily_contact_log(self, row):
+        data = dict(row)
+        data["note"] = decrypt_value(self.fernet, data.get("note") or "")
+        if "owner_name" in data:
+            data["owner_name"] = decrypt_value(self.fernet, data.get("owner_name") or "")
+        return data
+
     def dashboard_stats(self):
         return build_dashboard_stats(
             self.active_record_repository(),

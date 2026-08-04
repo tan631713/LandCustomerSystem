@@ -16,6 +16,7 @@ from customer_dialogs import (
     BatchEditDialog,
     ChangePasswordDialog,
     ColumnVisibilityDialog,
+    DailyContactLogDialog,
     DataQualityDialog,
     DataQualityRulesDialog,
     DashboardDialog,
@@ -367,11 +368,32 @@ class UiComponentTests(unittest.TestCase):
                 ]
             ),
         ]
+
+        class StubDailyContactLogWindow:
+            def load_daily_contact_logs(self, target_date, mine_only=False):
+                del target_date, mine_only
+                return [
+                    {
+                        "customer_id": 7,
+                        "owner_name": "王小明",
+                        "district": "桃園區",
+                        "section": "一段",
+                        "land_number": "101",
+                        "method": "電話",
+                        "result": "同意",
+                        "note": "約定下週再聯絡",
+                        "created_at": "2026-08-02T10:30:00",
+                    }
+                ]
+
+        dialogs.append(DailyContactLogDialog(StubDailyContactLogWindow()))
         try:
             self.assertEqual(dialogs[0].table.rowCount(), 12)
             self.assertEqual(dialogs[1].table.item(0, 2).text(), "地號")
             self.assertEqual(dialogs[2].values()["status"], "待回覆")
             self.assertEqual(dialogs[3].table.item(0, 2).text(), "王小明")
+            self.assertEqual(dialogs[4].table.item(0, 1).text(), "王小明")
+            self.assertEqual(dialogs[4].table.item(0, 5).text(), "電話／同意")
         finally:
             for dialog in dialogs:
                 dialog.close()

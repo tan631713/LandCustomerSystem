@@ -163,6 +163,10 @@ class CustomerDataSource(Protocol):
 
     def list_follow_ups(self, user: AuthenticatedUser, limit: int = 500) -> list[dict]: ...
 
+    def list_contact_logs_by_date(
+        self, user: AuthenticatedUser, target_date: str, mine_only: bool = False
+    ) -> list[dict]: ...
+
     def list_projects(self, user: AuthenticatedUser) -> list[dict]: ...
 
     def save_project(

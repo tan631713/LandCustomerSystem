@@ -34,13 +34,19 @@ const state = {
   fieldPlanOrderDirty: false,
   mobileUpdateDeferred: false,
   mobileUpdateResume: null,
-  mobileUpdateCompleted: false
+  mobileUpdateCompleted: false,
+  ownerResultsQuery: "",
+  ownerResultsOffset: 0,
+  ownerResultsTotal: 0,
+  landResultsParams: null,
+  landResultsOffset: 0,
+  landResultsTotal: 0
 };
 
 const MAX_ATTACHMENT_SIZE = 50 * 1024 * 1024;
 const PHOTO_COMPRESSION_THRESHOLD = 1.5 * 1024 * 1024;
 const PHOTO_MAX_DIMENSION = 2048;
-const MOBILE_ASSET_VERSION = 25;
+const MOBILE_ASSET_VERSION = 26;
 const MOBILE_UPDATE_RESUME_KEY = "lcs_mobile_update_resume";
 const MOBILE_UPDATE_RESUME_MAX_AGE_MS = 15 * 60 * 1000;
 
@@ -1840,47 +1846,103 @@ function emptyState(message) {
   return element("div", "empty-state", message);
 }
 
+function buildOwnerCard(owner) {
+  const card = element("article", "result-card");
+  const heading = element("h3", "", text(owner.name, "未填姓名"));
+  const meta = element("div", "card-meta");
+  meta.append(
+    element("span", "", `身分證：${maskIdentity(owner.external_id)}`),
+    element("span", "", `地址：${text(owner.address)}`)
+  );
+  const metrics = element("div", "metric-row");
+  metrics.append(
+    metric("土地", formatNumber(owner.land_count)),
+    metric("持分", formatNumber(owner.record_count)),
+    metric("坪數", formatNumber(owner.total_ping)),
+    metric("現值", formatNumber(owner.total_declared_value))
+  );
+  const buttons = element("div", "owner-buttons");
+  (owner.record_ids || []).slice(0, 6).forEach((recordId, index) => {
+    const button = element("button", "record-link", `持分 ${index + 1}`);
+    button.type = "button";
+    button.dataset.recordId = recordId;
+    buttons.append(button);
+  });
+  if ((owner.record_ids || []).length > 6) buttons.append(element("span", "muted", `另有 ${owner.record_ids.length - 6} 筆`));
+  card.append(heading, meta, metrics, buttons);
+  return card;
+}
+
+function buildLandCard(land) {
+  const card = element("article", "result-card");
+  card.append(element("h3", "", `${text(land.district, "未填地區")}・${text(land.section, "未填地段")}・${text(land.land_number, "未填地號")}`));
+  const metrics = element("div", "metric-row");
+  metrics.append(metric("面積㎡", formatNumber(land.area)), metric("公告現值", formatNumber(land.declared_value)), metric("地主", formatNumber((land.owners || []).length)));
+  card.append(metrics);
+  (land.owners || []).forEach(owner => {
+    const row = element("div", "owner-buttons");
+    const button = element("button", "record-link", `${text(owner.name, "未填姓名")}・${text(owner.numerator, "?")}/${text(owner.denominator, "?")}`);
+    button.type = "button";
+    button.dataset.recordId = owner.record_id;
+    row.append(button, element("span", "muted", `${formatNumber(owner.ping || 0)} 坪`));
+    card.append(row);
+  });
+  return card;
+}
+
+function buildLoadMoreButton(remainingCount, onLoadMore) {
+  const wrap = element("div", "load-more-row");
+  const button = element("button", "load-more-button secondary-button", `載入更多（還有 ${formatNumber(remainingCount)} 筆）`);
+  button.type = "button";
+  button.addEventListener("click", async () => {
+    setButtonBusy(button, true, "載入中…");
+    try {
+      await onLoadMore();
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      setButtonBusy(button, false);
+    }
+  });
+  wrap.append(button);
+  return wrap;
+}
+
 async function searchOwners(event) {
   if (event) event.preventDefault();
   const button = $("#owner-search-form button[type='submit']");
   setButtonBusy(button, true, "搜尋中…");
   const container = $("#owner-results");
   setChildren(container, [emptyState("正在查詢地主…")]);
+  state.ownerResultsOffset = 0;
   try {
     const query = encodeURIComponent($("#owner-query").value.trim());
     const result = await request(`/api/v1/owners?q=${query}&limit=100`);
+    state.ownerResultsQuery = query;
+    state.ownerResultsTotal = result.total;
+    state.ownerResultsOffset = (result.items || []).length;
     $("#owner-count").textContent = `找到 ${formatNumber(result.total)} 位地主`;
-    const cards = (result.items || []).map(owner => {
-      const card = element("article", "result-card");
-      const heading = element("h3", "", text(owner.name, "未填姓名"));
-      const meta = element("div", "card-meta");
-      meta.append(
-        element("span", "", `身分證：${maskIdentity(owner.external_id)}`),
-        element("span", "", `地址：${text(owner.address)}`)
-      );
-      const metrics = element("div", "metric-row");
-      metrics.append(
-        metric("土地", formatNumber(owner.land_count)),
-        metric("持分", formatNumber(owner.record_count)),
-        metric("坪數", formatNumber(owner.total_ping)),
-        metric("現值", formatNumber(owner.total_declared_value))
-      );
-      const buttons = element("div", "owner-buttons");
-      (owner.record_ids || []).slice(0, 6).forEach((recordId, index) => {
-        const button = element("button", "record-link", `持分 ${index + 1}`);
-        button.type = "button";
-        button.dataset.recordId = recordId;
-        buttons.append(button);
-      });
-      if ((owner.record_ids || []).length > 6) buttons.append(element("span", "muted", `另有 ${owner.record_ids.length - 6} 筆`));
-      card.append(heading, meta, metrics, buttons);
-      return card;
-    });
+    const cards = (result.items || []).map(buildOwnerCard);
     setChildren(container, cards.length ? cards : [emptyState("找不到符合的地主。")]);
+    if (state.ownerResultsOffset < state.ownerResultsTotal) {
+      container.append(buildLoadMoreButton(state.ownerResultsTotal - state.ownerResultsOffset, loadMoreOwners));
+    }
   } catch (error) {
     setChildren(container, [emptyState(error.message)]);
   } finally {
     setButtonBusy(button, false);
+  }
+}
+
+async function loadMoreOwners() {
+  const container = $("#owner-results");
+  const result = await request(`/api/v1/owners?q=${state.ownerResultsQuery}&limit=100&offset=${state.ownerResultsOffset}`);
+  state.ownerResultsOffset += (result.items || []).length;
+  const existingButton = container.querySelector(".load-more-row");
+  if (existingButton) existingButton.remove();
+  container.append(...(result.items || []).map(buildOwnerCard));
+  if (state.ownerResultsOffset < state.ownerResultsTotal) {
+    container.append(buildLoadMoreButton(state.ownerResultsTotal - state.ownerResultsOffset, loadMoreOwners));
   }
 }
 
@@ -1890,6 +1952,7 @@ async function searchLands(event) {
   setButtonBusy(button, true, "搜尋中…");
   const container = $("#land-results");
   setChildren(container, [emptyState("正在查詢土地…")]);
+  state.landResultsOffset = 0;
   const params = new URLSearchParams({
     q: $("#land-query").value.trim(),
     district: $("#land-district").value.trim(),
@@ -1898,28 +1961,33 @@ async function searchLands(event) {
   });
   try {
     const result = await request(`/api/v1/lands?${params}`);
+    state.landResultsParams = params;
+    state.landResultsTotal = result.total;
+    state.landResultsOffset = (result.items || []).length;
     $("#land-count").textContent = `找到 ${formatNumber(result.total)} 筆土地`;
-    const cards = (result.items || []).map(land => {
-      const card = element("article", "result-card");
-      card.append(element("h3", "", `${text(land.district, "未填地區")}・${text(land.section, "未填地段")}・${text(land.land_number, "未填地號")}`));
-      const metrics = element("div", "metric-row");
-      metrics.append(metric("面積㎡", formatNumber(land.area)), metric("公告現值", formatNumber(land.declared_value)), metric("地主", formatNumber((land.owners || []).length)));
-      card.append(metrics);
-      (land.owners || []).forEach(owner => {
-        const row = element("div", "owner-buttons");
-        const button = element("button", "record-link", `${text(owner.name, "未填姓名")}・${text(owner.numerator, "?")}/${text(owner.denominator, "?")}`);
-        button.type = "button";
-        button.dataset.recordId = owner.record_id;
-        row.append(button, element("span", "muted", `${formatNumber(owner.ping || 0)} 坪`));
-        card.append(row);
-      });
-      return card;
-    });
+    const cards = (result.items || []).map(buildLandCard);
     setChildren(container, cards.length ? cards : [emptyState("找不到符合的土地。")]);
+    if (state.landResultsOffset < state.landResultsTotal) {
+      container.append(buildLoadMoreButton(state.landResultsTotal - state.landResultsOffset, loadMoreLands));
+    }
   } catch (error) {
     setChildren(container, [emptyState(error.message)]);
   } finally {
     setButtonBusy(button, false);
+  }
+}
+
+async function loadMoreLands() {
+  const container = $("#land-results");
+  const params = new URLSearchParams(state.landResultsParams);
+  params.set("offset", String(state.landResultsOffset));
+  const result = await request(`/api/v1/lands?${params}`);
+  state.landResultsOffset += (result.items || []).length;
+  const existingButton = container.querySelector(".load-more-row");
+  if (existingButton) existingButton.remove();
+  container.append(...(result.items || []).map(buildLandCard));
+  if (state.landResultsOffset < state.landResultsTotal) {
+    container.append(buildLoadMoreButton(state.landResultsTotal - state.landResultsOffset, loadMoreLands));
   }
 }
 

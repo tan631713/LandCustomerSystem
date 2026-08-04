@@ -109,7 +109,7 @@ class CustomerApiTests(unittest.TestCase):
         self.assertEqual(health.status_code, 200)
         self.assertEqual(health.json()["backend"], "sqlite")
         self.assertEqual(health.json()["schema_version"], 9)
-        self.assertEqual(health.json()["mobile_asset_version"], 25)
+        self.assertEqual(health.json()["mobile_asset_version"], 26)
 
         bad_login = self.client.post(
             "/api/v1/auth/login",
@@ -174,7 +174,7 @@ class CustomerApiTests(unittest.TestCase):
         self.assertEqual(page.status_code, 200)
         self.assertIn("地主開發助手", page.text)
         self.assertIn('src="./field-visit.js?v=2"', page.text)
-        self.assertIn('src="./app.js?v=25"', page.text)
+        self.assertIn('src="./app.js?v=26"', page.text)
         self.assertIn('id="login-connection-check"', page.text)
         self.assertIn('id="login-connection-retry"', page.text)
         self.assertIn('id="connection-banner-retry"', page.text)
@@ -229,9 +229,9 @@ class CustomerApiTests(unittest.TestCase):
         service_worker = self.client.get("/mobile/service-worker.js")
         self.assertEqual(service_worker.status_code, 200)
         self.assertIn('url.pathname.startsWith("/api/")', service_worker.text)
-        self.assertIn('land-customer-mobile-v25', service_worker.text)
+        self.assertIn('land-customer-mobile-v26', service_worker.text)
         self.assertIn('/mobile/field-visit.js?v=2', service_worker.text)
-        self.assertIn('/mobile/app.js?v=25', service_worker.text)
+        self.assertIn('/mobile/app.js?v=26', service_worker.text)
         self.assertIn('fetch(event.request, { cache: "no-store" })', service_worker.text)
         self.assertIn("no-store", service_worker.headers["cache-control"])
 
@@ -250,11 +250,11 @@ class CustomerApiTests(unittest.TestCase):
         self.assertIn("window.isSecureContext === false", field_visit_script.text)
         self.assertIn("navigator.geolocation.getCurrentPosition(", field_visit_script.text)
 
-        app_script = self.client.get("/mobile/app.js?v=25")
+        app_script = self.client.get("/mobile/app.js?v=26")
         self.assertEqual(app_script.status_code, 200)
         self.assertEqual(app_script.headers["cache-control"], "no-store")
         self.assertIn("function maskIdentity(value)", app_script.text)
-        self.assertIn("const MOBILE_ASSET_VERSION = 25", app_script.text)
+        self.assertIn("const MOBILE_ASSET_VERSION = 26", app_script.text)
         self.assertIn("function checkMobileAssetVersion(", app_script.text)
         self.assertIn("health.mobile_asset_version", app_script.text)
         self.assertIn("async function registerMobileServiceWorker(", app_script.text)
@@ -729,6 +729,65 @@ class CustomerApiTests(unittest.TestCase):
                 headers=admin_headers,
             ).json()["item"]
         )
+
+    def test_contact_logs_by_date_filters_by_date_and_decrypts_owner_name(self):
+        admin_headers = self.login()
+        created = self.client.post(
+            f"/api/v1/records/{self.record_id}/contact-logs",
+            headers=admin_headers,
+            json={
+                "contact_date": "2026-08-02",
+                "method": "面談",
+                "result": "同意繼續合作",
+                "note": "現場拜訪，帶了合約範本",
+            },
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+
+        wrong_day = self.client.get(
+            "/api/v1/contact-logs",
+            params={"date": "2026-08-01"},
+            headers=admin_headers,
+        )
+        self.assertEqual(wrong_day.status_code, 200)
+        self.assertEqual(wrong_day.json()["items"], [])
+
+        matched = self.client.get(
+            "/api/v1/contact-logs",
+            params={"date": "2026-08-02"},
+            headers=admin_headers,
+        )
+        self.assertEqual(matched.status_code, 200)
+        items = matched.json()["items"]
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["owner_name"], "王大明")
+        self.assertEqual(items[0]["district"], "桃園區")
+        self.assertEqual(items[0]["land_number"], "100-1")
+        self.assertEqual(items[0]["note"], "現場拜訪，帶了合約範本")
+        self.assertEqual(items[0]["customer_id"], self.record_id)
+
+        mine_only = self.client.get(
+            "/api/v1/contact-logs",
+            params={"date": "2026-08-02", "mine_only": "true"},
+            headers=admin_headers,
+        )
+        self.assertEqual(len(mine_only.json()["items"]), 1)
+
+        viewer_headers = self.login("viewer", "viewer-password")
+        viewer_view = self.client.get(
+            "/api/v1/contact-logs",
+            params={"date": "2026-08-02"},
+            headers=viewer_headers,
+        )
+        self.assertEqual(viewer_view.status_code, 200)
+        self.assertEqual(len(viewer_view.json()["items"]), 1)
+
+        bad_date = self.client.get(
+            "/api/v1/contact-logs",
+            params={"date": "not-a-date"},
+            headers=admin_headers,
+        )
+        self.assertEqual(bad_date.status_code, 400)
 
     def test_tag_crud_single_and_batch_assignment_enforces_roles(self):
         admin_headers = self.login()

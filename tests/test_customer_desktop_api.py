@@ -112,6 +112,20 @@ class DesktopApiClientTests(unittest.TestCase):
                 return FakeResponse(None)
             if path.path == "/api/v1/follow-ups":
                 return FakeResponse({"items": [{"id": 9, "next_follow_up": "2026-07-20"}]})
+            if path.path == "/api/v1/contact-logs":
+                query = parse_qs(path.query)
+                self.captured_contact_logs_query = query
+                return FakeResponse(
+                    {
+                        "items": [
+                            {
+                                "customer_id": 9,
+                                "owner_name": "王小明",
+                                "note": "現場拜訪",
+                            }
+                        ]
+                    }
+                )
             if path.path == "/api/v1/projects":
                 if request.method == "GET":
                     return FakeResponse(
@@ -198,6 +212,14 @@ class DesktopApiClientTests(unittest.TestCase):
         )
         self.assertTrue(self.client.delete_follow_up(9))
         self.assertEqual(self.client.list_follow_ups()[0]["id"], 9)
+        self.assertEqual(
+            self.client.list_contact_logs_by_date("2026-08-02", mine_only=True)[0][
+                "owner_name"
+            ],
+            "王小明",
+        )
+        self.assertEqual(self.captured_contact_logs_query["date"], ["2026-08-02"])
+        self.assertEqual(self.captured_contact_logs_query["mine_only"], ["true"])
         self.assertEqual(self.client.list_projects()[0]["id"], 8)
         self.assertEqual(self.client.save_project("整合案", "進行中", ""), 8)
         self.assertEqual(
@@ -637,6 +659,10 @@ class FakeRecordClient:
             }
         ]
 
+    def list_contact_logs_by_date(self, target_date, mine_only=False):
+        self.contact_logs_by_date_query = (target_date, mine_only)
+        return [{"customer_id": 2, "owner_name": "陳先生", "note": "現場拜訪"}]
+
     def list_tags(self):
         return [dict(tag) for tag in self.tags]
 
@@ -959,6 +985,13 @@ class DesktopApiRecordRepositoryTests(unittest.TestCase):
             repository.get_follow_up_reminder(2)["status"], "待回覆"
         )
         self.assertEqual(repository.list_follow_up_reminders()[0]["customer_id"], 2)
+        self.assertEqual(
+            repository.list_contact_logs_by_date("2026-08-02", mine_only=True)[0][
+                "owner_name"
+            ],
+            "陳先生",
+        )
+        self.assertEqual(client.contact_logs_by_date_query, ("2026-08-02", True))
         self.assertEqual(repository.delete_follow_up_reminder(2), 1)
         self.assertEqual(client.follow_up_deleted, [2])
 

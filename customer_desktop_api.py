@@ -571,6 +571,17 @@ class DesktopApiClient:
         )
         return list(result.get("items") or [])
 
+    def list_contact_logs_by_date(self, target_date, mine_only=False):
+        result = self._request(
+            "GET",
+            "/api/v1/contact-logs",
+            params={
+                "date": str(target_date),
+                "mine_only": "true" if mine_only else "false",
+            },
+        )
+        return list(result.get("items") or [])
+
     def list_projects(self):
         result = self._request("GET", "/api/v1/projects")
         return list(result.get("items") or [])
@@ -1462,6 +1473,14 @@ class DesktopApiRecordRepository:
             row["status"] = row.get("follow_up_status") or ""
             rows.append(row)
         return rows
+
+    def list_contact_logs_by_date(self, target_date, mine_only=False):
+        return [
+            dict(item)
+            for item in self.client.list_contact_logs_by_date(
+                target_date, mine_only=mine_only
+            )
+        ]
 
     def list_cases(self):
         return [dict(row) for row in self.client.list_projects()]

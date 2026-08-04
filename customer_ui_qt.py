@@ -36,6 +36,7 @@ from customer_dialogs import (
     BatchEditDialog,
     BatchEditPreviewDialog,
     ChangePasswordDialog,
+    DailyContactLogDialog,
     DashboardDialog,
     FontSizeDialog,
     FollowUpListDialog,

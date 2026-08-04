@@ -1,7 +1,7 @@
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 9, 27, 0),
-    prodvers=(1, 9, 27, 0),
+    filevers=(1, 9, 29, 0),
+    prodvers=(1, 9, 29, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -16,13 +16,13 @@ VSVersionInfo(
         [
           StringStruct('CompanyName', '土地資料系統'),
           StringStruct('FileDescription', '土地資料系統'),
-          StringStruct('FileVersion', '1.9.27'),
+          StringStruct('FileVersion', '1.9.29'),
           StringStruct('InternalName', 'LandCustomerSystem'),
           StringStruct('LegalCopyright', 'Copyright 2026'),
           StringStruct('OriginalFilename', 'LandCustomerSystem.exe'),
           StringStruct('ProductName', '土地資料系統'),
-          StringStruct('ProductVersion', '1.9.27'),
-          StringStruct('BuildDate', '2026-07-30')
+          StringStruct('ProductVersion', '1.9.29'),
+          StringStruct('BuildDate', '2026-08-03')
         ]
       )
     ]),

@@ -505,6 +505,9 @@ def _build_report_menu(self):
     follow_up_list_action = QAction("追蹤提醒清單", self)
     follow_up_list_action.triggered.connect(self.show_follow_up_list)
     report_menu.addAction(follow_up_list_action)
+    daily_field_visit_log_action = QAction("每日外勤紀錄", self)
+    daily_field_visit_log_action.triggered.connect(self.show_daily_field_visit_log)
+    report_menu.addAction(daily_field_visit_log_action)
     health_check_action = QAction("系統健康檢查", self)
     health_check_action.triggered.connect(self.show_health_check)
     report_menu.addAction(health_check_action)
@@ -677,6 +680,7 @@ def _configure_api_action_groups(self, actions):
         actions["data_quality_action"],
         actions["dashboard_action"],
         actions["follow_up_list_action"],
+        actions["daily_field_visit_log_action"],
         actions["health_check_action"],
         actions["duplicate_action"],
         actions["map_action"],

@@ -1592,6 +1592,22 @@ class CustomerRepository:
                 (int(customer_id),),
             ).fetchall()
 
+    def list_contact_logs_by_date(self, target_date):
+        with self.database.connect() as conn:
+            return conn.execute(
+                """
+                SELECT cl.id, cl.customer_id, cl.contact_date, cl.method,
+                       cl.result, cl.next_follow_up, cl.note AS log_note,
+                       cl.created_at,
+                       c.district, c.section, c.land_number, c.owner_name
+                FROM contact_logs cl
+                JOIN customers c ON c.id = cl.customer_id
+                WHERE COALESCE(cl.contact_date, substr(cl.created_at, 1, 10)) = ?
+                ORDER BY cl.created_at DESC, cl.id DESC
+                """,
+                (str(target_date),),
+            ).fetchall()
+
     def add_contact_log(
         self,
         customer_id,

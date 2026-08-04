@@ -464,3 +464,17 @@ class ProductivityWorkflowMixin:
             for row in repository.list_follow_up_reminders()
         ]
         self._app_component("FollowUpListDialog")(reminders, self, on_record_activated=self.open_quality_issue_record).exec()
+
+    def load_daily_contact_logs(self, target_date, mine_only=False):
+        repository = self.active_record_repository()
+        return [
+            self.plain_daily_contact_log(row)
+            for row in repository.list_contact_logs_by_date(
+                target_date, mine_only=mine_only
+            )
+        ]
+
+    def show_daily_field_visit_log(self):
+        self._app_component("DailyContactLogDialog")(
+            self, self, on_record_activated=self.open_quality_issue_record
+        ).exec()

@@ -320,6 +320,8 @@ button:disabled { cursor: not-allowed; opacity: .5; transform: none; }
 .owner-buttons button, .record-link { min-height: 36px; padding: 7px 10px; color: var(--brand-dark); border-color: #bad0ca; background: #fff; font-size: 12px; }
 .record-link:hover { color: #fff; border-color: var(--brand); background: var(--brand); }
 .empty-state { grid-column: 1 / -1; padding: 54px 20px; border: 1px dashed #b9c8c4; border-radius: 15px; color: var(--muted); background: rgba(255,255,255,.45); text-align: center; }
+.load-more-row { grid-column: 1 / -1; display: flex; justify-content: center; padding: 6px 0 4px; }
+.load-more-button { min-width: 200px; }
 .section-heading { align-items: flex-end; }
 .result-card.overdue { border-color: #edbbb4; background: var(--danger-soft); }
 .result-card.overdue::before { content: "逾期"; position: absolute; top: 15px; right: 15px; padding: 4px 7px; border-radius: 999px; color: var(--danger); background: #ffdcd7; font-size: 10px; font-weight: 850; }

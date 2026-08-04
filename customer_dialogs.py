@@ -3,10 +3,10 @@
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QDate
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QComboBox, QFileDialog, QFrame,
+    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDateEdit, QFileDialog, QFrame,
     QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
     QMessageBox, QPlainTextEdit, QPushButton, QScrollArea, QTableWidget,
     QTableWidgetItem, QTabWidget, QTextBrowser, QVBoxLayout, QWidget,
@@ -1114,6 +1114,109 @@ class FollowUpListDialog(QDialog):
             return
         if self.on_record_activated is not None:
             self.on_record_activated(reminder.get("customer_id"))
+        self.accept()
+
+
+class DailyContactLogDialog(QDialog):
+    def __init__(self, window, parent=None, on_record_activated=None):
+        super().__init__(parent)
+        self.window = window
+        self.on_record_activated = on_record_activated
+        self.rows = []
+        self.setWindowTitle("每日外勤紀錄")
+        self.setModal(True)
+        self.resize(940, 560)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+
+        controls = QHBoxLayout()
+        controls.addWidget(QLabel("日期"))
+        self.date_edit = QDateEdit(QDate.currentDate().addDays(-1))
+        self.date_edit.setCalendarPopup(True)
+        self.date_edit.setDisplayFormat("yyyy-MM-dd")
+        self.date_edit.dateChanged.connect(self.refresh)
+        controls.addWidget(self.date_edit)
+        self.mine_only_checkbox = QCheckBox("只看我自己")
+        self.mine_only_checkbox.setChecked(True)
+        self.mine_only_checkbox.toggled.connect(self.refresh)
+        controls.addWidget(self.mine_only_checkbox)
+        controls.addStretch(1)
+        refresh_button = QPushButton("重新整理")
+        refresh_button.clicked.connect(self.refresh)
+        controls.addWidget(refresh_button)
+        layout.addLayout(controls)
+
+        self.summary_label = QLabel("")
+        self.summary_label.setWordWrap(True)
+        layout.addWidget(self.summary_label)
+
+        self.table = QTableWidget(0, 7)
+        self.table.setHorizontalHeaderLabels(
+            ["時間", "姓名", "地區", "地段", "地號", "方式／結果", "內容"]
+        )
+        self.table.verticalHeader().setVisible(False)
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SingleSelection)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.itemDoubleClicked.connect(self.activate_current_record)
+        for column in range(6):
+            self.table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.Stretch)
+        layout.addWidget(self.table, 1)
+
+        close_button = QPushButton("關閉")
+        close_button.clicked.connect(self.accept)
+        button_row = QHBoxLayout()
+        button_row.addStretch(1)
+        button_row.addWidget(close_button)
+        layout.addLayout(button_row)
+
+        self.refresh()
+
+    def refresh(self, *_args):
+        target_date = self.date_edit.date().toString("yyyy-MM-dd")
+        mine_only = self.mine_only_checkbox.isChecked()
+        try:
+            self.rows = self.window.load_daily_contact_logs(target_date, mine_only=mine_only)
+        except Exception as exc:
+            QMessageBox.warning(self, "讀取失敗", str(exc))
+            self.rows = []
+        self.summary_label.setText(
+            f"{target_date} 共有 {len(self.rows)} 筆聯絡紀錄；雙擊資料列可載入該筆資料。"
+        )
+        self.table.setRowCount(len(self.rows))
+        for row_number, log in enumerate(self.rows):
+            time_label = str(log.get("contacted_at") or log.get("created_at") or "")[:16]
+            method_result = "／".join(
+                part for part in [log.get("method") or "", log.get("result") or ""] if part
+            )
+            values = [
+                time_label,
+                log.get("owner_name", ""),
+                log.get("district", ""),
+                log.get("section", ""),
+                log.get("land_number", ""),
+                method_result,
+                log.get("note", ""),
+            ]
+            for column_number, value in enumerate(values):
+                self.table.setItem(row_number, column_number, QTableWidgetItem(str(value or "")))
+        self.table.resizeRowsToContents()
+
+    def current_log(self):
+        row_number = self.table.currentRow()
+        if row_number < 0 or row_number >= len(self.rows):
+            return None
+        return self.rows[row_number]
+
+    def activate_current_record(self, *_args):
+        log = self.current_log()
+        if log is None:
+            return
+        if self.on_record_activated is not None:
+            self.on_record_activated(log.get("customer_id"))
         self.accept()
 
 

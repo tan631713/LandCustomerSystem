@@ -241,3 +241,32 @@ class PostgreSQLCollaborationMixin:
             item["note"] = reminder.get("note") or ""
             items.append(item)
         return items
+
+    def list_contact_logs_by_date(self, user, target_date, mine_only=False):
+        sql = """
+            SELECT cl.id, cl.ownership_id AS customer_id, cl.contact_date,
+                   cl.contacted_at, cl.method, cl.result, cl.next_follow_up,
+                   cl.note AS log_note, cl.created_by, cl.created_at,
+                   COALESCE(creator.display_name, creator.username, '') AS created_by_name,
+                   land.district, land.section, land.land_number,
+                   COALESCE(ownership.owner_name_override, owner.owner_name) AS owner_name
+            FROM contact_logs cl
+            JOIN ownerships ownership ON ownership.id = cl.ownership_id
+            JOIN lands land ON land.id = ownership.land_id
+            JOIN owners owner ON owner.id = ownership.owner_id
+            LEFT JOIN users creator ON creator.id = cl.created_by
+            WHERE COALESCE(cl.contact_date, cl.contacted_at::date, cl.created_at::date) = %s
+        """
+        params = [str(target_date)]
+        if mine_only:
+            sql += " AND cl.created_by = %s"
+            params.append(int(user.id))
+        sql += " ORDER BY cl.contacted_at DESC NULLS LAST, cl.created_at DESC, cl.id DESC"
+        with self._connect() as conn:
+            rows = conn.execute(sql, tuple(params)).fetchall()
+        items = []
+        for row in rows:
+            item = _decrypt_record(row, user)
+            item["note"] = item.pop("log_note", "") or ""
+            items.append(item)
+        return items
