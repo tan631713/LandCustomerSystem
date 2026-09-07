@@ -51,11 +51,17 @@ def normalize_contact_values(values, *, allow_identity_preserve=False):
         "registered_address": _clean(source.get("registered_address"), 500),
         "contact_address": _clean(source.get("contact_address"), 500),
         "work_address": _clean(source.get("work_address"), 500),
+        "birth_year": _clean(source.get("birth_year"), 4),
         "identity_note": _clean(source.get("identity_note"), 300),
         "notes": _clean(source.get("notes"), 2000),
     }
     if not normalized["name"]:
         raise OwnerContactError("姓名不可空白。")
+    if normalized["birth_year"] and (
+        not normalized["birth_year"].isdigit()
+        or len(normalized["birth_year"]) != 4
+    ):
+        raise OwnerContactError("出生西元年必須是 4 位數字。")
     return normalized
 
 
@@ -214,6 +220,7 @@ class OwnerContactService:
             "registered_address": before.get("registered_address") or "",
             "contact_address": before.get("contact_address") or "",
             "work_address": before.get("work_address") or "",
+            "birth_year": before.get("birth_year") or "",
             "identity_note": before.get("identity_note") or "",
             "notes": before.get("contact_notes") or "",
         }

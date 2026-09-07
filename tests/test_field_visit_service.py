@@ -88,6 +88,14 @@ class _Source:
         self.calls.append(("today", user.id, visit_date))
         return {"id": 1}
 
+    def list_unresolved_field_visit_items(self, user, mine_only=False):
+        self.calls.append(("unresolved", user.id, mine_only))
+        return [{"id": 1, "status": "planned"}]
+
+    def list_visit_calendar_items(self, user, start_date, end_date, mine_only=False):
+        self.calls.append(("calendar", user.id, start_date, end_date, mine_only))
+        return [{"id": 1, "calendar_status": "scheduled"}]
+
     def get_field_visit_route(self, user, route_id):
         self.calls.append(("get", user.id, route_id))
         return {"id": route_id}
@@ -247,6 +255,21 @@ class FieldVisitServiceTests(unittest.TestCase):
         viewer = _user("viewer")
 
         self.assertEqual(service.get_today(viewer, date(2026, 7, 24)), {"id": 1})
+        self.assertEqual(
+            service.list_unresolved(viewer, mine_only=True),
+            [{"id": 1, "status": "planned"}],
+        )
+        self.assertEqual(source.calls[-1], ("unresolved", viewer.id, True))
+        self.assertEqual(
+            service.list_calendar_items(
+                viewer, start_date=date(2026, 8, 1), end_date=date(2026, 8, 31), mine_only=True
+            ),
+            [{"id": 1, "calendar_status": "scheduled"}],
+        )
+        self.assertEqual(
+            source.calls[-1],
+            ("calendar", viewer.id, date(2026, 8, 1), date(2026, 8, 31), True),
+        )
         with self.assertRaises(FieldVisitPermissionDenied):
             service.create_route(viewer, visit_date=date(2026, 7, 24))
         with self.assertRaises(FieldVisitPermissionDenied):

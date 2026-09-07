@@ -38,7 +38,12 @@ class DesktopStateMixin:
 
 
     def show_health_check(self):
-        self._app_component("HealthCheckDialog")(self.build_health_checks(), self).exec()
+        self._show_non_modal_report_dialog(
+            "_health_check_dialog",
+            self._app_component("HealthCheckDialog"),
+            self.build_health_checks(),
+            self,
+        )
 
     def build_health_checks(self):
         if self.api_mode:
@@ -108,6 +113,8 @@ class DesktopStateMixin:
         self.selection_save_timer.stop()
         if getattr(self, "splitter_save_timer", None) is not None:
             self.splitter_save_timer.stop()
+        if getattr(self, "gc_collect_timer", None) is not None:
+            self.gc_collect_timer.stop()
         if hasattr(self, "save_main_splitter_sizes"):
             self.save_main_splitter_sizes()
         self.persist_selection_state()

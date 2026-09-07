@@ -23,7 +23,18 @@ from customer_security import ENCRYPTED_FIELDS, decrypt_value
 DEFAULT_API_URL = "http://127.0.0.1:8732"
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 MAX_CLIENT_ATTACHMENT_BYTES = 50 * 1024 * 1024
-RECORD_FIELD_KEYS = frozenset(key for key, _label in LAND_FIELDS)
+# birth_year stays outside LAND_FIELDS on purpose (see
+# customer_repository.customer_data_columns) but still needs to round-trip
+# through the API-mode save path.
+RECORD_FIELD_KEYS = frozenset(key for key, _label in LAND_FIELDS) | {"birth_year"}
+# Fields that are new enough that a not-yet-upgraded home server's
+# RecordWrite schema (extra="forbid") would reject the whole save just for
+# the key being present -- even with a blank value. Only send these when
+# they're actually filled in, so saving keeps working against an older
+# server for every record that isn't using the new field yet; a record
+# that *does* use it still gets the real, informative "伺服器不支援" error
+# instead of silently losing the value.
+OPTIONAL_NEW_RECORD_FIELDS = frozenset({"birth_year"})
 
 
 class DesktopApiError(RuntimeError):
@@ -344,6 +355,26 @@ class DesktopApiClient:
             params={"visit_date": str(visit_date)},
         )
         return dict(result["item"]) if result and result.get("item") else None
+
+    def list_unresolved_field_visit_items(self, mine_only=False):
+        result = self._request(
+            "GET",
+            "/api/v1/field-visits/unresolved/items",
+            params={"mine_only": "true" if mine_only else "false"},
+        )
+        return list(result.get("items") or [])
+
+    def list_visit_calendar_items(self, start_date, end_date, mine_only=False):
+        result = self._request(
+            "GET",
+            "/api/v1/field-visits/calendar/items",
+            params={
+                "start_date": str(start_date),
+                "end_date": str(end_date),
+                "mine_only": "true" if mine_only else "false",
+            },
+        )
+        return list(result.get("items") or [])
 
     def create_field_visit(self, visit_date, title="今日拜訪行程"):
         result = self._request(
@@ -920,6 +951,27 @@ class DesktopApiClient:
         )
         return int(result["id"])
 
+    def list_previously_exported_record_ids(self, record_ids):
+        ids = [int(record_id) for record_id in record_ids]
+        if not ids:
+            return set()
+        result = self._request(
+            "GET",
+            "/api/v1/excel-export-status",
+            params={"ids": ",".join(str(record_id) for record_id in ids)},
+        )
+        return {int(value) for value in (result.get("exported_ids") or [])}
+
+    def mark_records_exported_to_excel(self, record_ids):
+        ids = [int(record_id) for record_id in record_ids]
+        if not ids:
+            return
+        self._request(
+            "POST",
+            "/api/v1/excel-export-status",
+            payload={"record_ids": ids},
+        )
+
     def ignored_duplicate_pairs(self):
         result = self._request("GET", "/api/v1/duplicate-reviews")
         return {
@@ -1185,7 +1237,21 @@ class DesktopApiRecordRepository:
         for row in self._all_rows():
             if int(row["id"]) == record_id:
                 return row
-        return None
+        # The cached row list (_all_rows()) only reflects what this client
+        # fetched, refreshed on this client's own writes (_invalidate()) --
+        # it does not know about a record another user's device created or
+        # touched in the meantime. That is a completely normal case for
+        # 每日外勤紀錄／未來排程, which deliberately show everyone's activity,
+        # not just this client's own -- a real user report ("雙擊資料列可直接
+        # 跳轉到該筆地主資料，這項無法正常使用") traced back to exactly this:
+        # double-clicking a row for a record outside the stale local cache
+        # silently returned None here, and load_record() silently no-ops
+        # on a None row, so nothing visibly happened at all. Fall back to a
+        # direct single-record fetch instead of giving up.
+        try:
+            return dict(self.client.get_record(record_id))
+        except DesktopApiError:
+            return None
 
     def fetch_customers_by_ids(self, record_ids):
         wanted = {int(record_id) for record_id in record_ids}
@@ -1195,6 +1261,8 @@ class DesktopApiRecordRepository:
         plain = {}
         for key, value in dict(values).items():
             if key not in RECORD_FIELD_KEYS:
+                continue
+            if key in OPTIONAL_NEW_RECORD_FIELDS and not value:
                 continue
             plain[key] = (
                 decrypt_value(self.fernet, value)
@@ -1482,6 +1550,22 @@ class DesktopApiRecordRepository:
             )
         ]
 
+    def list_unresolved_field_visit_items(self, mine_only=False):
+        return [
+            dict(item)
+            for item in self.client.list_unresolved_field_visit_items(
+                mine_only=mine_only
+            )
+        ]
+
+    def list_visit_calendar_items(self, start_date, end_date, mine_only=False):
+        return [
+            dict(item)
+            for item in self.client.list_visit_calendar_items(
+                start_date, end_date, mine_only=mine_only
+            )
+        ]
+
     def list_cases(self):
         return [dict(row) for row in self.client.list_projects()]
 
@@ -1736,6 +1820,12 @@ class DesktopApiRecordRepository:
                 customer_id, latitude, longitude, source
             )
         )
+
+    def list_previously_exported_customer_ids(self, customer_ids):
+        return self.client.list_previously_exported_record_ids(customer_ids)
+
+    def mark_customers_exported_to_excel(self, customer_ids):
+        self.client.mark_records_exported_to_excel(customer_ids)
 
     def ignored_duplicate_pairs(self):
         return set(self.client.ignored_duplicate_pairs())

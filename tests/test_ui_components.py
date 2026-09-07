@@ -186,6 +186,7 @@ class UiComponentTests(unittest.TestCase):
                 {
                     "district": "中正區",
                     "section": "一段",
+                    "subsection": "",
                     "land_number": "100",
                     "area": "120",
                     "declared_value": "20,000",
@@ -259,6 +260,7 @@ class UiComponentTests(unittest.TestCase):
                 {
                     "district": "中壢區",
                     "section": "中路、中路段",
+                    "subsection": "",
                     "land_number": "382-2",
                 },
             )
@@ -362,6 +364,7 @@ class UiComponentTests(unittest.TestCase):
                         "owner_name": "王小明",
                         "district": "桃園區",
                         "section": "一段",
+                        "subsection": "",
                         "land_number": "101",
                         "note": "再聯絡",
                     }
@@ -378,6 +381,7 @@ class UiComponentTests(unittest.TestCase):
                         "owner_name": "王小明",
                         "district": "桃園區",
                         "section": "一段",
+                        "subsection": "",
                         "land_number": "101",
                         "method": "電話",
                         "result": "同意",

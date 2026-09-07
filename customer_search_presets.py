@@ -90,44 +90,50 @@ class SearchPresetMixin:
 
     def open_saved_searches(self):
         dialog = SavedSearchDialog(self.saved_searches, self)
-        if dialog.exec() == QDialog.Accepted and dialog.selected_criteria is not None:
-            self.saved_searches = dialog.saved_searches
-            self.persist_saved_searches()
-            self.apply_search_state(dialog.selected_criteria)
-            return
-        if dialog.saved_searches != self.saved_searches:
-            self.saved_searches = dialog.saved_searches
-            self.persist_saved_searches()
+
+        def on_finished():
+            if dialog.result() == QDialog.Accepted and dialog.selected_criteria is not None:
+                self.saved_searches = dialog.saved_searches
+                self.persist_saved_searches()
+                self.apply_search_state(dialog.selected_criteria)
+                return
+            if dialog.saved_searches != self.saved_searches:
+                self.saved_searches = dialog.saved_searches
+                self.persist_saved_searches()
+
+        self._show_non_modal_dialog(dialog, on_finished=on_finished)
 
     def open_advanced_search(self):
         dialog = AdvancedSearchDialog(self.advanced_search_criteria, self)
-        if dialog.exec() != QDialog.Accepted:
-            return
-        self.advanced_search_criteria = dialog.criteria()
-        if self.search_input is not None:
-            self.search_input.clear()
-        if self.filter_field_combo is not None:
-            all_fields_index = self.filter_field_combo.findData("all")
-            self.filter_field_combo.blockSignals(True)
-            try:
-                self.filter_field_combo.setCurrentIndex(
-                    all_fields_index if all_fields_index >= 0 else 0
-                )
-            finally:
-                self.filter_field_combo.blockSignals(False)
-        SET_SETTING(
-            ADVANCED_SEARCH_SETTING_KEY,
-            ENCODE_PREFERENCES(self.advanced_search_criteria),
-        )
-        self.refresh_records_for_search()
-        condition_count = self.get_active_advanced_search_count()
-        if condition_count:
-            self.statusBar().showMessage(
-                f"已套用 {condition_count} 個進階條件（同欄任一符合、不同欄位全部符合）。",
-                4000,
+
+        def on_accepted():
+            self.advanced_search_criteria = dialog.criteria()
+            if self.search_input is not None:
+                self.search_input.clear()
+            if self.filter_field_combo is not None:
+                all_fields_index = self.filter_field_combo.findData("all")
+                self.filter_field_combo.blockSignals(True)
+                try:
+                    self.filter_field_combo.setCurrentIndex(
+                        all_fields_index if all_fields_index >= 0 else 0
+                    )
+                finally:
+                    self.filter_field_combo.blockSignals(False)
+            SET_SETTING(
+                ADVANCED_SEARCH_SETTING_KEY,
+                ENCODE_PREFERENCES(self.advanced_search_criteria),
             )
-        else:
-            self.statusBar().showMessage("已清除進階搜尋條件。", 3000)
+            self.refresh_records_for_search()
+            condition_count = self.get_active_advanced_search_count()
+            if condition_count:
+                self.statusBar().showMessage(
+                    f"已套用 {condition_count} 個進階條件（同欄任一符合、不同欄位全部符合）。",
+                    4000,
+                )
+            else:
+                self.statusBar().showMessage("已清除進階搜尋條件。", 3000)
+
+        self._show_non_modal_dialog(dialog, on_accepted=on_accepted)
 
     def clear_search(self):
         self.search_input.clear()

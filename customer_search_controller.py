@@ -6,12 +6,13 @@ from customer_search import (
     CustomerSearchWorker,
 )
 from customer_land_tree import group_land_records
-from PySide6.QtCore import QThread
+from PySide6.QtCore import Qt, QThread
 from PySide6.QtWidgets import QMessageBox
 
 TABLE_COLUMNS = ()
 TABLE_BATCH_SIZE = 200
 ASYNC_SEARCH_THRESHOLD = 500
+SEARCH_CANCEL_WAIT_MS = 2000
 ROW_COLOR_CHECKED = None
 ROW_COLOR_WATCHLIST = None
 ROW_COLOR_OVERDUE = None
@@ -40,6 +41,27 @@ class SearchControllerMixin:
             record_to_select,
             auto_expand_search_matches=self.land_search_is_active(),
         )
+
+    def cancel_pending_record_searches(self):
+        """Fully stop any in-flight background searches before superseding them.
+
+        Requesting interruption alone is not enough: the worker's database
+        fetch is not interruptible mid-query, so without an explicit
+        quit()/wait() here a rapid second search could start while the
+        previous search's QThread genuinely still runs, leaving two
+        background search threads alive at the same time. That overlap
+        (two threads each opening their own SQLite connection and
+        registering SQL functions concurrently) produced an intermittent
+        access-violation crash. Mirror the same quit()+wait() pattern
+        already used by closeEvent() so at most one record-search thread
+        is ever running.
+        """
+        pending = list(self.record_searches.values())
+        for thread, _worker in pending:
+            thread.requestInterruption()
+        for thread, _worker in pending:
+            thread.quit()
+            thread.wait(SEARCH_CANCEL_WAIT_MS)
 
     def active_record_repository(self):
         data_access = getattr(self, "data_access", None)
@@ -95,8 +117,7 @@ class SearchControllerMixin:
         record_repository = self.active_record_repository()
         self.record_search_request_id += 1
         request_id = self.record_search_request_id
-        for thread, _worker in list(self.record_searches.values()):
-            thread.requestInterruption()
+        self.cancel_pending_record_searches()
         self.refresh_watchlist_cache()
         keyword = self.search_input.text().strip().casefold()
         filter_field = self.get_filter_field()
@@ -206,24 +227,132 @@ class SearchControllerMixin:
             row_processor,
         )
         self.record_searches[request_id] = (thread, worker)
+        self._record_search_context[request_id] = (
+            target_id,
+            tree_state,
+            search_auto_expand,
+        )
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
-        worker.finished.connect(
-            lambda completed_id, rows: self.handle_record_search_ready(
+        # finished/failed/cancelled used to also be wired directly to
+        # thread.quit()/worker.deleteLater() on the same signal, which let
+        # the worker schedule its own teardown (from its own thread) in the
+        # very same emit() call that was still delivering the search
+        # results to the main thread. Route everything through one
+        # main-thread handler instead, so results are fully handled first
+        # and teardown (quit + wait + deleteLater) always happens afterward,
+        # synchronously, from the main thread.
+        #
+        # Connecting to bound methods of `self` (not bare lambdas) with an
+        # explicit Qt.QueuedConnection is deliberate, not stylistic: a real
+        # production crash (Windows Application Error, access violation,
+        # confirmed via faulthandler -- see native-crash-trace.log) showed
+        # this exact signal chain -- worker.finished.emit() in
+        # CustomerSearchWorker.run(), which executes on `thread`, this
+        # search's background QThread -- running all the way down into
+        # apply_record_rows()/restore_land_tree_view_state() and touching
+        # RecordTableModel.parent() while still on that background thread.
+        # QAbstractItemModel/QTreeView are not thread-safe; touching them
+        # off the GUI thread is undefined behaviour in Qt itself, which
+        # matches everything observed across many failed fix attempts
+        # aimed at the model's internal-pointer handling instead: crash
+        # locations/modules that varied release to release (python314.dll
+        # at different offsets, then Qt6Core.dll), and zero effect from any
+        # amount of Python-level exception handling.
+        #
+        # The likely mechanism: connecting a Signal directly to a bare
+        # lambda (as this code used to) gives Qt.AutoConnection no bound
+        # QObject to read a thread affinity from, so there is no reliable
+        # guarantee it resolves to a queued, marshaled-to-the-main-thread
+        # call rather than a same-thread direct call. A bound method of
+        # `self` (this window, a QObject that lives on the main thread for
+        # its entire life) gives AutoConnection an unambiguous receiver
+        # thread to compare against the emitting worker thread -- this is
+        # the standard, Qt-documented mechanism for cross-thread
+        # signal/slot delivery. Qt.QueuedConnection is passed explicitly
+        # anyway so this does not silently regress back to a direct call
+        # if `self`'s thread affinity ever changes for an unrelated reason.
+        worker.finished.connect(self._handle_record_search_finished, Qt.QueuedConnection)
+        worker.failed.connect(self._handle_record_search_failed, Qt.QueuedConnection)
+        worker.cancelled.connect(self._handle_record_search_cancelled, Qt.QueuedConnection)
+        self.statusBar().showMessage("正在背景搜尋資料…")
+        thread.start()
+
+    def _handle_record_search_finished(self, completed_id, rows):
+        search = self.record_searches.get(completed_id)
+        if search is None:
+            return
+        thread, worker = search
+        target_id, tree_state, search_auto_expand = self._record_search_context.pop(
+            completed_id, (None, None, None)
+        )
+        self._finish_record_search(
+            completed_id,
+            thread,
+            worker,
+            lambda: self.handle_record_search_ready(
                 completed_id,
                 rows,
                 target_id,
                 tree_state,
                 search_auto_expand,
-            )
+            ),
         )
-        worker.failed.connect(self.handle_record_search_failure)
-        for signal in (worker.finished, worker.failed, worker.cancelled):
-            signal.connect(thread.quit)
-            signal.connect(worker.deleteLater)
-        thread.finished.connect(lambda: self.finish_record_search(request_id))
-        self.statusBar().showMessage("正在背景搜尋資料…")
-        thread.start()
+
+    def _handle_record_search_failed(self, completed_id, message):
+        search = self.record_searches.get(completed_id)
+        if search is None:
+            return
+        thread, worker = search
+        self._record_search_context.pop(completed_id, None)
+        self._finish_record_search(
+            completed_id,
+            thread,
+            worker,
+            lambda: self.handle_record_search_failure(completed_id, message),
+        )
+
+    def _handle_record_search_cancelled(self, completed_id):
+        search = self.record_searches.get(completed_id)
+        if search is None:
+            return
+        thread, worker = search
+        self._record_search_context.pop(completed_id, None)
+        self._finish_record_search(completed_id, thread, worker, None)
+
+    def _finish_record_search(self, request_id, thread, worker, callback):
+        if callback is not None:
+            callback()
+        self.record_searches.pop(request_id, None)
+        # v1.9.36 changed this to an async teardown (thread.quit(), then
+        # deleteLater() deferred via thread.finished) specifically to avoid
+        # a blocking thread.wait() here freezing the GUI. That introduced a
+        # real, if subtle, use-after-thread-death race: `worker`'s own
+        # thread affinity is still the background `thread` at the moment
+        # `thread.finished` fires (worker.moveToThread(thread) was never
+        # undone), so worker.deleteLater()'s deferred-delete event was
+        # being posted to a queue whose event loop could already be gone.
+        # A production crash (Qt6Core.dll, access violation, confirmed via
+        # faulthandler -- see native-crash-trace.log) followed almost
+        # immediately after that version shipped, with no Python frames on
+        # the stack at all -- consistent with a fault deep inside Qt's own
+        # cross-thread object/event-queue bookkeeping rather than anything
+        # our own code executes. Reverted to the blocking wait(): it is
+        # slower (blocks the GUI for up to SEARCH_CANCEL_WAIT_MS in the
+        # worst case) but unambiguously safe, since worker/thread are only
+        # deleted once the background thread has verifiably, fully
+        # stopped. The perceived "2-3 second wait after adding an owner"
+        # this was trying to fix was never actually confirmed to BE this
+        # wait() -- it may simply be the real cost of grouping/processing
+        # a large dataset over the network, which no amount of teardown
+        # optimization here would change. Do not re-attempt an async
+        # teardown without a way to verify it against a real Windows
+        # session; this class of QThread lifecycle bug does not reproduce
+        # in the local (offscreen, small-dataset) test suite.
+        thread.quit()
+        thread.wait(SEARCH_CANCEL_WAIT_MS)
+        worker.deleteLater()
+        thread.deleteLater()
 
     def handle_record_search_ready(
         self,
@@ -251,12 +380,6 @@ class SearchControllerMixin:
         if request_id != self.record_search_request_id:
             return
         QMessageBox.critical(self, "搜尋失敗", message)
-
-    def finish_record_search(self, request_id):
-        search = self.record_searches.pop(request_id, None)
-        if search is not None:
-            thread, _worker = search
-            thread.deleteLater()
 
     def apply_record_rows(
         self,

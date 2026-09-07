@@ -351,7 +351,7 @@ class PostgreSQLDesktopFeatureMixin:
                        location.geocode_status, location.geocode_source,
                        location.geocoded_at, location.geocode_error,
                        location.updated_at,
-                       land.district, land.section, land.land_number,
+                       land.district, land.section, land.subsection, land.land_number,
                        COALESCE(ownership.owner_name_override, owner.owner_name) AS owner_name,
                        COALESCE(ownership.address_override, owner.address) AS address
                 FROM ownership_locations location
@@ -434,6 +434,61 @@ class PostgreSQLDesktopFeatureMixin:
                 ),
             )
         return record_id
+
+    def list_previously_exported_record_ids(self, user, record_ids):
+        del user
+        record_ids = [int(record_id) for record_id in record_ids]
+        if not record_ids:
+            return set()
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT ownership_id FROM ownership_excel_exports
+                WHERE ownership_id = ANY(%s)
+                """,
+                (record_ids,),
+            ).fetchall()
+        return {int(row["ownership_id"]) for row in rows}
+
+    def _mark_records_exported_to_excel_with_conn(self, conn, record_ids):
+        # Root cause of a real "duplicate export never detected" bug
+        # report: psycopg 3's Connection object has no executemany() at
+        # all (only execute() is exposed as a convenience method on
+        # Connection; executemany() only exists on a real Cursor) --
+        # calling conn.executemany(...) directly raised AttributeError on
+        # every call, on the real PostgreSQL home server, which the
+        # client-side desktop code correctly caught and treated as "no
+        # duplicates" (see the try/except in
+        # ExportControllerMixin.handle_excel_export_ready). The write
+        # never actually reached the database. _execute_many() (defined
+        # above on this same mixin, and already used the same way by
+        # _add_record_change_logs_with_conn) exists specifically to avoid
+        # this -- it should have been used here from the start. Split out
+        # from mark_records_exported_to_excel() (like
+        # _add_record_change_logs_with_conn() is split from
+        # add_record_change_logs()) so a test can drive this with a fake
+        # connection that has no executemany, exactly like real psycopg
+        # 3, without needing a live PostgreSQL server.
+        self._execute_many(
+            conn,
+            """
+            INSERT INTO ownership_excel_exports (
+                ownership_id, export_count, first_exported_at, last_exported_at
+            ) VALUES (%s, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT (ownership_id) DO UPDATE SET
+                export_count = ownership_excel_exports.export_count + 1,
+                last_exported_at = CURRENT_TIMESTAMP
+            """,
+            [(record_id,) for record_id in record_ids],
+        )
+
+    def mark_records_exported_to_excel(self, user, record_ids):
+        del user
+        record_ids = [int(record_id) for record_id in record_ids]
+        if not record_ids:
+            return
+        with self._connect() as conn:
+            self._mark_records_exported_to_excel_with_conn(conn, record_ids)
 
     def ignored_duplicate_pairs(self, user):
         del user

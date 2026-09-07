@@ -34,21 +34,28 @@ LAND_SECTION_HEADERS = {
 FORM_COLUMN_COUNT = 6
 LAND_FORM_ROWS = (
     (("district", 0, 3), ("section", 3, 3)),
+    (("subsection", 0, 3), ("land_number", 3, 3)),
     (
         ("registration_order", 0, 2),
         ("numerator", 2, 2),
         ("denominator", 4, 2),
     ),
-    (("land_number", 0, 6),),
     (("area", 0, 2), ("declared_value", 2, 2), ("ping", 4, 2)),
     (("total_declared_value", 0, 6),),
 )
 OWNER_FORM_ROWS = (
     (("owner_name", 0, 3), ("external_id", 3, 3)),
+    (("birth_year", 0, 3), ("age", 3, 3)),
     (("address", 0, 6),),
     (("registration_reason", 0, 3), ("visit_log", 3, 3)),
     (("note", 0, 6),),
 )
+# birth_year/age deliberately live outside LAND_FIELDS (see
+# customer_repository.customer_data_columns): they only need to show up in
+# this one form, not in Excel export/import, report templates, the table
+# column picker, or migration tooling.  This label map exists purely so
+# build_field_container() can find a label for them.
+EXTRA_OWNER_FORM_FIELD_LABELS = {"birth_year": "出生西元年", "age": "年齡"}
 
 
 class DesktopWindowMixin:
@@ -339,6 +346,7 @@ class DesktopWindowMixin:
         self.basic_data_form_layout = form_layout
         self.form_field_containers = {}
         field_labels = dict(self.land_fields)
+        field_labels.update(EXTRA_OWNER_FORM_FIELD_LABELS)
 
         def build_field_container(key):
             label = field_labels.get(key, key)
@@ -363,7 +371,7 @@ class DesktopWindowMixin:
             label_row.addWidget(label_widget)
             label_row.addStretch(1)
 
-            if key == "total_declared_value":
+            if key in ("total_declared_value", "age"):
                 auto_badge = QLabel("自動計算")
                 auto_badge.setObjectName("autoCalculationBadge")
                 auto_badge.setStyleSheet(
@@ -371,7 +379,8 @@ class DesktopWindowMixin:
                     "border-radius: 9px; padding: 2px 9px; font-size: 11px;"
                 )
                 label_row.addWidget(auto_badge)
-                self.auto_calculation_badge = auto_badge
+                if key == "total_declared_value":
+                    self.auto_calculation_badge = auto_badge
             cell_layout.addLayout(label_row)
 
             if key == "note":
@@ -381,12 +390,25 @@ class DesktopWindowMixin:
                 widget.setFixedHeight(92)
                 widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
                 self.fields[key] = widget
+            elif key == "age":
+                # Purely a live display of birth_year -> age: never part of
+                # self.fields, so it never gets read by get_form_data() or
+                # written to the database. See update_age_field().
+                widget = QLineEdit()
+                widget.setMinimumWidth(0)
+                widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                widget.setReadOnly(True)
+                widget.setPlaceholderText("由出生西元年計算")
+                self.age_display_widget = widget
             else:
                 widget = QLineEdit()
                 widget.setMinimumWidth(0)
                 widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
                 if key == "total_declared_value":
                     widget.setReadOnly(True)
+                if key == "birth_year":
+                    widget.setPlaceholderText("例如 1965")
+                    widget.setMaxLength(4)
                 self.fields[key] = widget
                 self.field_widgets[key] = widget
                 if key == "declared_value":
@@ -394,6 +416,8 @@ class DesktopWindowMixin:
                 if key == "external_id":
                     widget.textEdited.connect(self.on_external_id_edited)
                     widget.installEventFilter(self)
+                if key == "birth_year":
+                    widget.textChanged.connect(self.update_age_field)
             cell_layout.addWidget(widget)
             self.form_field_containers[key] = container
             return container
@@ -492,7 +516,9 @@ class DesktopWindowMixin:
         self._app_component("QMessageBox").information(self, "關於系統", full_version_text())
 
     def show_help(self):
-        self._app_component("HelpDialog")(self).exec()
+        self._show_non_modal_report_dialog(
+            "_help_dialog", self._app_component("HelpDialog"), self
+        )
 
     def show_data_menu(self):
         if self.data_menu is None or self.data_button is None:

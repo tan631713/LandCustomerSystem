@@ -105,7 +105,7 @@ class BackupStatusDialog(QDialog):
     def __init__(self, status, backup_directory, parent=None):
         super().__init__(parent)
         self.setWindowTitle("備份狀態")
-        self.setModal(True)
+        # Deliberately non-modal -- see show_backup_status() below.
         self.setMinimumWidth(520)
 
         layout = QVBoxLayout(self)
@@ -524,7 +524,13 @@ class BackupStatusMixin:
             if getattr(self, "api_mode", False)
             else self.database.backup_directory
         )
-        BackupStatusDialog(status, backup_directory, self).exec()
+        self._show_non_modal_report_dialog(
+            "_backup_status_dialog",
+            BackupStatusDialog,
+            status,
+            backup_directory,
+            self,
+        )
 
     def backup_now(self):
         if getattr(self, "api_mode", False):

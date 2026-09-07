@@ -515,3 +515,11 @@ button:disabled { cursor: not-allowed; opacity: .5; transform: none; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; }
 }
+
+.district-tabs { display: flex; flex-wrap: wrap; gap: 7px; margin: 4px 0 14px; }
+.district-tab { padding: 6px 14px; border: 1px solid #bdd2cd; border-radius: 999px; color: var(--brand-dark); background: #fff; font-size: 13px; cursor: pointer; }
+.district-tab:hover { background: var(--brand-soft); }
+.district-tab.active { border-color: var(--brand); color: #fff; background: var(--brand); }
+.map-view { width: 100%; height: min(60vh, 480px); border: 1px solid #bdd2cd; border-radius: 15px; overflow: hidden; }
+.map-popup-nav { display: inline-block; margin-top: 6px; padding: 5px 10px; border-radius: 999px; background: var(--brand); color: #fff; font-size: 12px; font-weight: 700; text-decoration: none; }
+.map-popup-nav:hover { background: var(--brand-dark); }

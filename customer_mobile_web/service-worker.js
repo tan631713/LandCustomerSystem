@@ -1,10 +1,10 @@
-const CACHE_NAME = "land-customer-mobile-v26";
+const CACHE_NAME = "land-customer-mobile-v29";
 const APP_SHELL = [
   "/mobile/",
   "/mobile/index.html",
   "/mobile/styles.css",
   "/mobile/field-visit.js?v=2",
-  "/mobile/app.js?v=26",
+  "/mobile/app.js?v=29",
   "/mobile/manifest.webmanifest",
   "/mobile/app-icon.png",
   "/mobile/og.png"

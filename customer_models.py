@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import traceback
 from dataclasses import dataclass
 
 from customer_land_tree import LandGroup, group_land_records, ownership_area
@@ -11,6 +12,7 @@ from PySide6.QtCore import (
     QAbstractItemModel,
     QModelIndex,
     QSortFilterProxyModel,
+    QThread,
     Qt,
 )
 from PySide6.QtGui import QColor, QFont, QIcon, QPixmap
@@ -144,44 +146,188 @@ class RecordTableModel(QAbstractItemModel):
         self.rows = visible_rows
         self.page_ownership_count = len(visible_rows)
 
+    def _node_for_index(self, index):
+        """Safely resolve a QModelIndex's internalPointer() to a live _TreeNode.
+
+        History (see git log around DESKTOP_CLIENT_VERSION 1.9.28-1.9.34 for
+        the full trail before touching this again):
+
+        1. createIndex() originally carried the _TreeNode object itself as
+           the internal pointer. Production hit a real crash from this:
+           refresh_records() on a large database replaces
+           self._root_nodes/_record_nodes (via beginResetModel()/
+           set_rows()) while a QModelIndex from the previous node set was
+           still in use elsewhere -- Qt's reset contract says such indexes
+           are invalid, but nothing stops already-in-flight code from
+           calling internalPointer() on one anyway.
+        2. An isinstance(node, _TreeNode) guard was added, then found
+           insufficient: a node could pass isinstance and still raise
+           AttributeError on node.kind, a field __init__ always sets --
+           evidence the object was never actually constructed via
+           _TreeNode(...) at all (reproduced locally with
+           _TreeNode.__new__(_TreeNode), which skips __init__ entirely).
+           `_node_for_index()` therefore both isinstance-checks AND
+           try/excepts a `.kind` read before trusting a node -- this is
+           the state this method is in now.
+        3. Deferring the post-save refresh to the next event-loop tick
+           (QTimer.singleShot(0, ...), in save_record() and
+           batch_add_shared_land_records()) was tried next, reasoning the
+           crash was reentrant Qt model-reset behaviour. Production crash
+           reports (Windows Application Error: python314.dll,
+           0xc0000005) showed the *identical* faulting offset before and
+           after that change -- ruling out timing/reentrancy as the sole
+           cause. Kept anyway (harmless, arguably still correct practice).
+        4. Twice now, createIndex() was changed to carry a plain int
+           node_id instead of the _TreeNode object, resolved back through
+           a model-owned `_nodes_by_id` dict rebuilt on every reset --
+           the pattern Qt's own docs recommend for exactly this class of
+           problem. Both times it was reverted:
+           - 1st time (DESKTOP_CLIENT_VERSION 1.9.29): reverted after a
+             user report of an add-record crash with no log at all. No
+             Event Viewer capture was taken, so this was never actually
+             confirmed to be caused by that change -- and the *same*
+             silent-crash signature (python314.dll, offset 0x20169)
+             persisted through two later releases that did NOT have this
+             change, which is why it was tried again.
+           - 2nd time (1.9.33): reverted after a *newly and differently
+             shaped* crash -- Application Error in Qt6Core.dll (not
+             python314.dll), reproduced on a clean install on first
+             launch, before any add-record action at all. This is much
+             stronger evidence than the 1.9.29 report: same exact code
+             path shape (createIndex(row, col, int)), a brand-new crash
+             signature that had never appeared in any of the many prior
+             python314.dll-crashing releases, appearing the very first
+             time this pattern was reintroduced. Treat createIndex() with
+             a plain int id as genuinely unsafe in this PySide6/Qt6
+             build until proven otherwise -- do not reattempt without new
+             evidence pointing specifically at *this* mechanism being
+             fixed upstream, or a local Windows repro to test against.
+
+        The underlying crash this was all trying to fix (python314.dll,
+        access violation, on add-record / batch-add) is UNRESOLVED as of
+        1.9.34. See 1.9.34's changelog entry for the next diagnostic step
+        (faulthandler-based crash tracing) rather than another blind
+        architecture change.
+        """
+        if not index.isValid():
+            return None
+        node = index.internalPointer()
+        if not isinstance(node, _TreeNode):
+            return None
+        try:
+            node.kind
+        except AttributeError:
+            return None
+        return node
+
+    def _warn_if_wrong_thread(self, method_name):
+        """Detect (and loudly log, but never crash on) an off-GUI-thread call.
+
+        The actual root cause of this app's long-running native-crash saga
+        (DESKTOP_CLIENT_VERSION 1.9.35, see start_record_search() in
+        customer_search_controller.py) was a background search worker's
+        result-handling signal resolving to a same-thread connection
+        instead of being marshaled to the GUI thread -- so this model's
+        methods ended up being called from a background QThread.
+        QAbstractItemModel is not thread-safe; that is undefined behaviour
+        in Qt itself and was silently corrupting memory, surfacing later
+        as an unrelated-looking native crash with no attributable cause.
+
+        The 1.9.35 fix addresses the one place that actually had this bug.
+        This is a second, independent layer of defense on top of that fix,
+        not a replacement for it: if this class of bug is ever
+        reintroduced -- most likely by a future change to this codebase --
+        this turns it back into an immediate, attributable, non-fatal log
+        entry (via customer_error_handler.log_diagnostic_event(), into the
+        same application-error.log used for real exceptions) instead of
+        another unexplained native crash. Returns False (meaning "do not
+        proceed") when called off the GUI thread so callers can bail out
+        to a safe default before touching any node state.
+        """
+        current = QThread.currentThread()
+        home = self.thread()
+        if current is home:
+            return True
+        try:
+            stack = "".join(traceback.format_stack())
+        except Exception:
+            stack = ""
+        try:
+            from customer_error_handler import log_diagnostic_event
+
+            log_diagnostic_event(
+                "RecordTableModel.wrong_thread",
+                (
+                    f"{method_name}() was called from {current!r}, not this "
+                    f"model's GUI thread ({home!r}). This should never "
+                    f"happen after DESKTOP_CLIENT_VERSION 1.9.35 -- see "
+                    f"start_record_search() in customer_search_controller.py "
+                    f"for the bug this guards against. Call stack:\n{stack}"
+                ),
+            )
+        except Exception:
+            pass
+        return False
+
     def rowCount(self, parent=QModelIndex()):
-        if not parent.isValid():
-            return len(self._root_nodes)
-        node = parent.internalPointer()
-        if node is not None and node.kind == "land":
-            return len(node.group.records)
-        return 0
+        # The try/except here (and in index()/parent()/data()/flags()/
+        # setData() below) is deliberate belt-and-suspenders on top of
+        # _node_for_index()'s own .kind check: this bug has already come
+        # back once from a corruption mode that check didn't anticipate,
+        # so nothing reachable from a node attribute access is allowed to
+        # escape as an uncaught exception and take down the whole app.
+        try:
+            if not self._warn_if_wrong_thread("rowCount"):
+                return 0
+            if not parent.isValid():
+                return len(self._root_nodes)
+            node = self._node_for_index(parent)
+            if node is not None and node.kind == "land":
+                return len(node.group.records)
+            return 0
+        except AttributeError:
+            return 0
 
     def columnCount(self, _parent=QModelIndex()):
         return len(TABLE_COLUMNS)
 
     def index(self, row, column, parent=QModelIndex()):
-        if row < 0 or column < 0 or column >= self.columnCount():
-            return QModelIndex()
-        if not parent.isValid():
-            if row >= len(self._root_nodes):
+        try:
+            if not self._warn_if_wrong_thread("index"):
                 return QModelIndex()
-            return self.createIndex(row, column, self._root_nodes[row])
-        parent_node = parent.internalPointer()
-        if parent_node is None or parent_node.kind != "land":
+            if row < 0 or column < 0 or column >= self.columnCount():
+                return QModelIndex()
+            if not parent.isValid():
+                if row >= len(self._root_nodes):
+                    return QModelIndex()
+                return self.createIndex(row, column, self._root_nodes[row])
+            parent_node = self._node_for_index(parent)
+            if parent_node is None or parent_node.kind != "land":
+                return QModelIndex()
+            if row >= len(parent_node.group.records):
+                return QModelIndex()
+            record_id = int(parent_node.group.records[row]["id"])
+            child = self._record_nodes.get(record_id)
+            return (
+                self.createIndex(row, column, child)
+                if child is not None
+                else QModelIndex()
+            )
+        except AttributeError:
             return QModelIndex()
-        if row >= len(parent_node.group.records):
-            return QModelIndex()
-        record_id = int(parent_node.group.records[row]["id"])
-        child = self._record_nodes.get(record_id)
-        return (
-            self.createIndex(row, column, child)
-            if child is not None
-            else QModelIndex()
-        )
 
     def parent(self, index):
-        if not index.isValid():
+        try:
+            if not self._warn_if_wrong_thread("parent"):
+                return QModelIndex()
+            if not index.isValid():
+                return QModelIndex()
+            node = self._node_for_index(index)
+            if node is None or node.kind != "ownership" or node.parent is None:
+                return QModelIndex()
+            return self.createIndex(node.parent.row, 0, node.parent)
+        except AttributeError:
             return QModelIndex()
-        node = index.internalPointer()
-        if node is None or node.kind != "ownership" or node.parent is None:
-            return QModelIndex()
-        return self.createIndex(node.parent.row, 0, node.parent)
 
     @staticmethod
     def _group_display(group, key):
@@ -270,9 +416,15 @@ class RecordTableModel(QAbstractItemModel):
         return Qt.PartiallyChecked
 
     def data(self, index, role=Qt.DisplayRole):
-        if not index.isValid():
+        try:
+            if not self._warn_if_wrong_thread("data"):
+                return None
+            return self._data(index, role)
+        except AttributeError:
             return None
-        node = index.internalPointer()
+
+    def _data(self, index, role):
+        node = self._node_for_index(index)
         if node is None:
             return None
         key = TABLE_COLUMNS[index.column()][0]
@@ -380,14 +532,20 @@ class RecordTableModel(QAbstractItemModel):
         return str(section + 1)
 
     def flags(self, index):
-        if not index.isValid():
+        try:
+            if not self._warn_if_wrong_thread("flags"):
+                return Qt.NoItemFlags
+            node = self._node_for_index(index)
+            if node is None:
+                return Qt.NoItemFlags
+            flags = Qt.ItemIsEnabled | Qt.ItemIsSelectable
+            if index.column() == CHECK_COLUMN:
+                flags |= Qt.ItemIsUserCheckable
+                if node.kind == "land":
+                    flags |= Qt.ItemIsAutoTristate
+            return flags
+        except AttributeError:
             return Qt.NoItemFlags
-        flags = Qt.ItemIsEnabled | Qt.ItemIsSelectable
-        if index.column() == CHECK_COLUMN:
-            flags |= Qt.ItemIsUserCheckable
-            if index.internalPointer().kind == "land":
-                flags |= Qt.ItemIsAutoTristate
-        return flags
 
     def setData(self, index, value, role=Qt.EditRole):
         if (
@@ -413,37 +571,42 @@ class RecordTableModel(QAbstractItemModel):
     def set_node_checked(self, index, checked):
         """Apply the established land-parent or ownership-child semantics."""
 
-        if not index.isValid() or index.column() != CHECK_COLUMN:
-            return False
-        node = index.internalPointer()
-        if node is None:
-            return False
-        target = bool(checked)
-        records = node.group.records if node.kind == "land" else [node.record]
-        changed = []
-        for record in records:
-            if bool(record.get("checked")) == target:
-                continue
-            self._set_record_checked(record, target)
-            changed.append(int(record["id"]))
-        for record_id in changed:
-            self.checked_changed_callback(record_id, target)
-        if changed:
-            left = self.index(node.row, CHECK_COLUMN, self.parent(index))
-            right = self.index(node.row, self.columnCount() - 1, self.parent(index))
-            self.dataChanged.emit(
-                left,
-                right,
-                [Qt.CheckStateRole, Qt.BackgroundRole],
-            )
-            if node.kind == "ownership":
-                parent_index = self.parent(index)
+        try:
+            if not self._warn_if_wrong_thread("set_node_checked"):
+                return False
+            if not index.isValid() or index.column() != CHECK_COLUMN:
+                return False
+            node = self._node_for_index(index)
+            if node is None:
+                return False
+            target = bool(checked)
+            records = node.group.records if node.kind == "land" else [node.record]
+            changed = []
+            for record in records:
+                if bool(record.get("checked")) == target:
+                    continue
+                self._set_record_checked(record, target)
+                changed.append(int(record["id"]))
+            for record_id in changed:
+                self.checked_changed_callback(record_id, target)
+            if changed:
+                left = self.index(node.row, CHECK_COLUMN, self.parent(index))
+                right = self.index(node.row, self.columnCount() - 1, self.parent(index))
                 self.dataChanged.emit(
-                    parent_index.siblingAtColumn(CHECK_COLUMN),
-                    parent_index.siblingAtColumn(self.columnCount() - 1),
-                    [Qt.CheckStateRole],
+                    left,
+                    right,
+                    [Qt.CheckStateRole, Qt.BackgroundRole],
                 )
-        return True
+                if node.kind == "ownership":
+                    parent_index = self.parent(index)
+                    self.dataChanged.emit(
+                        parent_index.siblingAtColumn(CHECK_COLUMN),
+                        parent_index.siblingAtColumn(self.columnCount() - 1),
+                        [Qt.CheckStateRole],
+                    )
+            return True
+        except AttributeError:
+            return False
 
     @staticmethod
     def _set_record_checked(record, checked):
@@ -651,7 +814,7 @@ class RecordTableModel(QAbstractItemModel):
         return None
 
     def node_for_index(self, index):
-        return index.internalPointer() if index.isValid() else None
+        return self._node_for_index(index)
 
     def group_for_index(self, index):
         node = self.node_for_index(index)

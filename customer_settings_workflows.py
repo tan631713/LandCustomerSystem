@@ -12,7 +12,7 @@ from customer_messages import (
     startup_backup_notice,
 )
 from customer_repository import normalize_watch_name
-from PySide6.QtWidgets import QApplication, QDialog
+from PySide6.QtWidgets import QApplication
 
 
 class SettingsWorkflowMixin:
@@ -48,60 +48,61 @@ class SettingsWorkflowMixin:
             return None
         policy = self._app_component("load_backup_policy")()
         dialog = self._app_component("BackupManagementDialog")(parent=self, **policy)
-        if dialog.exec() != QDialog.Accepted:
-            return None
 
-        policy = dialog.selected_policy()
-        if self.api_mode:
+        def on_accepted():
+            policy = dialog.selected_policy()
+            if self.api_mode:
+                try:
+                    self._app_component("save_backup_policy")(policy)
+                    result = self.active_record_repository().maintain_server_backups(
+                        policy["retention_days"], policy["max_count"]
+                    )
+                except Exception as exc:
+                    self.refresh_backup_status(show_warning=True)
+                    self._app_component("QMessageBox").critical(
+                        self, "備份管理失敗", backup_management_failure_message(exc)
+                    )
+                    return
+                detail = (
+                    f"家中伺服器目前保留 {result.get('backup_count', 0)} 份 ZIP 備份，"
+                    f"本次清除 {result.get('deleted_count', 0)} 份舊備份。"
+                )
+                self._log_operation("備份管理", "整理伺服器備份", detail)
+                self.refresh_backup_status()
+                self._app_component("QMessageBox").information(self, "備份管理完成", detail)
+                return
             try:
                 self._app_component("save_backup_policy")(policy)
-                result = self.active_record_repository().maintain_server_backups(
-                    policy["retention_days"], policy["max_count"]
-                )
+                self.database.configure_backup_policy(**policy)
+                if dialog.requested_action == "compress":
+                    result = self.database.compress_existing_backups()
+                    action_text = "壓縮"
+                elif dialog.requested_action == "clean":
+                    result = self.database.prune_backups()
+                    action_text = "清理"
+                else:
+                    result = self.database.run_backup_maintenance()
+                    action_text = "維護"
             except Exception as exc:
                 self.refresh_backup_status(show_warning=True)
-                self._app_component("QMessageBox").critical(
-                    self, "備份管理失敗", backup_management_failure_message(exc)
-                )
-                return None
+                self._app_component("QMessageBox").critical(self, "備份管理失敗", backup_management_failure_message(exc))
+                return
+
             detail = (
-                f"家中伺服器目前保留 {result.get('backup_count', 0)} 份 ZIP 備份，"
-                f"本次清除 {result.get('deleted_count', 0)} 份舊備份。"
+                f"已壓縮 {result.compressed_count} 份、刪除 {result.deleted_count} 份，"
+                f"釋放 {format_storage_size(result.reclaimed_bytes)}。"
             )
-            self._log_operation("備份管理", "整理伺服器備份", detail)
+            if result.failed_paths:
+                detail += f"\n另有 {len(result.failed_paths)} 份無法處理，已保留原檔。"
+            try:
+                self._log_operation("備份管理", action_text, detail)
+            except Exception as exc:
+                detail += f"\n操作已完成，但操作記錄未寫入：{exc}"
             self.refresh_backup_status()
             self._app_component("QMessageBox").information(self, "備份管理完成", detail)
-            return result
-        try:
-            self._app_component("save_backup_policy")(policy)
-            self.database.configure_backup_policy(**policy)
-            if dialog.requested_action == "compress":
-                result = self.database.compress_existing_backups()
-                action_text = "壓縮"
-            elif dialog.requested_action == "clean":
-                result = self.database.prune_backups()
-                action_text = "清理"
-            else:
-                result = self.database.run_backup_maintenance()
-                action_text = "維護"
-        except Exception as exc:
-            self.refresh_backup_status(show_warning=True)
-            self._app_component("QMessageBox").critical(self, "備份管理失敗", backup_management_failure_message(exc))
-            return None
 
-        detail = (
-            f"已壓縮 {result.compressed_count} 份、刪除 {result.deleted_count} 份，"
-            f"釋放 {format_storage_size(result.reclaimed_bytes)}。"
-        )
-        if result.failed_paths:
-            detail += f"\n另有 {len(result.failed_paths)} 份無法處理，已保留原檔。"
-        try:
-            self._log_operation("備份管理", action_text, detail)
-        except Exception as exc:
-            detail += f"\n操作已完成，但操作記錄未寫入：{exc}"
-        self.refresh_backup_status()
-        self._app_component("QMessageBox").information(self, "備份管理完成", detail)
-        return result
+        self._show_non_modal_dialog(dialog, on_accepted=on_accepted)
+        return None
 
     def apply_saved_font_size(self):
         app = QApplication.instance()
@@ -119,14 +120,16 @@ class SettingsWorkflowMixin:
 
     def change_font_size(self):
         dialog = self._app_component("FontSizeDialog")(self.current_font_size_key, self)
-        if dialog.exec() != QDialog.Accepted:
-            return
-        selected_key = dialog.selected_font_size_key()
-        if selected_key == self.current_font_size_key:
-            return
-        self.current_font_size_key = selected_key
-        self._app_component("set_setting")("font_size", selected_key)
-        self.apply_saved_font_size()
+
+        def on_accepted():
+            selected_key = dialog.selected_font_size_key()
+            if selected_key == self.current_font_size_key:
+                return
+            self.current_font_size_key = selected_key
+            self._app_component("set_setting")("font_size", selected_key)
+            self.apply_saved_font_size()
+
+        self._show_non_modal_dialog(dialog, on_accepted=on_accepted)
 
     def manage_watchlist(self):
         if not self.ensure_can_modify("注意名單管理"):
@@ -135,9 +138,12 @@ class SettingsWorkflowMixin:
         dialog = self._app_component("WatchlistDialog")(
             self, repository=repository
         )
-        if dialog.exec() == QDialog.Accepted:
+
+        def on_accepted():
             self.refresh_watchlist_cache()
             self.refresh_records(self.selected_record_id)
+
+        self._show_non_modal_dialog(dialog, on_accepted=on_accepted)
 
     def refresh_watchlist_cache(self):
         repository = (
@@ -167,7 +173,7 @@ class SettingsWorkflowMixin:
             else None
         )
         dialog = self._app_component("OperationLogDialog")(self, rows=rows)
-        dialog.exec()
+        self._show_non_modal_dialog(dialog)
 
     def show_startup_backup_notice(self):
         self._app_component("QMessageBox").information(
@@ -223,26 +229,28 @@ class SettingsWorkflowMixin:
                 )
                 return
             dialog = self._app_component("ServerBackupRestoreDialog")(backups, self)
-            if dialog.exec() != QDialog.Accepted:
-                return
-            try:
-                result = repository.restore_server_backup(
-                    dialog.selected_backup_name(), dialog.confirmation()
+
+            def on_accepted():
+                try:
+                    result = repository.restore_server_backup(
+                        dialog.selected_backup_name(), dialog.confirmation()
+                    )
+                except Exception as exc:
+                    self._app_component("QMessageBox").critical(
+                        self, "伺服器還原失敗", str(exc)
+                    )
+                    return
+                self._app_component("QMessageBox").information(
+                    self,
+                    "伺服器還原完成",
+                    "PostgreSQL 正式資料與附件已還原。所有登入已失效，桌面程式將關閉，"
+                    "請重新開啟並登入。\n\n"
+                    f"還原檔：{result.get('restored_backup') or ''}\n"
+                    f"還原前安全備份：{result.get('safety_backup') or ''}",
                 )
-            except Exception as exc:
-                self._app_component("QMessageBox").critical(
-                    self, "伺服器還原失敗", str(exc)
-                )
-                return
-            self._app_component("QMessageBox").information(
-                self,
-                "伺服器還原完成",
-                "PostgreSQL 正式資料與附件已還原。所有登入已失效，桌面程式將關閉，"
-                "請重新開啟並登入。\n\n"
-                f"還原檔：{result.get('restored_backup') or ''}\n"
-                f"還原前安全備份：{result.get('safety_backup') or ''}",
-            )
-            self.close()
+                self.close()
+
+            self._show_non_modal_dialog(dialog, on_accepted=on_accepted)
             return
         backup_directory = self.database.backup_directory
         try:

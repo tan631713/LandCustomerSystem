@@ -267,6 +267,7 @@ class RecordWrite(BaseModel):
 
     district: str = Field(min_length=1, max_length=100)
     section: str = Field(min_length=1, max_length=100)
+    subsection: str | None = Field(default=None, max_length=100)
     registration_order: str | None = Field(default=None, max_length=100)
     land_number: str = Field(min_length=1, max_length=100)
     area: str | None = Field(default=None, max_length=80)
@@ -281,6 +282,7 @@ class RecordWrite(BaseModel):
     registration_reason: str | None = Field(default=None, max_length=500)
     note: str | None = Field(default=None, max_length=5000)
     visit_log: str | None = Field(default=None, max_length=10000)
+    birth_year: str | None = Field(default=None, max_length=4)
 
     @field_validator("*", mode="before")
     @classmethod
@@ -306,6 +308,12 @@ class RecordWrite(BaseModel):
                 raise ValueError(f"{field_name} must be numeric")
         if self.denominator not in (None, "") and parse_number(self.denominator) == 0:
             raise ValueError("denominator must not be zero")
+        if self.birth_year not in (None, ""):
+            if not self.birth_year.isdigit() or len(self.birth_year) != 4:
+                raise ValueError("birth_year must be a 4-digit Gregorian year")
+            year = int(self.birth_year)
+            if not (1900 <= year <= datetime.now().year):
+                raise ValueError("birth_year is out of range")
         return self
 
     def normalized_values(self):
@@ -439,6 +447,12 @@ class RecordLocationWrite(BaseModel):
     source: str = Field(default="manual", min_length=1, max_length=80)
 
 
+class ExcelExportMark(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    record_ids: list[int] = Field(min_length=1, max_length=5000)
+
+
 class FieldVisitRouteCreate(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -504,6 +518,7 @@ class FieldVisitStatusUpdate(BaseModel):
     longitude: float | None = Field(default=None, ge=-180, le=180)
     note: str = Field(default="", max_length=5000)
     postponed_until: datetime | None = None
+    contact_date: date | None = None
 
     @model_validator(mode="after")
     def validate_coordinate_pair(self):

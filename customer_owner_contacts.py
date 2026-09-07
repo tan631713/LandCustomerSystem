@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from customer_desktop_support import DesktopSupportMixin
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -24,14 +25,17 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSpinBox,
-    QTabWidget,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
-from customer_domain import mask_identity_text, normalize_taiwan_identity
+from customer_domain import (
+    calculate_age_from_birth_year,
+    mask_identity_text,
+    normalize_taiwan_identity,
+)
 from customer_owner_contact_types import RELATIONSHIP_TYPES
 
 
@@ -210,10 +214,14 @@ class OwnerContactDialog(QDialog):
         self.allow_edit = bool(allow_edit)
         self.owner_address = _text(owner_address)
         self.is_edit = bool(existing)
-        self._selected_contact = None
+        self._linked_contact = None
         self.edit_requested = False
         self._address_helper_buttons = []
         self._identity_state = {}
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(300)
+        self._search_timer.timeout.connect(self._search_for_matching_contacts)
         self.setWindowTitle(
             "查看關係人"
             if self.readonly
@@ -231,10 +239,7 @@ class OwnerContactDialog(QDialog):
             scroll.setWidget(content)
             layout.addWidget(scroll, 1)
         else:
-            self.mode_tabs = QTabWidget(self)
-            self.mode_tabs.addTab(self._build_new_contact_page(), "建立新關係人")
-            self.mode_tabs.addTab(self._build_existing_contact_page(), "選擇既有關係人")
-            layout.addWidget(self.mode_tabs, 1)
+            layout.addWidget(self._build_new_contact_page(), 1)
 
         buttons = QDialogButtonBox(parent=self)
         if self.readonly:
@@ -256,7 +261,6 @@ class OwnerContactDialog(QDialog):
             self._fill_existing(self.existing)
         else:
             self.new_sort_order.setValue(int(next_sort_order))
-            self.link_sort_order.setValue(int(next_sort_order))
         if self.readonly:
             self._set_readonly()
 
@@ -275,10 +279,58 @@ class OwnerContactDialog(QDialog):
         registered_address = QLineEdit(group)
         contact_address = QLineEdit(group)
         work_address = QLineEdit(group)
+        birth_year = QLineEdit(group)
+        birth_year.setPlaceholderText("例如 1965")
+        birth_year.setMaxLength(4)
+        age = QLineEdit(group)
+        age.setReadOnly(True)
+        age.setPlaceholderText("由出生西元年計算")
         identity_note = QLineEdit(group)
         notes = QPlainTextEdit(group)
         notes.setFixedHeight(80)
         form.addRow("姓名 *", name)
+        if prefix == "new":
+            self._match_hint = QLabel("", group)
+            self._match_hint.setStyleSheet("color:#9ca3af;")
+            self._match_hint.hide()
+            form.addRow("", self._match_hint)
+
+            self._match_table = ContactChoiceTable(group)
+            self._match_table.setMaximumHeight(140)
+            self._match_table.doubleClicked.connect(
+                lambda _index: self._apply_contact_link(
+                    self._match_table.selected_contact()
+                )
+            )
+            self._match_table.hide()
+            form.addRow("", self._match_table)
+
+            match_actions = QHBoxLayout()
+            self._use_match_button = QPushButton("使用選取的既有資料", group)
+            self._use_match_button.clicked.connect(
+                lambda: self._apply_contact_link(
+                    self._match_table.selected_contact()
+                )
+            )
+            self._use_match_button.hide()
+            match_actions.addWidget(self._use_match_button)
+            match_actions.addStretch(1)
+            form.addRow("", match_actions)
+
+            link_banner = QHBoxLayout()
+            self._link_banner = QLabel("", group)
+            self._link_banner.setWordWrap(True)
+            self._link_banner.setStyleSheet(
+                "background:#1e3a5f;color:#bfdbfe;border-radius:5px;padding:6px 8px;"
+            )
+            self._unlink_button = QPushButton("改為手動輸入新資料", group)
+            self._unlink_button.clicked.connect(self._clear_contact_link)
+            self._unlink_button.hide()
+            link_banner.addWidget(self._link_banner, 1)
+            link_banner.addWidget(self._unlink_button)
+            form.addRow(link_banner)
+
+            name.textEdited.connect(self._on_name_edited)
         identity_row = QHBoxLayout()
         identity_row.addWidget(external_id, 1)
         identity_button = QPushButton(
@@ -291,6 +343,11 @@ class OwnerContactDialog(QDialog):
         form.addRow("戶籍地址", registered_address)
         form.addRow("聯絡地址", contact_address)
         form.addRow("工作地址", work_address)
+        birth_year_row = QHBoxLayout()
+        birth_year_row.addWidget(birth_year, 1)
+        birth_year_row.addWidget(QLabel("年齡", group))
+        birth_year_row.addWidget(age, 1)
+        form.addRow("出生西元年", birth_year_row)
         form.addRow("身分補充", identity_note)
         form.addRow("人員備註", notes)
         helpers = QHBoxLayout()
@@ -324,6 +381,15 @@ class OwnerContactDialog(QDialog):
         setattr(self, f"{prefix}_registered_address", registered_address)
         setattr(self, f"{prefix}_contact_address", contact_address)
         setattr(self, f"{prefix}_work_address", work_address)
+        setattr(self, f"{prefix}_birth_year", birth_year)
+        # age is a pure live display of birth_year, never read when
+        # collecting values to save -- see _contact_values().
+        setattr(self, f"{prefix}_age", age)
+        birth_year.textChanged.connect(
+            lambda text, field_prefix=prefix: getattr(
+                self, f"{field_prefix}_age"
+            ).setText(calculate_age_from_birth_year(text))
+        )
         setattr(self, f"{prefix}_identity_note", identity_note)
         setattr(self, f"{prefix}_contact_notes", notes)
         self._identity_state[prefix] = {
@@ -432,25 +498,97 @@ class OwnerContactDialog(QDialog):
         layout.addWidget(scroll)
         return page
 
-    def _build_existing_contact_page(self):
-        page = QWidget(self)
-        layout = QVBoxLayout(page)
-        search_row = QHBoxLayout()
-        self.search_input = QLineEdit(page)
-        self.search_input.setPlaceholderText(
-            "輸入姓名、手機、市話、戶籍地址或聯絡地址"
+    def _on_name_edited(self, _text_value):
+        if self._linked_contact is not None:
+            return
+        self._search_timer.start()
+
+    def _search_for_matching_contacts(self):
+        if self._linked_contact is not None:
+            return
+        query = self.new_name.text().strip()
+        if len(query) < 2:
+            self._match_hint.hide()
+            self._match_table.hide()
+            self._use_match_button.hide()
+            return
+        try:
+            rows = self.repository.search_owner_contacts(query, limit=5)
+        except Exception:
+            return
+        if not rows:
+            self._match_hint.setText("沒有找到相符的既有關係人。")
+            self._match_hint.show()
+            self._match_table.hide()
+            self._use_match_button.hide()
+            return
+        self._match_table.set_contacts(rows)
+        self._match_table.selectRow(0)
+        self._match_hint.setText(f"找到 {len(rows)} 位可能相符的既有關係人，可直接選用避免重複建立：")
+        self._match_hint.show()
+        self._match_table.show()
+        self._use_match_button.show()
+
+    def _apply_contact_link(self, contact):
+        if not contact:
+            return
+        self._linked_contact = dict(contact)
+        self.new_name.setText(_text(contact.get("name")))
+        self.new_mobile_phone.setText(_text(contact.get("mobile_phone")))
+        self.new_home_phone.setText(_text(contact.get("home_phone")))
+        self.new_registered_address.setText(_text(contact.get("registered_address")))
+        self.new_contact_address.setText(_text(contact.get("contact_address")))
+        self.new_work_address.clear()
+        self.new_birth_year.setText(_text(contact.get("birth_year")))
+        self.new_external_id.clear()
+        self.new_identity_note.clear()
+        self.new_contact_notes.clear()
+        self._match_hint.hide()
+        self._match_table.hide()
+        self._use_match_button.hide()
+        owner_count = int(contact.get("owner_count") or 0)
+        self._link_banner.setText(
+            f"已選擇既有關係人「{_text(contact.get('name'))}」"
+            f"（已連結 {owner_count} 位地主），其他共用欄位已鎖定，"
+            "只需要填寫與目前地主的關係。"
         )
-        self.search_input.returnPressed.connect(self._search_contacts)
-        search_button = QPushButton("搜尋", page)
-        search_button.clicked.connect(self._search_contacts)
-        search_row.addWidget(self.search_input, 1)
-        search_row.addWidget(search_button)
-        layout.addLayout(search_row)
-        self.search_table = ContactChoiceTable(page)
-        self.search_table.itemSelectionChanged.connect(self._sync_selected_contact)
-        layout.addWidget(self.search_table, 1)
-        layout.addWidget(self._relation_group("link"))
-        return page
+        self._unlink_button.show()
+        self._set_shared_fields_enabled(False)
+
+    def _clear_contact_link(self):
+        self._linked_contact = None
+        self._link_banner.setText("")
+        self._unlink_button.hide()
+        self._set_shared_fields_enabled(True)
+        for field in (
+            self.new_mobile_phone,
+            self.new_home_phone,
+            self.new_registered_address,
+            self.new_contact_address,
+            self.new_work_address,
+            self.new_birth_year,
+            self.new_identity_note,
+        ):
+            field.clear()
+        self.new_contact_notes.clear()
+        self.new_name.setFocus()
+
+    def _set_shared_fields_enabled(self, enabled):
+        for widget in (
+            self.new_external_id,
+            self.new_external_id_button,
+            self.new_mobile_phone,
+            self.new_home_phone,
+            self.new_registered_address,
+            self.new_contact_address,
+            self.new_work_address,
+            self.new_birth_year,
+            self.new_identity_note,
+            self.new_contact_notes,
+        ):
+            widget.setEnabled(enabled)
+        for button in self._address_helper_buttons:
+            button.setEnabled(enabled)
 
     def _build_edit_content(self, layout):
         shared_notice = QLabel(
@@ -487,28 +625,6 @@ class OwnerContactDialog(QDialog):
             layout.addWidget(detail_meta)
         layout.addStretch(1)
 
-    def _search_contacts(self):
-        query = self.search_input.text().strip()
-        if not query:
-            self.search_table.set_contacts([])
-            QMessageBox.information(
-                self,
-                "請輸入搜尋條件",
-                "請輸入姓名、手機、市話、戶籍地址或聯絡地址。",
-            )
-            return
-        try:
-            rows = self.repository.search_owner_contacts(query, limit=50)
-        except Exception as exc:
-            QMessageBox.warning(self, "搜尋失敗", f"無法搜尋既有關係人：{exc}")
-            return
-        self.search_table.set_contacts(rows)
-        if not rows:
-            QMessageBox.information(self, "沒有結果", "找不到符合條件的關係人。")
-
-    def _sync_selected_contact(self):
-        self._selected_contact = self.search_table.selected_contact()
-
     def _fill_existing(self, values):
         self.edit_name.setText(_text(values.get("name")))
         masked_external_id = _text(values.get("external_id"))
@@ -528,6 +644,7 @@ class OwnerContactDialog(QDialog):
         )
         self.edit_contact_address.setText(_text(values.get("contact_address")))
         self.edit_work_address.setText(_text(values.get("work_address")))
+        self.edit_birth_year.setText(_text(values.get("birth_year")))
         self.edit_identity_note.setText(_text(values.get("identity_note")))
         self.edit_contact_notes.setPlainText(_text(values.get("contact_notes")))
         relationship = _text(values.get("relationship_type"))
@@ -580,6 +697,9 @@ class OwnerContactDialog(QDialog):
             "work_address": getattr(
                 self, f"{prefix}_work_address"
             ).text().strip(),
+            "birth_year": getattr(
+                self, f"{prefix}_birth_year"
+            ).text().strip(),
             "identity_note": getattr(
                 self, f"{prefix}_identity_note"
             ).text().strip(),
@@ -612,11 +732,11 @@ class OwnerContactDialog(QDialog):
                     "relation_updated_at"
                 ),
             }
-        if self.mode_tabs.currentIndex() == 1:
+        if self._linked_contact is not None:
             return {
                 "mode": "link",
-                "contact_id": int((self._selected_contact or {}).get("id") or 0),
-                "relation": self._relation_values("link"),
+                "contact_id": int((self._linked_contact or {}).get("id") or 0),
+                "relation": self._relation_values("new"),
             }
         return {
             "mode": "new",
@@ -690,7 +810,7 @@ class OwnerContactDialog(QDialog):
         self.accept()
 
 
-class OwnerContactsWidget(QWidget):
+class OwnerContactsWidget(QWidget, DesktopSupportMixin):
     HEADERS = (
         "主要",
         "姓名",
@@ -934,45 +1054,62 @@ class OwnerContactsWidget(QWidget):
             owner_address=self._owner_address(),
             parent=self,
         )
-        if dialog.exec() != QDialog.Accepted:
-            return
-        values = dialog.result_values()
-        try:
+
+        def on_accepted():
+            values = dialog.result_values()
             if values["mode"] == "link":
-                repository.link_owner_contact(
-                    self.record_id,
-                    {
-                        "contact_id": values["contact_id"],
-                        "relation": values["relation"],
-                    },
-                )
-            else:
-                action = self._duplicate_action(values["contact"])
-                if action is None:
-                    return
-                if isinstance(action, dict):
+                try:
                     repository.link_owner_contact(
                         self.record_id,
                         {
-                            "contact_id": int(action["id"]),
+                            "contact_id": values["contact_id"],
                             "relation": values["relation"],
                         },
                     )
-                else:
-                    repository.create_owner_contact(
-                        self.record_id,
-                        {
-                            "contact": values["contact"],
-                            "relation": values["relation"],
-                        },
-                    )
-        except Exception as exc:
-            QMessageBox.warning(self, "新增失敗", f"無法建立關係人：{exc}")
-            return
-        self.refresh()
-        self.status_label.setText("關係人已新增。")
+                except Exception as exc:
+                    QMessageBox.warning(self, "新增失敗", f"無法建立關係人：{exc}")
+                    return
+                self.refresh()
+                self.status_label.setText("關係人已新增。")
+                return
 
-    def _duplicate_action(self, contact):
+            def on_duplicate_action_resolved(action):
+                if action is None:
+                    return
+                try:
+                    if isinstance(action, dict):
+                        repository.link_owner_contact(
+                            self.record_id,
+                            {
+                                "contact_id": int(action["id"]),
+                                "relation": values["relation"],
+                            },
+                        )
+                    else:
+                        repository.create_owner_contact(
+                            self.record_id,
+                            {
+                                "contact": values["contact"],
+                                "relation": values["relation"],
+                            },
+                        )
+                except Exception as exc:
+                    QMessageBox.warning(self, "新增失敗", f"無法建立關係人：{exc}")
+                    return
+                self.refresh()
+                self.status_label.setText("關係人已新增。")
+
+            self._resolve_duplicate_action(values["contact"], on_duplicate_action_resolved)
+
+        self._show_non_modal_dialog(dialog, on_accepted=on_accepted)
+
+    def _resolve_duplicate_action(self, contact, on_result):
+        """Async counterpart of the old _duplicate_action(): instead of
+        returning True/None/dict synchronously, calls on_result(...) with
+        that same value once it is known -- immediately if no picker
+        dialog is needed, or from ExistingContactPickerDialog's
+        completion callback if one is shown. See add_contact() for the
+        one caller."""
         repository = self.repository()
         duplicates = repository.find_owner_contact_duplicates(
             name=contact.get("name", ""),
@@ -983,7 +1120,8 @@ class OwnerContactsWidget(QWidget):
             limit=20,
         )
         if not duplicates:
-            return True
+            on_result(True)
+            return
         message = QMessageBox(self)
         message.setWindowTitle("發現可能重複的關係人")
         message.setIcon(QMessageBox.Warning)
@@ -1005,13 +1143,20 @@ class OwnerContactsWidget(QWidget):
         message.exec()
         clicked = message.clickedButton()
         if clicked == create_anyway:
-            return True
+            on_result(True)
+            return
         if clicked != use_existing or clicked == cancel:
-            return None
+            on_result(None)
+            return
         picker = ExistingContactPickerDialog(duplicates, self)
-        if picker.exec() != QDialog.Accepted:
-            return None
-        return picker.selected_contact()
+
+        def on_picker_finished():
+            if picker.result() == QDialog.Accepted:
+                on_result(picker.selected_contact())
+            else:
+                on_result(None)
+
+        self._show_non_modal_dialog(picker, on_finished=on_picker_finished)
 
     def edit_selected(self):
         selected = self.selected_relation()
@@ -1036,29 +1181,33 @@ class OwnerContactsWidget(QWidget):
             readonly=not self.can_write,
             parent=self,
         )
-        if dialog.exec() != QDialog.Accepted or not self.can_write:
-            return
-        values = dialog.result_values()
-        try:
-            repository.update_owner_contact(
-                self.record_id,
-                selected["relation_id"],
-                {
-                    "contact": values["contact"],
-                    "relation": values["relation"],
-                    "expected_contact_updated_at": values.get(
-                        "expected_contact_updated_at"
-                    ),
-                    "expected_relation_updated_at": values.get(
-                        "expected_relation_updated_at"
-                    ),
-                },
-            )
-        except Exception as exc:
-            QMessageBox.warning(self, "儲存失敗", f"無法更新關係人：{exc}")
-            return
-        self.refresh()
-        self.status_label.setText("關係人資料已更新。")
+
+        def on_accepted():
+            if not self.can_write:
+                return
+            values = dialog.result_values()
+            try:
+                repository.update_owner_contact(
+                    self.record_id,
+                    selected["relation_id"],
+                    {
+                        "contact": values["contact"],
+                        "relation": values["relation"],
+                        "expected_contact_updated_at": values.get(
+                            "expected_contact_updated_at"
+                        ),
+                        "expected_relation_updated_at": values.get(
+                            "expected_relation_updated_at"
+                        ),
+                    },
+                )
+            except Exception as exc:
+                QMessageBox.warning(self, "儲存失敗", f"無法更新關係人：{exc}")
+                return
+            self.refresh()
+            self.status_label.setText("關係人資料已更新。")
+
+        self._show_non_modal_dialog(dialog, on_accepted=on_accepted)
 
     def view_selected(self):
         selected = self.selected_relation()
@@ -1081,35 +1230,40 @@ class OwnerContactsWidget(QWidget):
             owner_address=self._owner_address(),
             parent=self,
         )
-        result = dialog.exec()
-        if (
-            self.can_write
-            and result == QDialog.Accepted
-            and getattr(dialog, "edit_requested", False)
-        ):
-            self._open_edit_dialog(repository, existing, selected)
+
+        def on_finished():
+            if (
+                self.can_write
+                and dialog.result() == QDialog.Accepted
+                and getattr(dialog, "edit_requested", False)
+            ):
+                self._open_edit_dialog(repository, existing, selected)
+
+        self._show_non_modal_dialog(dialog, on_finished=on_finished)
 
     def deactivate_selected(self):
         selected = self.selected_relation()
         if not self.can_write or not selected or not selected.get("is_active"):
             return
         dialog = DeactivateRelationDialog(selected.get("name"), self)
-        if dialog.exec() != QDialog.Accepted:
-            return
-        try:
-            self.repository().deactivate_owner_contact(
-                self.record_id,
-                selected["relation_id"],
-                reason=dialog.reason(),
-                expected_relation_updated_at=selected.get(
-                    "relation_updated_at"
-                ),
-            )
-        except Exception as exc:
-            QMessageBox.warning(self, "停用失敗", f"無法停用關係：{exc}")
-            return
-        self.refresh()
-        self.status_label.setText("關係已停用。")
+
+        def on_accepted():
+            try:
+                self.repository().deactivate_owner_contact(
+                    self.record_id,
+                    selected["relation_id"],
+                    reason=dialog.reason(),
+                    expected_relation_updated_at=selected.get(
+                        "relation_updated_at"
+                    ),
+                )
+            except Exception as exc:
+                QMessageBox.warning(self, "停用失敗", f"無法停用關係：{exc}")
+                return
+            self.refresh()
+            self.status_label.setText("關係已停用。")
+
+        self._show_non_modal_dialog(dialog, on_accepted=on_accepted)
 
     def reactivate_selected(self):
         selected = self.selected_relation()

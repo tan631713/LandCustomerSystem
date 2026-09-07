@@ -4,9 +4,10 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QDate
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QTextCursor
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDateEdit, QFileDialog, QFrame,
+    QAbstractItemView, QApplication, QCheckBox, QComboBox, QCompleter,
+    QFileDialog, QFrame,
     QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
     QMessageBox, QPlainTextEdit, QPushButton, QScrollArea, QTableWidget,
     QTableWidgetItem, QTabWidget, QTextBrowser, QVBoxLayout, QWidget,
@@ -14,6 +15,7 @@ from PySide6.QtWidgets import (
 
 from customer_responsive_dialog import ResponsiveDialog as QDialog
 
+from customer_domain import parse_shared_land_rows
 from customer_quality import (
     QUALITY_RULE_OPTIONS,
     QUALITY_RULE_PRESETS,
@@ -56,20 +58,20 @@ HELP_SECTIONS = [
         "批量新增",
         """
         <h2>同地號批量新增</h2>
-        <p>適合一次新增同地區、同地段、同地號的多位所有權人。</p>
+        <p>適合一次新增同地區、同地段（可再加小段）、同地號的多位所有權人。</p>
         <h3>上方共同欄位</h3>
         <ul>
-          <li>地區、地段、地號、面積、公告現值可一起填入。</li>
+          <li>地區、地段、小段、地號、面積、公告現值可一起填入；小段沒有的話可以留空。</li>
           <li>序號/登記次序可以手動輸入在每一列。</li>
         </ul>
         <h3>每列資料順序</h3>
-        <p><code>登記次序、姓名、身分證、地址、分子、分母、備註、出訪記錄</code></p>
+        <p><code>登記次序、姓名、身分證、地址、分子、分母、原因、備註、出訪記錄</code></p>
         <p>可用頓號 <code>、</code> 或逗號 <code>，</code> 分隔，也可從 Excel 複製貼上。</p>
         <h3>範例</h3>
         <p><code>15、王弘益、H100059743、桃園市桃園區大華九街34號、108、3360</code></p>
         <p><b>身分證可以空白：</b></p>
         <p><code>16、王小明、、桃園市桃園區中正路1號、1、2</code></p>
-        <p>如果只有前 6 欄，備註與出訪記錄會自動留空。</p>
+        <p>如果只有前 6 欄，原因、備註與出訪記錄會自動留空。</p>
         """,
     ),
     (
@@ -79,8 +81,7 @@ HELP_SECTIONS = [
         <ul>
           <li>可從「資料 → 匯入 .xlsx」匯入土地資料。</li>
           <li>匯入前會先預覽資料，並標示可能重複或格式異常的列。</li>
-          <li>可從「資料 → 匯出 Excel」匯出目前資料。</li>
-          <li>可從「資料 → 匯出勾選資料」只匯出勾選或目前選取的資料。</li>
+          <li>可從「資料 → 匯出選取資料」匯出勾選或目前選取的資料（一定要先勾選或選取，不能匯出全部）。</li>
         </ul>
         <p><b>提示：</b>匯出會尊重目前表格欄位順序與隱藏欄位設定。</p>
         """,
@@ -165,7 +166,7 @@ class HelpDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("使用說明")
-        self.setModal(True)
+        # Deliberately non-modal -- see show_help() in customer_window_ui.py.
         self.resize(760, 560)
 
         layout = QVBoxLayout(self)
@@ -833,7 +834,8 @@ class DashboardDialog(QDialog):
         super().__init__(parent)
         self.stats = stats
         self.setWindowTitle("資料統計儀表板")
-        self.setModal(True)
+        # Deliberately non-modal -- see show_dashboard() in
+        # customer_productivity_workflows.py.
         self.resize(760, 560)
 
         layout = QVBoxLayout(self)
@@ -1046,7 +1048,8 @@ class FollowUpListDialog(QDialog):
         self.reminders = list(reminders)
         self.on_record_activated = on_record_activated
         self.setWindowTitle("追蹤提醒清單")
-        self.setModal(True)
+        # Deliberately non-modal -- see show_follow_up_list() in
+        # customer_productivity_workflows.py.
         self.resize(860, 520)
 
         layout = QVBoxLayout(self)
@@ -1058,8 +1061,10 @@ class FollowUpListDialog(QDialog):
         title.setStyleSheet("font-size: 15px; font-weight: 600;")
         layout.addWidget(title)
 
-        self.table = QTableWidget(0, 7)
-        self.table.setHorizontalHeaderLabels(["追蹤日", "狀態", "姓名", "地區", "地段", "地號", "備註"])
+        self.table = QTableWidget(0, 8)
+        self.table.setHorizontalHeaderLabels(
+            ["追蹤日", "狀態", "姓名", "地區", "地段", "小段", "地號", "備註"]
+        )
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setSelectionMode(QTableWidget.SingleSelection)
@@ -1071,7 +1076,8 @@ class FollowUpListDialog(QDialog):
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(7, QHeaderView.Stretch)
         layout.addWidget(self.table, 1)
         self.load_rows()
 
@@ -1091,6 +1097,7 @@ class FollowUpListDialog(QDialog):
                 reminder.get("owner_name", ""),
                 reminder.get("district", ""),
                 reminder.get("section", ""),
+                reminder.get("subsection", ""),
                 reminder.get("land_number", ""),
                 reminder.get("note", ""),
             ]
@@ -1117,53 +1124,131 @@ class FollowUpListDialog(QDialog):
         self.accept()
 
 
-class DailyContactLogDialog(QDialog):
+CALENDAR_STATUS_STYLES = {
+    "scheduled": {"label": "已排定", "bg": QColor("#1e3a5f"), "text": QColor("#93c5fd")},
+    "overdue": {"label": "已逾期", "bg": QColor("#5b2230"), "text": QColor("#fca5a5")},
+    "completed": {"label": "已完成", "bg": QColor("#14532d"), "text": QColor("#86efac")},
+    "skipped": {"label": "已略過", "bg": QColor("#334155"), "text": QColor("#cbd5e1")},
+}
+
+
+class _CalendarDayCell(QFrame):
+    """One clickable day box inside VisitCalendarDialog's month grid.
+
+    A plain QFrame subclass rather than a monkey-patched mousePressEvent
+    on a generic QWidget -- overriding the virtual method through proper
+    subclassing is the reliable way to make a non-button widget clickable
+    in Qt; assigning to the instance attribute directly is a common but
+    fragile shortcut.
+    """
+
+    def __init__(self, date_value, on_click):
+        super().__init__()
+        self.date_value = date_value
+        self._on_click = on_click
+
+    def mousePressEvent(self, event):
+        if self._on_click is not None:
+            self._on_click(self.date_value)
+        super().mousePressEvent(event)
+
+
+class VisitCalendarDialog(QDialog):
+    """行程月曆 -- replaces the old separate 每日外勤紀錄 and 未來排程 dialogs.
+
+    The user wanted a more intuitive way to see which landowners had been
+    added to a field-visit route than two side-by-side tables they had to
+    cross-reference by date themselves: a month calendar where each day
+    cell shows, at a glance, who is on it and how that item stands --
+    scheduled, overdue, completed, or skipped -- color-coded, with a
+    detail list below for the selected day. See
+    load_visit_calendar_items()/list_visit_calendar_items() (server and
+    repository side) for how the two old data sources (unresolved
+    schedule items, daily contact logs) are merged into this single list
+    without double-counting.
+
+    Works outside api_mode too, unlike the old 未來排程 (which used to
+    refuse to open at all without a server connection): local/SQLite mode
+    has no field-visit-route data, but still has contact_logs, so the
+    calendar just shows less there (see
+    CustomerRepository.list_visit_calendar_items()'s docstring) instead of
+    being unavailable outright.
+    """
+
     def __init__(self, window, parent=None, on_record_activated=None):
         super().__init__(parent)
         self.window = window
         self.on_record_activated = on_record_activated
-        self.rows = []
-        self.setWindowTitle("每日外勤紀錄")
-        self.setModal(True)
-        self.resize(940, 560)
+        self.items_by_date = {}
+        self.selected_date = QDate.currentDate()
+        self.displayed_month = QDate(self.selected_date.year(), self.selected_date.month(), 1)
+        self.setWindowTitle("行程月曆")
+        # Deliberately non-modal -- see the matching comment that used to
+        # be on DailyContactLogDialog/UpcomingFieldVisitsDialog and
+        # show_visit_calendar() in customer_productivity_workflows.py.
+        # Wider than a first pass (760) -- a narrow 7-column grid was
+        # cutting owner names off inside each day cell (user report: "行
+        # 程月曆沒辦法很好的看到地主名稱"); more width per column gives
+        # names more room before they need to wrap.
+        self.resize(980, 780)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
 
-        controls = QHBoxLayout()
-        controls.addWidget(QLabel("日期"))
-        self.date_edit = QDateEdit(QDate.currentDate().addDays(-1))
-        self.date_edit.setCalendarPopup(True)
-        self.date_edit.setDisplayFormat("yyyy-MM-dd")
-        self.date_edit.dateChanged.connect(self.refresh)
-        controls.addWidget(self.date_edit)
+        nav_row = QHBoxLayout()
+        self.prev_button = QPushButton("〈")
+        self.prev_button.setFixedWidth(32)
+        self.prev_button.clicked.connect(self.go_previous_month)
+        nav_row.addWidget(self.prev_button)
+        self.month_label = QLabel("")
+        self.month_label.setAlignment(Qt.AlignCenter)
+        nav_row.addWidget(self.month_label, 1)
+        self.next_button = QPushButton("〉")
+        self.next_button.setFixedWidth(32)
+        self.next_button.clicked.connect(self.go_next_month)
+        nav_row.addWidget(self.next_button)
         self.mine_only_checkbox = QCheckBox("只看我自己")
-        self.mine_only_checkbox.setChecked(True)
+        # Defaults to unchecked (everyone's activity) -- same reasoning as
+        # the two dialogs this replaces: a team-wide activity review, not
+        # just a personal log.
+        self.mine_only_checkbox.setChecked(False)
         self.mine_only_checkbox.toggled.connect(self.refresh)
-        controls.addWidget(self.mine_only_checkbox)
-        controls.addStretch(1)
+        nav_row.addWidget(self.mine_only_checkbox)
         refresh_button = QPushButton("重新整理")
         refresh_button.clicked.connect(self.refresh)
-        controls.addWidget(refresh_button)
-        layout.addLayout(controls)
+        nav_row.addWidget(refresh_button)
+        layout.addLayout(nav_row)
+
+        legend_row = QHBoxLayout()
+        for status in ("scheduled", "overdue", "completed", "skipped"):
+            style = CALENDAR_STATUS_STYLES[status]
+            legend_label = QLabel(f"● {style['label']}")
+            legend_label.setStyleSheet(f"color: {style['text'].name()}; font-size: 11px;")
+            legend_row.addWidget(legend_label)
+        legend_row.addStretch(1)
+        layout.addLayout(legend_row)
+
+        self.grid_widget = QWidget()
+        self.grid_layout = QGridLayout(self.grid_widget)
+        self.grid_layout.setSpacing(2)
+        self.grid_layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.grid_widget)
 
         self.summary_label = QLabel("")
         self.summary_label.setWordWrap(True)
         layout.addWidget(self.summary_label)
 
-        self.table = QTableWidget(0, 7)
-        self.table.setHorizontalHeaderLabels(
-            ["時間", "姓名", "地區", "地段", "地號", "方式／結果", "內容"]
-        )
+        self.table = QTableWidget(0, 6)
+        self.table.setHorizontalHeaderLabels(["姓名", "地區", "地段", "小段", "地號", "狀態"])
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setSelectionMode(QTableWidget.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.itemDoubleClicked.connect(self.activate_current_record)
-        for column in range(6):
+        for column in range(5):
             self.table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Stretch)
         layout.addWidget(self.table, 1)
 
         close_button = QPushButton("關閉")
@@ -1175,48 +1260,210 @@ class DailyContactLogDialog(QDialog):
 
         self.refresh()
 
+    def go_previous_month(self):
+        self.displayed_month = self.displayed_month.addMonths(-1)
+        self.refresh()
+
+    def go_next_month(self):
+        self.displayed_month = self.displayed_month.addMonths(1)
+        self.refresh()
+
     def refresh(self, *_args):
-        target_date = self.date_edit.date().toString("yyyy-MM-dd")
         mine_only = self.mine_only_checkbox.isChecked()
+        year = self.displayed_month.year()
+        month = self.displayed_month.month()
+        start_date = QDate(year, month, 1)
+        end_date = QDate(year, month, start_date.daysInMonth())
         try:
-            self.rows = self.window.load_daily_contact_logs(target_date, mine_only=mine_only)
+            items = self.window.load_visit_calendar_items(
+                start_date.toString("yyyy-MM-dd"),
+                end_date.toString("yyyy-MM-dd"),
+                mine_only=mine_only,
+            )
         except Exception as exc:
             QMessageBox.warning(self, "讀取失敗", str(exc))
-            self.rows = []
+            items = []
+        self.items_by_date = {}
+        for item in items:
+            date_key = str(item.get("date") or "")
+            self.items_by_date.setdefault(date_key, []).append(item)
+        self.month_label.setText(start_date.toString("yyyy年M月"))
+        if self.selected_date.year() != year or self.selected_date.month() != month:
+            today = QDate.currentDate()
+            self.selected_date = today if (today.year() == year and today.month() == month) else start_date
+        total_count = len(items)
         self.summary_label.setText(
-            f"{target_date} 共有 {len(self.rows)} 筆聯絡紀錄；雙擊資料列可載入該筆資料。"
+            f"{start_date.toString('yyyy年M月')} 共有 {total_count} 筆行程／紀錄；"
+            "點選日期可展開當天清單，雙擊清單列可載入該筆資料。"
         )
+        self._rebuild_grid(start_date, end_date)
+        self._update_detail()
+
+    def _rebuild_grid(self, start_date, end_date):
+        while self.grid_layout.count():
+            child = self.grid_layout.takeAt(0)
+            widget = child.widget()
+            if widget is not None:
+                # setParent(None) detaches it from the screen immediately;
+                # takeAt() alone only unmanages it from the layout, and
+                # deleteLater() alone leaves it sitting at its old
+                # geometry, visible and overlapping the freshly-built
+                # cells, until the next event-loop pass actually runs the
+                # deferred delete. Both together avoid the ghost-widget
+                # overlap a plain deleteLater() produced when refresh()
+                # ran twice in close succession (e.g. navigating months
+                # quickly).
+                widget.setParent(None)
+                widget.deleteLater()
+
+        for column, label_text in enumerate(["日", "一", "二", "三", "四", "五", "六"]):
+            header_label = QLabel(label_text)
+            header_label.setAlignment(Qt.AlignCenter)
+            header_label.setStyleSheet("color: #94a3b8; font-size: 11px;")
+            self.grid_layout.addWidget(header_label, 0, column)
+
+        today = QDate.currentDate()
+        cursor = QDate(start_date)
+        row = 1
+        column = cursor.dayOfWeek() % 7
+        while cursor <= end_date:
+            cell = self._make_day_cell(QDate(cursor), today)
+            self.grid_layout.addWidget(cell, row, column)
+            column += 1
+            if column > 6:
+                column = 0
+                row += 1
+            cursor = cursor.addDays(1)
+
+    def _make_day_cell(self, date_value, today):
+        date_key = date_value.toString("yyyy-MM-dd")
+        items = self.items_by_date.get(date_key, [])
+
+        cell = _CalendarDayCell(date_value, self._select_day)
+        # Just tall enough for the date number plus two single-line name
+        # pills -- a cell that wraps a long name just grows taller for
+        # that one row on its own (QGridLayout sizes each row to its
+        # tallest cell), it doesn't need every row reserving room for it.
+        # Kept low deliberately: the calendar grid has no stretch factor
+        # (see the layout.addWidget(self.grid_widget) call below), so its
+        # total height is exactly this times 6 rows -- shrinking it is
+        # what actually gives the detail list below more room, not a
+        # stretch-factor change (grid_widget already yields all leftover
+        # space to self.table's stretch=1; the grid's minimum footprint
+        # was simply too tall to leave much of that space over).
+        cell.setMinimumHeight(48)
+        cell.setFrameShape(QFrame.StyledPanel)
+        is_selected = date_value == self.selected_date
+        is_today = date_value == today
+        background = "#1e293b" if is_selected else "#0f172a"
+        if is_selected:
+            # Amber takes priority over the today-marker blue -- the
+            # actively viewed day needs to read clearly even when it
+            # happens to also be today.
+            border = "2px solid #f5a524"
+        elif is_today:
+            border = "2px solid #60a5fa"
+        else:
+            border = "1px solid #1e293b"
+        cell.setStyleSheet(
+            f"QFrame {{ background: {background}; border: {border}; border-radius: 4px; }}"
+        )
+
+        cell_layout = QVBoxLayout(cell)
+        cell_layout.setContentsMargins(3, 2, 3, 2)
+        cell_layout.setSpacing(1)
+
+        date_label = QLabel(str(date_value.day()))
+        date_font = "font-weight: bold;" if date_value == today else ""
+        date_color = "#60a5fa" if date_value == today else "#cbd5e1"
+        date_label.setStyleSheet(f"color: {date_color}; font-size: 11px; {date_font}")
+        cell_layout.addWidget(date_label)
+
+        for item in items[:2]:
+            style = CALENDAR_STATUS_STYLES.get(
+                item.get("calendar_status"), CALENDAR_STATUS_STYLES["scheduled"]
+            )
+            owner_name = str(item.get("owner_name") or "")
+            pill = QLabel(owner_name)
+            # Wrap instead of letting the grid column clip long names --
+            # a narrow 7-column-wide cell was cutting names off with no
+            # way to see the rest without clicking through to the detail
+            # list below. The tooltip is a second fallback for names that
+            # still don't fully fit even after wrapping and widening the
+            # dialog.
+            pill.setWordWrap(True)
+            pill.setToolTip(owner_name)
+            pill.setStyleSheet(
+                f"background: {style['bg'].name()}; color: {style['text'].name()};"
+                " border-radius: 3px; padding: 0px 4px; font-size: 12px;"
+            )
+            cell_layout.addWidget(pill)
+
+        if len(items) > 2:
+            more_label = QLabel(f"+{len(items) - 2} 筆")
+            more_label.setStyleSheet("color: #64748b; font-size: 10px;")
+            cell_layout.addWidget(more_label)
+
+        cell_layout.addStretch(1)
+        return cell
+
+    def _select_day(self, date_value):
+        self.selected_date = date_value
+        start_date = QDate(self.displayed_month.year(), self.displayed_month.month(), 1)
+        end_date = QDate(
+            self.displayed_month.year(), self.displayed_month.month(), start_date.daysInMonth()
+        )
+        self._rebuild_grid(start_date, end_date)
+        self._update_detail()
+
+    def _update_detail(self):
+        date_key = self.selected_date.toString("yyyy-MM-dd")
+        self.rows = self.items_by_date.get(date_key, [])
         self.table.setRowCount(len(self.rows))
-        for row_number, log in enumerate(self.rows):
-            time_label = str(log.get("contacted_at") or log.get("created_at") or "")[:16]
-            method_result = "／".join(
-                part for part in [log.get("method") or "", log.get("result") or ""] if part
+        for row_number, item in enumerate(self.rows):
+            style = CALENDAR_STATUS_STYLES.get(
+                item.get("calendar_status"), CALENDAR_STATUS_STYLES["scheduled"]
             )
             values = [
-                time_label,
-                log.get("owner_name", ""),
-                log.get("district", ""),
-                log.get("section", ""),
-                log.get("land_number", ""),
-                method_result,
-                log.get("note", ""),
+                item.get("owner_name", ""),
+                item.get("district", ""),
+                item.get("section", ""),
+                item.get("subsection", ""),
+                item.get("land_number", ""),
+                style["label"],
             ]
             for column_number, value in enumerate(values):
-                self.table.setItem(row_number, column_number, QTableWidgetItem(str(value or "")))
+                cell = QTableWidgetItem(str(value or ""))
+                if column_number == 5:
+                    cell.setForeground(style["text"])
+                self.table.setItem(row_number, column_number, cell)
         self.table.resizeRowsToContents()
 
-    def current_log(self):
+    def current_item(self):
         row_number = self.table.currentRow()
         if row_number < 0 or row_number >= len(self.rows):
             return None
         return self.rows[row_number]
 
     def activate_current_record(self, *_args):
-        log = self.current_log()
-        if log is None:
+        item = self.current_item()
+        if item is None:
+            # Diagnostic breadcrumb for a user report ("在行程月曆下我沒辦法
+            # 雙擊讀取資料") that could not be reproduced through the normal
+            # code paths -- if this ever fires for real, it pins the failure
+            # down to the double-click not resolving to a valid table row at
+            # all, rather than anything downstream in
+            # open_quality_issue_record(). See application-error.log.
+            from customer_error_handler import log_diagnostic_event
+
+            log_diagnostic_event(
+                "VisitCalendarDialog.activate_current_record",
+                f"current_item() returned None -- table.currentRow()="
+                f"{self.table.currentRow()}, len(self.rows)={len(self.rows)}",
+            )
             return
         if self.on_record_activated is not None:
-            self.on_record_activated(log.get("customer_id"))
+            self.on_record_activated(item.get("customer_id"))
         self.accept()
 
 
@@ -1350,6 +1597,14 @@ class ColumnVisibilityDialog(QDialog):
 
 
 class AdvancedSearchDialog(QDialog):
+    # Reserved criteria key for the exclude-keyword field -- deliberately
+    # not a real ADVANCED_SEARCH_FIELDS entry (those are all per-field
+    # "must contain" filters); this one field applies across every
+    # searchable column and means the opposite ("must NOT contain").
+    # CustomerRecordProcessor pops this key out of advanced_criteria before
+    # its normal per-field matching loop -- see its docstring.
+    EXCLUDE_KEYWORD_KEY = "_exclude_keyword"
+
     def __init__(self, criteria, parent=None):
         super().__init__(parent)
         self.setWindowTitle("進階搜尋")
@@ -1395,6 +1650,18 @@ class AdvancedSearchDialog(QDialog):
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setWidget(scroll_content)
         outer_layout.addWidget(self.scroll_area, 1)
+
+        exclude_separator = QFrame()
+        exclude_separator.setFrameShape(QFrame.HLine)
+        outer_layout.addWidget(exclude_separator)
+
+        exclude_label = QLabel("排除關鍵字（任一欄位包含就不顯示，其餘照樣顯示）")
+        outer_layout.addWidget(exclude_label)
+        self.exclude_input = QLineEdit()
+        self.exclude_input.setPlaceholderText("多個值可用「、」或「，」分隔，任一符合就排除")
+        self.exclude_input.setText(str(criteria.get(self.EXCLUDE_KEYWORD_KEY, "") or ""))
+        self.inputs[self.EXCLUDE_KEYWORD_KEY] = self.exclude_input
+        outer_layout.addWidget(self.exclude_input)
 
         button_row = QHBoxLayout()
         clear_button = QPushButton("清除條件")
@@ -1651,12 +1918,22 @@ class BatchEditPreviewDialog(QDialog):
 
 
 class SharedLandBatchDialog(QDialog):
-    def __init__(self, initial_values=None, parent=None):
+    REQUIRED_SHARED_FIELDS = ("district", "section", "land_number")
+
+    def __init__(
+        self,
+        initial_values=None,
+        parent=None,
+        *,
+        district_options=None,
+        section_options=None,
+        subsection_options=None,
+    ):
         super().__init__(parent)
         initial_values = initial_values or {}
         self.setWindowTitle("同地號批量新增")
         self.setModal(True)
-        self.resize(760, 520)
+        self.resize(760, 560)
 
         self.shared_inputs = {}
         layout = QVBoxLayout(self)
@@ -1667,31 +1944,64 @@ class SharedLandBatchDialog(QDialog):
         shared_fields = (
             ("district", "地區"),
             ("section", "地段"),
+            ("subsection", "小段"),
             ("land_number", "地號"),
-            ("area", "面積/m²"),
-            ("declared_value", "公告現值"),
+            ("area", "面積 (m²)"),
+            ("declared_value", "公告現值 (元)"),
         )
+        completer_options = {
+            "district": district_options,
+            "section": section_options,
+            "subsection": subsection_options,
+        }
         for index, (key, label) in enumerate(shared_fields):
             field_row = (index // 3) * 2
             column = index % 3
+            label_text = f"{label} *" if key in self.REQUIRED_SHARED_FIELDS else label
+            field_label = QLabel(label_text)
+            if key in self.REQUIRED_SHARED_FIELDS:
+                field_label.setStyleSheet("color: var(--text-secondary);")
             edit = QLineEdit(str(initial_values.get(key) or ""))
+            if key in ("area", "declared_value"):
+                edit.setAlignment(Qt.AlignRight)
+            options = completer_options.get(key)
+            if options:
+                completer = QCompleter(sorted(set(options)), edit)
+                completer.setCaseSensitivity(Qt.CaseInsensitive)
+                completer.setFilterMode(Qt.MatchContains)
+                edit.setCompleter(completer)
             self.shared_inputs[key] = edit
-            shared_layout.addWidget(QLabel(label), field_row, column)
+            shared_layout.addWidget(field_label, field_row, column)
             shared_layout.addWidget(edit, field_row + 1, column)
         layout.addLayout(shared_layout)
 
-        layout.addWidget(
+        layout.addWidget(self._build_quick_add_row())
+
+        hint_row = QHBoxLayout()
+        hint_row.addWidget(
             QLabel(
-                "每行一筆，欄位順序：登記次序、姓名、身分證、地址、分子、分母、備註、出訪記錄。\n"
+                "每行一筆，欄位順序：登記次序、姓名、身分證、地址、分子、分母、原因、備註、出訪記錄。\n"
                 "可直接從 Excel 複製貼上（Tab 分隔），也接受逗號分隔；姓名為必填。"
-            )
+            ),
+            1,
         )
+        paste_button = QPushButton("貼上剪貼簿")
+        paste_button.setToolTip("直接以剪貼簿目前內容取代下方文字")
+        paste_button.clicked.connect(self.paste_from_clipboard)
+        hint_row.addWidget(paste_button, 0, Qt.AlignTop)
+        layout.addLayout(hint_row)
+
         self.rows_edit = QPlainTextEdit()
         self.rows_edit.setPlaceholderText(
-            "1\t王小明\tA123456789\t台北市中正區\t1\t2\t備註\t首次拜訪\n"
+            "1\t王小明\tA123456789\t台北市中正區\t1\t2\t買賣\t備註\t首次拜訪\n"
             "2\t陳小華\tB123456789\t新北市板橋區\t1\t2"
         )
+        self.rows_edit.textChanged.connect(self.update_row_status)
         layout.addWidget(self.rows_edit, 1)
+
+        self.row_status_label = QLabel("尚未輸入任何資料。")
+        self.row_status_label.setWordWrap(True)
+        layout.addWidget(self.row_status_label)
 
         button_row = QHBoxLayout()
         button_row.addStretch(1)
@@ -1702,6 +2012,87 @@ class SharedLandBatchDialog(QDialog):
         preview_button.clicked.connect(self.accept)
         button_row.addWidget(preview_button)
         layout.addLayout(button_row)
+
+    def _build_quick_add_row(self):
+        box = QFrame()
+        box.setFrameShape(QFrame.StyledPanel)
+        box_layout = QVBoxLayout(box)
+        box_layout.setContentsMargins(10, 8, 10, 10)
+        box_layout.setSpacing(6)
+        box_layout.addWidget(QLabel("快速新增一列（不需要 Excel，一次輸入一位所有權人）"))
+
+        fields_row = QHBoxLayout()
+        fields_row.setSpacing(8)
+        quick_fields = (
+            ("owner_name", "姓名", "王小明", 3),
+            ("external_id", "身分證", "A123456789", 3),
+            ("address", "地址", "台北市中正區", 4),
+            ("numerator", "分子", "1", 1),
+            ("denominator", "分母", "2", 1),
+            ("registration_reason", "原因", "買賣", 2),
+        )
+        self.quick_inputs = {}
+        for key, label, placeholder, stretch in quick_fields:
+            column = QVBoxLayout()
+            column.setSpacing(2)
+            column.addWidget(QLabel(label))
+            edit = QLineEdit()
+            edit.setPlaceholderText(placeholder)
+            self.quick_inputs[key] = edit
+            column.addWidget(edit)
+            fields_row.addLayout(column, stretch)
+
+        add_button = QPushButton("加入清單")
+        add_button.clicked.connect(self.add_quick_row)
+        fields_row.addWidget(add_button, 0, Qt.AlignBottom)
+        box_layout.addLayout(fields_row)
+        return box
+
+    def add_quick_row(self):
+        name = self.quick_inputs["owner_name"].text().strip()
+        if not name:
+            self.quick_inputs["owner_name"].setFocus()
+            return
+        line = "\t".join(
+            self.quick_inputs[key].text().strip()
+            for key in (
+                "owner_name",
+                "external_id",
+                "address",
+                "numerator",
+                "denominator",
+                "registration_reason",
+            )
+        )
+        existing = self.rows_edit.toPlainText()
+        self.rows_edit.setPlainText(f"{existing}\n{line}" if existing.strip() else line)
+        self.rows_edit.moveCursor(QTextCursor.End)
+        for edit in self.quick_inputs.values():
+            edit.clear()
+        self.quick_inputs["owner_name"].setFocus()
+
+    def paste_from_clipboard(self):
+        text = QApplication.clipboard().text()
+        if text:
+            self.rows_edit.setPlainText(text)
+            self.rows_edit.moveCursor(QTextCursor.End)
+
+    def update_row_status(self):
+        text = self.rows_edit.toPlainText()
+        if not text.strip():
+            self.row_status_label.setText("尚未輸入任何資料。")
+            self.row_status_label.setStyleSheet("")
+            return
+        parsed_rows, errors = parse_shared_land_rows(text)
+        if errors:
+            extra = f"（另有 {len(errors) - 1} 項錯誤）" if len(errors) > 1 else ""
+            self.row_status_label.setText(
+                f"⚠ 已辨識 {len(parsed_rows)} 筆，{errors[0]}{extra}"
+            )
+            self.row_status_label.setStyleSheet("color: #f5a524;")
+        else:
+            self.row_status_label.setText(f"✓ 已辨識 {len(parsed_rows)} 筆，格式正確。")
+            self.row_status_label.setStyleSheet("color: #4ade80;")
 
     def values(self):
         return (

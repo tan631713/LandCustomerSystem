@@ -96,6 +96,17 @@ class CustomerRecordProcessor:
         self.sort_field = sort_field or "rowid"
         self.reverse = bool(reverse)
         self.advanced_criteria = dict(advanced_criteria or {})
+        # "_exclude_keyword" (see AdvancedSearchDialog.EXCLUDE_KEYWORD_KEY)
+        # is not a per-field "must contain" entry like every other key left
+        # in advanced_criteria -- it is a single "must NOT contain in any
+        # searchable field" term, so it is popped out here and given its
+        # own matching logic in matches() instead of falling into the
+        # generic per-field loop, which would otherwise look it up as if it
+        # were a real column (via filter_values.get("_exclude_keyword")),
+        # matching nothing and silently doing nothing.
+        self.exclude_keyword = str(
+            self.advanced_criteria.pop("_exclude_keyword", "") or ""
+        ).casefold()
         self.show_checked_only = bool(show_checked_only)
         self.decryption_cache = decryption_cache
 
@@ -141,7 +152,14 @@ class CustomerRecordProcessor:
         return ""
 
     def build_record(self, row, include_search_text=None):
-        include_search_text = bool(self.keyword) if include_search_text is None else include_search_text
+        # exclude_keyword is matched against search_text too (see
+        # matches()), so it needs building whenever either is set -- not
+        # just the main keyword.
+        include_search_text = (
+            bool(self.keyword or self.exclude_keyword)
+            if include_search_text is None
+            else include_search_text
+        )
         record_id = row["id"]
         ownership_id = self.row_value(row, "ownership_id", record_id) or record_id
         land_id = self.row_value(row, "land_id", None)
@@ -198,6 +216,7 @@ class CustomerRecordProcessor:
             "owner_id": owner_id,
             "district": row["district"] or "",
             "section": row["section"] or "",
+            "subsection": row["subsection"] or "",
             "registration_order": row["registration_order"] or "",
             "land_number": row["land_number"] or "",
             "area": row["area"] or "",
@@ -228,6 +247,7 @@ class CustomerRecordProcessor:
             for part in (
                 str(raw["district"]).strip(),
                 str(raw["section"]).strip(),
+                str(raw["subsection"]).strip(),
                 str(raw["land_number"]).strip(),
             )
             if part
@@ -322,6 +342,10 @@ class CustomerRecordProcessor:
                 value = str(record["filter_values"].get(self.filter_field, "") or "").casefold()
                 if self.keyword not in value:
                     return False
+        if self.exclude_keyword:
+            exclude_terms = split_search_terms(self.exclude_keyword)
+            if exclude_terms and any(term in record["search_text"] for term in exclude_terms):
+                return False
         filter_values = record.get("filter_values", {})
         for key, expected in self.advanced_criteria.items():
             expected_terms = split_search_terms(expected)

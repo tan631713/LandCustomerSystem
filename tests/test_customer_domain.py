@@ -45,6 +45,7 @@ class CustomerDomainTests(unittest.TestCase):
         first = {
             "district": " 中正區 ",
             "section": "一段",
+            "subsection": "",
             "registration_order": "1",
             "land_number": "100",
             "owner_name": "王小明",

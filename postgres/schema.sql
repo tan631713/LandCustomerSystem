@@ -272,6 +272,13 @@ CREATE TABLE IF NOT EXISTS ownership_locations (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS ownership_excel_exports (
+    ownership_id BIGINT PRIMARY KEY REFERENCES ownerships(id) ON DELETE CASCADE,
+    export_count INTEGER NOT NULL DEFAULT 0,
+    first_exported_at TIMESTAMPTZ,
+    last_exported_at TIMESTAMPTZ
+);
+
 CREATE TABLE IF NOT EXISTS duplicate_reviews (
     left_ownership_id BIGINT NOT NULL REFERENCES ownerships(id) ON DELETE CASCADE,
     right_ownership_id BIGINT NOT NULL REFERENCES ownerships(id) ON DELETE CASCADE,
@@ -820,4 +827,41 @@ ADD COLUMN IF NOT EXISTS external_id TEXT;
 
 INSERT INTO schema_migrations (version, name)
 VALUES (11, 'encrypted owner contact identity number')
+ON CONFLICT (version) DO NOTHING;
+
+-- Version 12: birth year, so the desktop edit form can auto-calculate age.
+--
+-- owners.birth_year follows owner_name/external_id/address: the shared
+-- Fernet ciphertext, decrypted client-side, never written as plaintext.
+-- contacts.birth_year instead follows contacts.name/address/phone (plain
+-- text) rather than contacts.external_id -- a birth year alone does not
+-- carry the same identity-theft risk as a national ID number, so it is not
+-- masked for viewers either.
+
+ALTER TABLE owners
+ADD COLUMN IF NOT EXISTS birth_year TEXT;
+
+ALTER TABLE contacts
+ADD COLUMN IF NOT EXISTS birth_year TEXT;
+
+INSERT INTO schema_migrations (version, name)
+VALUES (12, 'owner and contact birth year')
+ON CONFLICT (version) DO NOTHING;
+
+-- Version 13: 小段 (cadastral sub-section), stored alongside district/section
+-- /land_number on lands.
+--
+-- Deliberately NOT part of the existing UNIQUE (district, section,
+-- land_number) constraint or the land_key identity hash computed in
+-- customer_postgres_keys.py / customer_api/aggregates.py: two rows that
+-- already resolve to the same district+section+land_number keep sharing one
+-- lands row even if their subsection differs, exactly as before this
+-- migration. subsection is a plain descriptive field here, matching how it
+-- is treated everywhere else in this release.
+
+ALTER TABLE lands
+ADD COLUMN IF NOT EXISTS subsection TEXT NOT NULL DEFAULT '';
+
+INSERT INTO schema_migrations (version, name)
+VALUES (13, 'land subsection field')
 ON CONFLICT (version) DO NOTHING;

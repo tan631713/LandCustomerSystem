@@ -127,58 +127,75 @@ class ProductivityWorkflowMixin:
         return False
 
     def show_recycle_bin(self):
+        # Used to be a `while True: ... if declined: continue` loop around a
+        # blocking .exec() call -- re-showing a fresh dialog (with reloaded
+        # recycle-bin contents) whenever the user declined a permanent-
+        # delete confirmation. Non-modal has no loop to "continue"; the
+        # equivalent is open_dialog() calling itself again inside its own
+        # on_accepted callback.
         repository = self.active_record_repository()
-        while True:
+
+        def open_dialog():
             dialog = self._app_component("RecycleBinDialog")(repository.list_recycle_bin(), self)
-            if dialog.exec() != QDialog.Accepted:
-                return
-            if dialog.action == "restore":
-                if not self.ensure_can_modify("還原回收桶資料"):
-                    return
-                restored = repository.restore_recycle_items(dialog.selected_ids())
-                self._log_operation("回收桶還原", f"還原 {len(restored)} 筆", "")
-                self.refresh_records(restored[0] if restored else None)
-            elif dialog.action in {"purge", "purge_all"}:
-                if not self.ensure_admin("永久清除回收桶"):
-                    return
-                reply = self._app_component("QMessageBox").question(
-                    self,
-                    "永久刪除確認",
-                    "永久刪除後只能從備份還原，確定繼續嗎？",
-                )
-                if reply != self._app_component("QMessageBox").Yes:
-                    continue
-                ids = None if dialog.action == "purge_all" else dialog.selected_ids()
-                count = repository.purge_recycle_items(ids, self.attachments_dir)
-                self._log_operation("清理回收桶", f"永久刪除 {count} 筆", "")
+
+            def on_accepted():
+                if dialog.action == "restore":
+                    if not self.ensure_can_modify("還原回收桶資料"):
+                        return
+                    restored = repository.restore_recycle_items(dialog.selected_ids())
+                    self._log_operation("回收桶還原", f"還原 {len(restored)} 筆", "")
+                    self.refresh_records(restored[0] if restored else None)
+                elif dialog.action in {"purge", "purge_all"}:
+                    if not self.ensure_admin("永久清除回收桶"):
+                        return
+                    reply = self._app_component("QMessageBox").question(
+                        self,
+                        "永久刪除確認",
+                        "永久刪除後只能從備份還原，確定繼續嗎？",
+                    )
+                    if reply != self._app_component("QMessageBox").Yes:
+                        open_dialog()
+                        return
+                    ids = None if dialog.action == "purge_all" else dialog.selected_ids()
+                    count = repository.purge_recycle_items(ids, self.attachments_dir)
+                    self._log_operation("清理回收桶", f"永久刪除 {count} 筆", "")
+
+            self._show_non_modal_dialog(dialog, on_accepted=on_accepted)
+
+        open_dialog()
 
     def show_undo_operations(self):
         if not self.ensure_can_modify("復原批次操作"):
             return
         repository = self.active_record_repository()
         dialog = self._app_component("UndoOperationsDialog")(repository.list_undo_operations(), self)
-        if dialog.exec() != QDialog.Accepted:
-            return
-        if self._app_component("QMessageBox").question(
-            self,
-            "確認復原",
-            "系統會把所選操作涉及的資料恢復到操作前，確定繼續嗎？",
-        ) != self._app_component("QMessageBox").Yes:
-            return
-        result = repository.undo_operation(dialog.operation_id)
-        if result:
-            self._log_operation("復原批次操作", result["summary"], "")
-            self.checked_record_ids.clear()
-            self.new_record()
-            self.refresh_records()
-            self._app_component("QMessageBox").information(self, "復原完成", result["summary"])
+
+        def on_accepted():
+            if self._app_component("QMessageBox").question(
+                self,
+                "確認復原",
+                "系統會把所選操作涉及的資料恢復到操作前，確定繼續嗎？",
+            ) != self._app_component("QMessageBox").Yes:
+                return
+            result = repository.undo_operation(dialog.operation_id)
+            if result:
+                self._log_operation("復原批次操作", result["summary"], "")
+                self.checked_record_ids.clear()
+                self.new_record()
+                self.refresh_records()
+                self._app_component("QMessageBox").information(self, "復原完成", result["summary"])
+
+        self._show_non_modal_dialog(dialog, on_accepted=on_accepted)
 
     def manage_users(self):
         if not self.ensure_admin("使用者與權限管理"):
             return
         repository = self.active_record_repository()
-        self._app_component("UserManagementDialog")(repository, self.encryption_key, self).exec()
-        self._log_operation("使用者管理", "檢視或更新帳號與權限", "")
+        dialog = self._app_component("UserManagementDialog")(repository, self.encryption_key, self)
+        self._show_non_modal_dialog(
+            dialog,
+            on_finished=lambda: self._log_operation("使用者管理", "檢視或更新帳號與權限", ""),
+        )
 
     def manage_external_backups(self):
         if not self.ensure_admin("異地完整備份"):
@@ -191,67 +208,71 @@ class ProductivityWorkflowMixin:
                 max_count=policy["max_count"],
                 parent=self,
             )
-            dialog.exec()
-            self.refresh_backup_status()
+            self._show_non_modal_dialog(dialog, on_finished=self.refresh_backup_status)
             return
         dialog = self._app_component("BackupTargetsDialog")(self.repository, self.productivity, self)
-        dialog.exec()
-        if dialog.restore_succeeded:
-            QApplication.quit()
-            return
-        self.repository.log_operation("異地備份", "開啟異地備份管理", "")
-        self.refresh_backup_status()
+
+        def on_finished():
+            if dialog.restore_succeeded:
+                QApplication.quit()
+                return
+            self.repository.log_operation("異地備份", "開啟異地備份管理", "")
+            self.refresh_backup_status()
+
+        self._show_non_modal_dialog(dialog, on_finished=on_finished)
 
     def show_workflow_board(self):
-        if not self.ensure_can_modify("案件工作流程"):
-            return
-        repository = self.active_record_repository()
-        self._app_component("WorkflowDialog")(repository, self).exec()
-        self._log_operation("案件工作流程", "更新案件或任務", "")
-        self.refresh_records(self.selected_record_id)
-        self.refresh_notification_status()
+        self.open_case_planning_workflow()
 
     def show_notification_center(self):
-        self._app_component("NotificationCenterDialog")(self.active_record_repository(), self).exec()
-        self.refresh_notification_status()
+        dialog = self._app_component("NotificationCenterDialog")(self.active_record_repository(), self)
+        self._show_non_modal_dialog(dialog, on_finished=self.refresh_notification_status)
 
     def manage_import_profiles(self):
         if not self.ensure_can_modify("Excel 匯入設定檔"):
             return
-        self._app_component("ImportProfilesDialog")(self.repository, dict(LAND_FIELDS), self).exec()
-        applied = apply_default_import_profile(self.repository)
-        self._log_operation("匯入設定檔", f"套用 {applied} 個預設欄名", "")
+        dialog = self._app_component("ImportProfilesDialog")(self.repository, dict(LAND_FIELDS), self)
+
+        def on_finished():
+            applied = apply_default_import_profile(self.repository)
+            self._log_operation("匯入設定檔", f"套用 {applied} 個預設欄名", "")
+
+        self._show_non_modal_dialog(dialog, on_finished=on_finished)
 
     def manage_report_templates(self):
         if not self.ensure_can_modify("報表與列印範本"):
             return
         dialog = self._app_component("ReportTemplatesDialog")(self.repository, dict(LAND_FIELDS), self)
-        if dialog.exec() != QDialog.Accepted or not dialog.export_template:
-            return
-        record_ids = self.selected_or_checked_record_ids()
-        if not record_ids:
-            self._app_component("QMessageBox").information(self, "尚未選取", "請先勾選或選取要輸出的資料。")
-            return
-        file_path, _selected_filter = QFileDialog.getSaveFileName(
-            self,
-            "儲存範本報表",
-            str(self.app_dir / "土地資料報表.docx"),
-            "Word 文件 (*.docx)",
-        )
-        if not file_path:
-            return
-        if not file_path.lower().endswith(".docx"):
-            file_path += ".docx"
-        rows = []
-        for row in self.active_record_repository().fetch_customers_by_ids(record_ids):
-            plain = self.get_plain_record_data(row)
-            plain["id"] = row["id"]
-            rows.append(plain)
-        count = export_report_with_template(
-            file_path, rows, dialog.export_template, dict(LAND_FIELDS)
-        )
-        self._log_operation("範本報表", f"輸出 {count} 筆", file_path)
-        self._app_component("QMessageBox").information(self, "報表完成", f"已輸出 {count} 筆資料：\n{file_path}")
+
+        def on_accepted():
+            if not dialog.export_template:
+                return
+            record_ids = self.selected_or_checked_record_ids()
+            if not record_ids:
+                self._app_component("QMessageBox").information(self, "尚未選取", "請先勾選或選取要輸出的資料。")
+                return
+            file_path, _selected_filter = QFileDialog.getSaveFileName(
+                self,
+                "儲存範本報表",
+                str(self.app_dir / "土地資料報表.docx"),
+                "Word 文件 (*.docx)",
+            )
+            if not file_path:
+                return
+            if not file_path.lower().endswith(".docx"):
+                file_path += ".docx"
+            rows = []
+            for row in self.active_record_repository().fetch_customers_by_ids(record_ids):
+                plain = self.get_plain_record_data(row)
+                plain["id"] = row["id"]
+                rows.append(plain)
+            count = export_report_with_template(
+                file_path, rows, dialog.export_template, dict(LAND_FIELDS)
+            )
+            self._log_operation("範本報表", f"輸出 {count} 筆", file_path)
+            self._app_component("QMessageBox").information(self, "報表完成", f"已輸出 {count} 筆資料：\n{file_path}")
+
+        self._show_non_modal_dialog(dialog, on_accepted=on_accepted)
 
     def show_duplicate_finder(self):
         if not self.ensure_can_modify("智慧重複資料檢查"):
@@ -269,37 +290,46 @@ class ProductivityWorkflowMixin:
             self._app_component("QMessageBox").information(self, "檢查完成", "沒有發現尚未確認的高相似資料。")
             return
         dialog = self._app_component("DuplicateFinderDialog")(pairs, self)
-        if dialog.exec() != QDialog.Accepted or not dialog.pair:
-            return
-        left_id, right_id = dialog.pair["left_id"], dialog.pair["right_id"]
-        if dialog.action == "ignore":
-            repository.ignore_duplicate_pair(left_id, right_id)
-            self._log_operation("忽略重複建議", f"ID {left_id} / {right_id}", "")
-            return
-        self.checked_record_ids = {left_id, right_id}
-        self.merge_checked_records()
+
+        def on_accepted():
+            if not dialog.pair:
+                return
+            left_id, right_id = dialog.pair["left_id"], dialog.pair["right_id"]
+            if dialog.action == "ignore":
+                repository.ignore_duplicate_pair(left_id, right_id)
+                self._log_operation("忽略重複建議", f"ID {left_id} / {right_id}", "")
+                return
+            self.checked_record_ids = {left_id, right_id}
+            self.merge_checked_records()
+
+        self._show_non_modal_dialog(dialog, on_accepted=on_accepted)
 
     def show_map_visualization(self):
         if not self.ensure_can_modify("地圖與地號視覺化"):
             return
         dialog = self._app_component("MapLocationsDialog")(
-            self.active_record_repository(), self.fernet, self.selected_record_id, self
+            self.active_record_repository(), self.fernet, self.selected_record_id, self,
+            settings_repository=self.repository,
         )
-        if dialog.exec() != QDialog.Accepted or not dialog.export_requested:
-            return
-        file_path, _selected_filter = QFileDialog.getSaveFileName(
-            self,
-            "儲存土地位置視覺化",
-            str(self.app_dir / "土地位置與地號視覺化.html"),
-            "HTML 網頁 (*.html)",
-        )
-        if not file_path:
-            return
-        if not file_path.lower().endswith(".html"):
-            file_path += ".html"
-        count = self.productivity.build_map_html(dialog.rows, file_path)
-        self._log_operation("地圖視覺化", f"輸出 {count} 個位置", file_path)
-        open_local_path(file_path, self, item_label="土地位置視覺化")
+
+        def on_accepted():
+            if not dialog.export_requested:
+                return
+            file_path, _selected_filter = QFileDialog.getSaveFileName(
+                self,
+                "儲存土地位置視覺化",
+                str(self.app_dir / "土地位置與地號視覺化.html"),
+                "HTML 網頁 (*.html)",
+            )
+            if not file_path:
+                return
+            if not file_path.lower().endswith(".html"):
+                file_path += ".html"
+            count = self.productivity.build_map_html(dialog.rows, file_path)
+            self._log_operation("地圖視覺化", f"輸出 {count} 個位置", file_path)
+            open_local_path(file_path, self, item_label="土地位置視覺化")
+
+        self._show_non_modal_dialog(dialog, on_accepted=on_accepted)
 
     def verify_managed_attachments(self):
         if not self.ensure_admin("檢查納管附件"):
@@ -316,66 +346,105 @@ class ProductivityWorkflowMixin:
         self._log_operation("附件完整性檢查", message, "")
 
     def run_data_quality_check(self):
+        # Two chained dialogs -- rules_dialog's acceptance used to
+        # synchronously gate opening DataQualityDialog. Non-modal has no
+        # synchronous gate, so the second dialog is only constructed
+        # inside the first one's on_finished callback, and its own
+        # completion (statusBar summary) is likewise deferred to its own
+        # on_finished callback.
         selected_rule_keys = self._app_component("load_quality_rule_keys")()
         rules_dialog = self._app_component("DataQualityRulesDialog")(selected_rule_keys, self)
-        if rules_dialog.exec() != QDialog.Accepted:
-            self.statusBar().showMessage("已取消資料品質檢查。", 2500)
-            return
-        selected_rule_keys = rules_dialog.selected_rules()
-        self._app_component("save_quality_rule_keys")(selected_rule_keys)
 
-        rows = self.active_record_repository().fetch_all_customer_rows()
-        plain_records = []
-        for row in rows:
-            data = self.get_plain_record_data(row)
-            data["id"] = row["id"]
-            plain_records.append(data)
-        all_issues = inspect_customer_quality(plain_records, enabled_rules=selected_rule_keys)
-        ignored_signatures = self._app_component("load_ignored_quality_issue_signatures")()
-        issues = [
-            issue for issue in all_issues
-            if quality_issue_signature(issue) not in ignored_signatures
-        ]
-        ignored_count = len(all_issues) - len(issues)
-        active_count_state = {"value": len(issues)}
-        ignored_count_state = {"value": ignored_count}
+        def on_rules_finished():
+            if rules_dialog.result() != QDialog.Accepted:
+                self.statusBar().showMessage("已取消資料品質檢查。", 2500)
+                return
+            selected_rules = rules_dialog.selected_rules()
+            self._app_component("save_quality_rule_keys")(selected_rules)
 
-        def ignore_quality_issue(issue):
-            signature = quality_issue_signature(issue)
-            if signature not in ignored_signatures:
-                ignored_signatures.add(signature)
-                active_count_state["value"] = max(0, active_count_state["value"] - 1)
-                ignored_count_state["value"] += 1
+            rows = self.active_record_repository().fetch_all_customer_rows()
+            plain_records = []
+            for row in rows:
+                data = self.get_plain_record_data(row)
+                data["id"] = row["id"]
+                plain_records.append(data)
+            all_issues = inspect_customer_quality(plain_records, enabled_rules=selected_rules)
+            ignored_signatures = self._app_component("load_ignored_quality_issue_signatures")()
+            issues = [
+                issue for issue in all_issues
+                if quality_issue_signature(issue) not in ignored_signatures
+            ]
+            ignored_count = len(all_issues) - len(issues)
+            active_count_state = {"value": len(issues)}
+            ignored_count_state = {"value": ignored_count}
+
+            def ignore_quality_issue(issue):
+                signature = quality_issue_signature(issue)
+                if signature not in ignored_signatures:
+                    ignored_signatures.add(signature)
+                    active_count_state["value"] = max(0, active_count_state["value"] - 1)
+                    ignored_count_state["value"] += 1
+                    self._app_component("save_ignored_quality_issue_signatures")(ignored_signatures)
+
+            def clear_ignored_quality_issues():
+                ignored_signatures.clear()
+                ignored_count_state["value"] = 0
                 self._app_component("save_ignored_quality_issue_signatures")(ignored_signatures)
 
-        def clear_ignored_quality_issues():
-            ignored_signatures.clear()
-            ignored_count_state["value"] = 0
-            self._app_component("save_ignored_quality_issue_signatures")(ignored_signatures)
+            quality_dialog = self._app_component("DataQualityDialog")(
+                issues,
+                total_records=len(plain_records),
+                parent=self,
+                on_issue_activated=self.open_quality_issue_record,
+                on_issue_ignored=ignore_quality_issue,
+                ignored_count=ignored_count,
+                on_clear_ignored=clear_ignored_quality_issues,
+            )
 
-        self._app_component("DataQualityDialog")(
-            issues,
-            total_records=len(plain_records),
-            parent=self,
-            on_issue_activated=self.open_quality_issue_record,
-            on_issue_ignored=ignore_quality_issue,
-            ignored_count=ignored_count,
-            on_clear_ignored=clear_ignored_quality_issues,
-        ).exec()
-        self.statusBar().showMessage(
-            f"資料品質檢查完成：{len(plain_records)} 筆資料，"
-            f"{active_count_state['value']} 個未確認提醒，{ignored_count_state['value']} 個已隱藏；"
-            f"已啟用 {len(selected_rule_keys)} 項規則。",
-            4000,
-        )
+            def on_quality_dialog_finished():
+                self.statusBar().showMessage(
+                    f"資料品質檢查完成：{len(plain_records)} 筆資料，"
+                    f"{active_count_state['value']} 個未確認提醒，{ignored_count_state['value']} 個已隱藏；"
+                    f"已啟用 {len(selected_rules)} 項規則。",
+                    4000,
+                )
+
+            self._show_non_modal_dialog(quality_dialog, on_finished=on_quality_dialog_finished)
+
+        self._show_non_modal_dialog(rules_dialog, on_finished=on_rules_finished)
 
     def open_quality_issue_record(self, record_id):
+        # Diagnostic breadcrumbs for a user report ("在行程月曆下我沒辦法雙擊
+        # 讀取資料"/"雙擊資料列可直接跳轉到該筆地主資料，這項無法正常使用")
+        # that could not be reproduced through any of the normal code paths
+        # (direct calls, a real simulated double-click, a pre-existing
+        # selection, a background search racing it -- all resolved
+        # correctly in testing). If this method silently fails to reach its
+        # last line for real, or reaches it with a selected_record_id that
+        # does not match record_id, this pins down exactly where -- see
+        # application-error.log. Safe to remove once the report is
+        # resolved; see 完整版變更紀錄.txt for context.
+        from customer_error_handler import log_diagnostic_event
+
+        log_diagnostic_event(
+            "open_quality_issue_record", f"start record_id={record_id}"
+        )
         self.refresh_records(record_id)
         self.load_record(record_id)
         self.statusBar().showMessage(f"已載入資料 ID {record_id}，可在右側表單修正。", 4000)
+        log_diagnostic_event(
+            "open_quality_issue_record",
+            f"done record_id={record_id} selected_record_id={self.selected_record_id} "
+            f"district_field={self.fields['district'].text()!r}",
+        )
 
     def show_dashboard(self):
-        self._app_component("DashboardDialog")(self.dashboard_stats(), self).exec()
+        self._show_non_modal_report_dialog(
+            "_dashboard_dialog",
+            self._app_component("DashboardDialog"),
+            self.dashboard_stats(),
+            self,
+        )
 
     def show_record_history(self):
         if self.selected_record_id is None:
@@ -387,11 +456,12 @@ class ProductivityWorkflowMixin:
             return
         plain_data = self.get_plain_record_data(row)
         logs = self.plain_record_change_logs(self.selected_record_id)
-        self._app_component("RecordHistoryDialog")(
+        dialog = self._app_component("RecordHistoryDialog")(
             logs,
             self.record_label(self.selected_record_id, plain_data),
             self,
-        ).exec()
+        )
+        self._show_non_modal_dialog(dialog)
 
     def edit_follow_up_reminder(self):
         if not self.ensure_can_modify("追蹤提醒"):
@@ -417,45 +487,47 @@ class ProductivityWorkflowMixin:
             reminder,
             self,
         )
-        if dialog.exec() != QDialog.Accepted:
-            return
-        if dialog.delete_requested:
+
+        def on_accepted():
+            if dialog.delete_requested:
+                try:
+                    deleted = repository.delete_follow_up_reminder(
+                        self.selected_record_id
+                    )
+                except DesktopApiError as exc:
+                    self._app_component("QMessageBox").critical(self, "清除失敗", str(exc))
+                    return
+                if deleted and not self.api_mode:
+                    repository.log_operation(
+                        "清除追蹤提醒",
+                        self.record_label(self.selected_record_id, plain_data),
+                        "",
+                    )
+                self._app_component("QMessageBox").information(self, "已清除", "已清除這筆資料的追蹤提醒。")
+                self.refresh_records(self.selected_record_id)
+                return
+            values = dialog.values()
+            encrypted_note = encrypt_value(self.fernet, values.get("note") or "")
             try:
-                deleted = repository.delete_follow_up_reminder(
-                    self.selected_record_id
+                repository.save_follow_up_reminder(
+                    self.selected_record_id,
+                    values.get("due_date"),
+                    values.get("status"),
+                    encrypted_note,
                 )
             except DesktopApiError as exc:
-                self._app_component("QMessageBox").critical(self, "清除失敗", str(exc))
+                self._app_component("QMessageBox").critical(self, "儲存失敗", str(exc))
                 return
-            if deleted and not self.api_mode:
+            if not self.api_mode:
                 repository.log_operation(
-                    "清除追蹤提醒",
+                    "設定追蹤提醒",
                     self.record_label(self.selected_record_id, plain_data),
-                    "",
+                    f"{values.get('due_date') or '未設定日期'} / {values.get('status')}",
                 )
-            self._app_component("QMessageBox").information(self, "已清除", "已清除這筆資料的追蹤提醒。")
             self.refresh_records(self.selected_record_id)
-            return
-        values = dialog.values()
-        encrypted_note = encrypt_value(self.fernet, values.get("note") or "")
-        try:
-            repository.save_follow_up_reminder(
-                self.selected_record_id,
-                values.get("due_date"),
-                values.get("status"),
-                encrypted_note,
-            )
-        except DesktopApiError as exc:
-            self._app_component("QMessageBox").critical(self, "儲存失敗", str(exc))
-            return
-        if not self.api_mode:
-            repository.log_operation(
-                "設定追蹤提醒",
-                self.record_label(self.selected_record_id, plain_data),
-                f"{values.get('due_date') or '未設定日期'} / {values.get('status')}",
-            )
-        self.refresh_records(self.selected_record_id)
-        self._app_component("QMessageBox").information(self, "已儲存", "追蹤提醒已儲存。")
+            self._app_component("QMessageBox").information(self, "已儲存", "追蹤提醒已儲存。")
+
+        self._show_non_modal_dialog(dialog, on_accepted=on_accepted)
 
     def show_follow_up_list(self):
         repository = self.active_record_repository()
@@ -463,18 +535,77 @@ class ProductivityWorkflowMixin:
             self.plain_follow_up_reminder(row)
             for row in repository.list_follow_up_reminders()
         ]
-        self._app_component("FollowUpListDialog")(reminders, self, on_record_activated=self.open_quality_issue_record).exec()
+        self._show_non_modal_report_dialog(
+            "_follow_up_list_dialog",
+            self._app_component("FollowUpListDialog"),
+            reminders,
+            self,
+            on_record_activated=self.open_quality_issue_record,
+        )
 
-    def load_daily_contact_logs(self, target_date, mine_only=False):
+    def _show_non_modal_report_dialog(self, attr_name, dialog_factory, *args, **kwargs):
+        """Open (or refocus) a non-modal, view-only report/status dialog.
+
+        每日外勤紀錄 and 未來排程 used to be opened with .exec(), a blocking
+        modal call -- the user explicitly asked to be able to have several
+        of these windows open together (e.g. 每日外勤紀錄 next to 未來排程, to
+        cross-reference) and still use the main window while one is open,
+        which a modal .exec() call makes impossible: nothing else can be
+        interacted with, including the menu action that would open a
+        second one. Later extended, on request, to every dialog in the app
+        that is purely informational -- opened via .exec() with no code
+        afterward that depends on how the user closed it (no
+        `if dialog.exec() != QDialog.Accepted: ...`), so nothing about its
+        result needs to be awaited synchronously.
+
+        `dialog_factory` is the dialog class/constructor itself (e.g.
+        `self._app_component("HealthCheckDialog")`, or a class imported
+        directly in a module that doesn't route dialog lookups through
+        _app_component) -- called with `*args, **kwargs` to build it,
+        exactly as the old `Dialog(...).exec()` call site did.
+
+        The dialog instance is kept on `self` (keyed by attr_name) so a
+        second click on the same menu action re-focuses the existing
+        window instead of spawning a duplicate, and so the Python wrapper
+        object survives after .show() returns (it is not garbage
+        collected just because this method's local variable goes out of
+        scope) -- .show() does not keep it referenced anywhere else the
+        way a blocking .exec() call implicitly did.
+        """
+        existing = getattr(self, attr_name, None)
+        if existing is not None and existing.isVisible():
+            existing.raise_()
+            existing.activateWindow()
+            return existing
+        dialog = dialog_factory(*args, **kwargs)
+        setattr(self, attr_name, dialog)
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+        return dialog
+
+    def load_visit_calendar_items(self, start_date, end_date, mine_only=False):
         repository = self.active_record_repository()
         return [
-            self.plain_daily_contact_log(row)
-            for row in repository.list_contact_logs_by_date(
-                target_date, mine_only=mine_only
+            self.plain_visit_calendar_item(row)
+            for row in repository.list_visit_calendar_items(
+                start_date, end_date, mine_only=mine_only
             )
         ]
 
-    def show_daily_field_visit_log(self):
-        self._app_component("DailyContactLogDialog")(
-            self, self, on_record_activated=self.open_quality_issue_record
-        ).exec()
+    def show_visit_calendar(self):
+        # Replaces the old separate 每日外勤紀錄 / 未來排程 dialogs (see
+        # VisitCalendarDialog's docstring) -- unlike 未來排程 alone, this
+        # still works outside api_mode: local/SQLite mode has no
+        # field-visit-route data, but load_visit_calendar_items() still
+        # surfaces plain contact_logs activity there (see
+        # CustomerRepository.list_visit_calendar_items()'s docstring), so
+        # there is no reason to block the whole dialog the way 未來排程 used
+        # to -- it just shows less.
+        self._show_non_modal_report_dialog(
+            "_visit_calendar_dialog",
+            self._app_component("VisitCalendarDialog"),
+            self,
+            self,
+            on_record_activated=self.open_quality_issue_record,
+        )

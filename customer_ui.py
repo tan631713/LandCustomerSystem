@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from customer_client_connection import normalize_server_api_url
-from customer_error_handler import install_exception_handler
+from customer_error_handler import install_exception_handler, install_native_crash_tracer
 
 
 def get_runtime_directory():
@@ -104,6 +104,7 @@ def run_company_client_health_check(report_path):
 
 def entrypoint():
     install_exception_handler(get_runtime_directory())
+    install_native_crash_tracer(get_runtime_directory())
     apply_company_client_config()
     if "--client-health-report" in sys.argv:
         argument_index = sys.argv.index("--client-health-report")

@@ -248,7 +248,7 @@ class PostgreSQLCollaborationMixin:
                    cl.contacted_at, cl.method, cl.result, cl.next_follow_up,
                    cl.note AS log_note, cl.created_by, cl.created_at,
                    COALESCE(creator.display_name, creator.username, '') AS created_by_name,
-                   land.district, land.section, land.land_number,
+                   land.district, land.section, land.subsection, land.land_number,
                    COALESCE(ownership.owner_name_override, owner.owner_name) AS owner_name
             FROM contact_logs cl
             JOIN ownerships ownership ON ownership.id = cl.ownership_id

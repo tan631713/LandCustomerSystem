@@ -29,13 +29,18 @@ def register_view_routes(app, *, settings, source, current_session):
         q: str = Query(default="", max_length=200),
         district: str = Query(default="", max_length=100),
         section: str = Query(default="", max_length=100),
+        subsection: str = Query(default="", max_length=100),
         offset: int = Query(default=0, ge=0),
         limit: int = Query(default=100, ge=1),
     ):
         records_result = source.list_records(
             session.user,
             query=q,
-            filters={"district": district, "section": section},
+            filters={
+                "district": district,
+                "section": section,
+                "subsection": subsection,
+            },
             offset=0,
             limit=100_000,
         )

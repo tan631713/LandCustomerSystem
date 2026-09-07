@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import tempfile
 import time
@@ -15,6 +16,30 @@ from cryptography.hazmat.primitives import serialization
 import backup_postgresql
 import build_postgresql_release
 import setup_local_https
+
+
+class ReleaseManifestTests(unittest.TestCase):
+    def test_manifest_schema_version_matches_latest_schema_sql_migration(self):
+        # The manifest's postgresql_schema_version is a hardcoded literal in
+        # build_postgresql_release.py, not derived from schema.sql -- it
+        # already went stale once (still said 11 after schema.sql grew a
+        # version-12 migration). Catch that drift here instead of only
+        # noticing it by reading a packaged release-manifest.json by eye.
+        source = Path(build_postgresql_release.__file__).read_text(encoding="utf-8")
+        manifest_match = re.search(r'"postgresql_schema_version":\s*(\d+)', source)
+        self.assertIsNotNone(manifest_match, "postgresql_schema_version literal not found")
+        manifest_version = int(manifest_match.group(1))
+
+        schema_sql = Path("postgres/schema.sql").read_text(encoding="utf-8")
+        migration_versions = [
+            int(match)
+            for match in re.findall(
+                r"INSERT INTO schema_migrations \(version, name\)\s*\n\s*VALUES \((\d+),",
+                schema_sql,
+            )
+        ]
+        self.assertTrue(migration_versions, "no schema_migrations INSERT statements found")
+        self.assertEqual(manifest_version, max(migration_versions))
 
 
 class LocalHttpsCertificateTests(unittest.TestCase):

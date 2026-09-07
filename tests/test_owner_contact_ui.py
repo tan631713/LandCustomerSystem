@@ -1,6 +1,7 @@
 import os
 import ast
 import unittest
+from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
@@ -21,6 +22,7 @@ class _Repository:
     def __init__(self):
         self.calls = []
         self.fail_list = False
+        self.search_results = []
         self.rows = [
             {
                 "relation_id": 1,
@@ -88,7 +90,7 @@ class _Repository:
 
     def search_owner_contacts(self, query, limit=50):
         self.calls.append(("search", query, limit))
-        return []
+        return [dict(row) for row in self.search_results]
 
     def find_owner_contact_duplicates(self, **values):
         self.calls.append(("duplicates", values))
@@ -140,6 +142,25 @@ class _Repository:
         row["is_primary"] = False
 
 
+class _FakeSignal:
+    """Stand-in for a real Qt signal on plain-Python fake dialogs -- see
+    the identical helper in tests/test_ui_workflow.py for the full
+    rationale (production dialogs are real QDialog subclasses with a
+    genuine `.finished` signal _show_non_modal_dialog() connects to;
+    these fakes are plain Python objects with no human present, so
+    `.show()` immediately `.emit()`s it)."""
+
+    def __init__(self):
+        self._callbacks = []
+
+    def connect(self, callback):
+        self._callbacks.append(callback)
+
+    def emit(self, *args):
+        for callback in list(self._callbacks):
+            callback(*args)
+
+
 class _AcceptedDialog:
     payload = {
         "mode": "new",
@@ -163,9 +184,24 @@ class _AcceptedDialog:
     }
 
     def __init__(self, *_args, **_kwargs):
-        pass
+        self.finished = _FakeSignal()
 
     def exec(self):
+        return QDialog.Accepted
+
+    def show(self):
+        self.finished.emit(QDialog.Accepted)
+
+    def raise_(self):
+        pass
+
+    def activateWindow(self):
+        pass
+
+    def isVisible(self):
+        return False
+
+    def result(self):
         return QDialog.Accepted
 
     def result_values(self):
@@ -178,9 +214,28 @@ class _DetailDialog:
     def __init__(self, *_args, **kwargs):
         self.kwargs = kwargs
         self.edit_requested = False
+        self.finished = _FakeSignal()
         self.instances.append(self)
 
     def exec(self):
+        return QDialog.Rejected
+
+    def show(self):
+        # Matches the old .exec() -> QDialog.Rejected this fake always
+        # returned: a read-only detail view the "user" closed without
+        # requesting edit.
+        self.finished.emit(QDialog.Rejected)
+
+    def raise_(self):
+        pass
+
+    def activateWindow(self):
+        pass
+
+    def isVisible(self):
+        return False
+
+    def result(self):
         return QDialog.Rejected
 
 
@@ -290,10 +345,15 @@ class OwnerContactUiTests(unittest.TestCase):
         self.assertEqual(self.repository.rows[0]["name"], "王大明")
 
         widget.table.selectRow(0)
+        # deactivate_selected() now opens this non-modally (.show(), not
+        # .exec()) -- calling the dialog's own real .accept() when shown
+        # is the equivalent simulated "user accepted" trigger: it sets
+        # result() to Accepted and emits the real finished signal, same
+        # as a genuine button click would.
         with patch.object(
             DeactivateRelationDialog,
-            "exec",
-            return_value=QDialog.Accepted,
+            "show",
+            lambda self: self.accept(),
         ):
             widget.deactivate_selected()
         self.assertTrue(
@@ -398,6 +458,163 @@ class OwnerContactUiTests(unittest.TestCase):
         detail = _DetailDialog.instances[-1]
         self.assertTrue(detail.kwargs["readonly"])
         self.assertTrue(detail.kwargs["allow_edit"])
+
+    def test_add_dialog_has_no_upfront_mode_tabs(self):
+        dialog = OwnerContactDialog(self.repository, 7)
+        try:
+            self.assertFalse(hasattr(dialog, "mode_tabs"))
+            self.assertTrue(dialog._match_table.isHidden())
+            self.assertTrue(dialog._use_match_button.isHidden())
+            self.assertTrue(dialog._unlink_button.isHidden())
+        finally:
+            dialog.close()
+
+    def test_typing_a_name_shows_live_matches_without_a_separate_tab(self):
+        self.repository.search_results = [
+            {
+                "id": 9,
+                "name": "王小明",
+                "mobile_phone": "0912345678",
+                "home_phone": "",
+                "registered_address": "桃園市桃園區",
+                "contact_address": "",
+                "owner_count": 2,
+            }
+        ]
+        dialog = OwnerContactDialog(self.repository, 7)
+        try:
+            dialog.new_name.setText("王小明")
+            dialog._search_for_matching_contacts()
+            self.assertIn(("search", "王小明", 5), self.repository.calls)
+            self.assertFalse(dialog._match_table.isHidden())
+            self.assertFalse(dialog._use_match_button.isHidden())
+            self.assertEqual(dialog._match_table.rowCount(), 1)
+            self.assertIn("1", dialog._match_hint.text())
+        finally:
+            dialog.close()
+
+    def test_short_or_empty_name_does_not_search(self):
+        dialog = OwnerContactDialog(self.repository, 7)
+        try:
+            dialog.new_name.setText("王")
+            dialog._search_for_matching_contacts()
+            self.assertEqual(
+                [call for call in self.repository.calls if call[0] == "search"], []
+            )
+            self.assertTrue(dialog._match_table.isHidden())
+        finally:
+            dialog.close()
+
+    def test_no_matches_shows_hint_and_hides_table(self):
+        dialog = OwnerContactDialog(self.repository, 7)
+        try:
+            dialog.new_name.setText("查無此人")
+            dialog._search_for_matching_contacts()
+            self.assertIn("沒有找到", dialog._match_hint.text())
+            self.assertTrue(dialog._match_table.isHidden())
+            self.assertTrue(dialog._use_match_button.isHidden())
+        finally:
+            dialog.close()
+
+    def test_applying_a_match_locks_shared_fields_and_switches_to_link_mode(self):
+        dialog = OwnerContactDialog(self.repository, 7)
+        try:
+            dialog._apply_contact_link(
+                {
+                    "id": 9,
+                    "name": "王小明",
+                    "mobile_phone": "0912345678",
+                    "home_phone": "",
+                    "registered_address": "桃園市桃園區",
+                    "contact_address": "台中市",
+                    "owner_count": 2,
+                }
+            )
+            self.assertEqual(dialog.new_name.text(), "王小明")
+            self.assertEqual(dialog.new_mobile_phone.text(), "0912345678")
+            self.assertFalse(dialog.new_mobile_phone.isEnabled())
+            self.assertFalse(dialog.new_registered_address.isEnabled())
+            self.assertFalse(dialog._unlink_button.isHidden())
+            self.assertIn("王小明", dialog._link_banner.text())
+            self.assertIn("2", dialog._link_banner.text())
+
+            values = dialog.result_values()
+            self.assertEqual(values["mode"], "link")
+            self.assertEqual(values["contact_id"], 9)
+        finally:
+            dialog.close()
+
+    def test_unlink_button_restores_manual_entry_mode(self):
+        dialog = OwnerContactDialog(self.repository, 7)
+        try:
+            dialog._apply_contact_link(
+                {
+                    "id": 9,
+                    "name": "王小明",
+                    "mobile_phone": "0912345678",
+                    "home_phone": "",
+                    "registered_address": "桃園市桃園區",
+                    "contact_address": "",
+                    "owner_count": 2,
+                }
+            )
+            dialog._clear_contact_link()
+            self.assertTrue(dialog.new_mobile_phone.isEnabled())
+            self.assertEqual(dialog.new_mobile_phone.text(), "")
+            self.assertTrue(dialog._unlink_button.isHidden())
+
+            dialog.new_name.setText("陳先生")
+            dialog.new_relationship_type.setCurrentText("兒子")
+            values = dialog.result_values()
+            self.assertEqual(values["mode"], "new")
+            self.assertEqual(values["contact"]["name"], "陳先生")
+        finally:
+            dialog.close()
+
+    def test_birth_year_updates_age_live_and_carries_through_link_and_unlink(self):
+        dialog = OwnerContactDialog(self.repository, 7)
+        try:
+            self.assertEqual(dialog.new_age.text(), "")
+            dialog.new_birth_year.setText("1980")
+            expected_age = str(date.today().year - 1980)
+            self.assertEqual(dialog.new_age.text(), expected_age)
+            values = dialog.result_values()
+            self.assertEqual(values["contact"]["birth_year"], "1980")
+
+            dialog._apply_contact_link(
+                {
+                    "id": 9,
+                    "name": "王小明",
+                    "mobile_phone": "0912345678",
+                    "home_phone": "",
+                    "registered_address": "桃園市桃園區",
+                    "contact_address": "",
+                    "birth_year": "1990",
+                    "owner_count": 2,
+                }
+            )
+            linked_age = str(date.today().year - 1990)
+            self.assertEqual(dialog.new_birth_year.text(), "1990")
+            self.assertEqual(dialog.new_age.text(), linked_age)
+            self.assertFalse(dialog.new_birth_year.isEnabled())
+
+            dialog._clear_contact_link()
+            self.assertTrue(dialog.new_birth_year.isEnabled())
+            self.assertEqual(dialog.new_birth_year.text(), "")
+            self.assertEqual(dialog.new_age.text(), "")
+        finally:
+            dialog.close()
+
+    def test_manual_entry_without_touching_matches_still_creates_new_contact(self):
+        dialog = OwnerContactDialog(self.repository, 7)
+        try:
+            dialog.new_name.setText("李小美")
+            dialog.new_relationship_type.setCurrentText("女兒")
+            values = dialog.result_values()
+            self.assertEqual(values["mode"], "new")
+            self.assertEqual(values["contact"]["name"], "李小美")
+        finally:
+            dialog.close()
 
 
 if __name__ == "__main__":

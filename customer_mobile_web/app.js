@@ -40,13 +40,16 @@ const state = {
   ownerResultsTotal: 0,
   landResultsParams: null,
   landResultsOffset: 0,
-  landResultsTotal: 0
+  landResultsTotal: 0,
+  mapInstance: null,
+  mapMarkerLayer: null,
+  mapItems: []
 };
 
 const MAX_ATTACHMENT_SIZE = 50 * 1024 * 1024;
 const PHOTO_COMPRESSION_THRESHOLD = 1.5 * 1024 * 1024;
 const PHOTO_MAX_DIMENSION = 2048;
-const MOBILE_ASSET_VERSION = 26;
+const MOBILE_ASSET_VERSION = 32;
 const MOBILE_UPDATE_RESUME_KEY = "lcs_mobile_update_resume";
 const MOBILE_UPDATE_RESUME_MAX_AGE_MS = 15 * 60 * 1000;
 
@@ -55,7 +58,8 @@ const pages = {
   field: "今日外勤",
   owners: "地主搜尋",
   lands: "土地搜尋",
-  followups: "追蹤提醒"
+  followups: "追蹤提醒",
+  map: "地圖"
 };
 
 let lastFocusedElement = null;
@@ -65,6 +69,7 @@ let fieldPlanLastFocusedElement = null;
 const recordLabels = {
   district: "地區",
   section: "地段",
+  subsection: "小段",
   registration_order: "登記次序",
   land_number: "地號",
   area: "面積（㎡）",
@@ -676,6 +681,14 @@ function navigate(page, force = false) {
     if (page === "owners") searchOwners();
     if (page === "lands") searchLands();
     if (page === "followups") loadFollowups();
+    if (page === "map") loadMapPage();
+  } else if (page === "map" && state.mapInstance) {
+    // Leaflet computes tile layout from the container's on-screen size at
+    // creation time; a container that was hidden (display:none, via the
+    // .page/.active CSS toggle above) when the map first initialized --
+    // or that's simply being shown again after being hidden -- needs an
+    // explicit nudge to recompute, or it renders with stale/blank tiles.
+    state.mapInstance.invalidateSize();
   }
 }
 
@@ -1768,7 +1781,8 @@ async function submitFieldAction(event) {
       latitude: position ? position.latitude : null,
       longitude: position ? position.longitude : null,
       note: $("#field-action-note").value.trim(),
-      postponed_until: postponedUntil
+      postponed_until: postponedUntil,
+      contact_date: localDateISO()
     };
     if (
       state.fieldActionIdempotencyKey
@@ -1796,9 +1810,9 @@ async function submitFieldAction(event) {
       ? "今日行程已全部處理完成"
       : {
           start: "已開始拜訪",
-          complete: "已完成拜訪，已前往下一位",
-          skip: "已略過，已前往下一位",
-          postpone: "已延後，已前往下一位"
+          complete: "已完成拜訪並記錄一筆聯絡紀錄，已前往下一位",
+          skip: "已略過並記錄一筆聯絡紀錄，已前往下一位",
+          postpone: "已延後並記錄一筆聯絡紀錄，已前往下一位"
         }[action];
     toast(success);
   } catch (error) {
@@ -2033,6 +2047,141 @@ async function loadFollowups() {
   } finally {
     setButtonBusy(refreshButton, false);
   }
+}
+
+async function loadMapPage() {
+  const refreshButton = $("#refresh-map");
+  setButtonBusy(refreshButton, true, "更新中…");
+  const countLabel = $("#map-count");
+  const mapContainer = $("#map-view");
+  const emptyLabel = $("#map-empty");
+  countLabel.textContent = "正在載入地圖資料…";
+  try {
+    const result = await request("/api/v1/record-locations");
+    const items = (result.items || []).filter(
+      item => Number.isFinite(Number(item.latitude)) && Number.isFinite(Number(item.longitude))
+    );
+    if (!items.length) {
+      countLabel.textContent = "";
+      $("#map-district-tabs").replaceChildren();
+      mapContainer.classList.add("hidden");
+      emptyLabel.textContent = "目前還沒有已定位的地主，請先在電腦版的「地圖與地號視覺化」設定座標。";
+      emptyLabel.classList.remove("hidden");
+      return;
+    }
+    emptyLabel.classList.add("hidden");
+    mapContainer.classList.remove("hidden");
+    countLabel.textContent = `已定位 ${formatNumber(items.length)} 筆`;
+    renderMapView(items);
+  } catch (error) {
+    countLabel.textContent = "";
+    mapContainer.classList.add("hidden");
+    emptyLabel.textContent = error.message;
+    emptyLabel.classList.remove("hidden");
+  } finally {
+    setButtonBusy(refreshButton, false);
+  }
+}
+
+function renderMapView(items) {
+  state.mapItems = items;
+  const districtCounts = new Map();
+  items.forEach(item => {
+    const name = item.district || "未填地區";
+    districtCounts.set(name, (districtCounts.get(name) || 0) + 1);
+  });
+  const districts = ["全部", ...[...districtCounts.entries()].sort((a, b) => b[1] - a[1]).map(([name]) => name)];
+
+  const tabsContainer = $("#map-district-tabs");
+  tabsContainer.replaceChildren(...districts.map(name => {
+    const button = element("button", "district-tab", name);
+    button.type = "button";
+    button.dataset.district = name;
+    button.addEventListener("click", () => showMapDistrict(name));
+    return button;
+  }));
+
+  if (!state.mapInstance) {
+    state.mapInstance = L.map($("#map-view"));
+    // 內政部國土測繪中心「通用電子地圖」-- 免費、不需金鑰、中文地名/路名
+    // 涵蓋比 OpenStreetMap 完整，設為預設底圖；CARTO Voyager 是視覺風格
+    // 較接近 Google 地圖的替代選項。地圖右上角的圖層切換器讓使用者自己
+    // 選要看哪一種，跟桌面版「產生視覺化HTML」的底圖選項一致。
+    const nlscLayer = L.tileLayer(
+      "https://wmts.nlsc.gov.tw/wmts/EMAP/default/GoogleMapsCompatible/{z}/{y}/{x}",
+      { maxZoom: 19, attribution: "國土測繪中心 通用電子地圖" }
+    );
+    const cartoLayer = L.tileLayer(
+      "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+      {
+        maxZoom: 20,
+        attribution: "&copy; OpenStreetMap contributors &copy; CARTO"
+      }
+    );
+    nlscLayer.addTo(state.mapInstance);
+    L.control.layers(
+      { "國土測繪中心地圖": nlscLayer, "CARTO 彩色地圖": cartoLayer }
+    ).addTo(state.mapInstance);
+    state.mapMarkerLayer = L.layerGroup().addTo(state.mapInstance);
+  } else {
+    state.mapInstance.invalidateSize();
+  }
+
+  showMapDistrict(districts[0]);
+}
+
+function buildMapMarkerPopup(item, latitude, longitude) {
+  // Built as real DOM nodes (via element()'s safe textContent), not an
+  // HTML template string -- district/section/land_number/owner_name are
+  // decrypted user-entered data and must never be interpolated into raw
+  // innerHTML passed to Leaflet's bindPopup().
+  const popup = document.createElement("div");
+  popup.appendChild(
+    element("b", "", [item.district, item.section, item.land_number].filter(Boolean).join(" "))
+  );
+  popup.appendChild(document.createElement("br"));
+  popup.appendChild(document.createTextNode(text(item.owner_name, "")));
+
+  // Reuses the exact same Google Maps navigation link the field-visit
+  // workflow already builds (field-visit.js, loaded on every mobile
+  // page) so "點一下開始導航" behaves identically everywhere in the app.
+  const buildNavigationUrl = window.LCSFieldVisit && window.LCSFieldVisit.buildGoogleMapsNavigationUrl;
+  if (typeof buildNavigationUrl === "function") {
+    try {
+      const navigationUrl = buildNavigationUrl({ latitude, longitude });
+      popup.appendChild(document.createElement("br"));
+      const link = element("a", "map-popup-nav", "🧭 導航到這裡");
+      link.href = navigationUrl;
+      link.target = "_blank";
+      link.rel = "noopener";
+      popup.appendChild(link);
+    } catch (error) {
+      // No usable coordinates -- silently skip the navigation link
+      // rather than breaking the whole popup over it.
+    }
+  }
+  return popup;
+}
+
+function showMapDistrict(name) {
+  if (!state.mapInstance || !state.mapMarkerLayer) return;
+  state.mapMarkerLayer.clearLayers();
+  const items = state.mapItems || [];
+  const visible = name === "全部" ? items : items.filter(item => (item.district || "未填地區") === name);
+  const bounds = [];
+  visible.forEach(item => {
+    const latitude = Number(item.latitude);
+    const longitude = Number(item.longitude);
+    L.marker([latitude, longitude])
+      .addTo(state.mapMarkerLayer)
+      .bindPopup(buildMapMarkerPopup(item, latitude, longitude));
+    bounds.push([latitude, longitude]);
+  });
+  if (bounds.length) state.mapInstance.fitBounds(bounds, { padding: [24, 24], maxZoom: 17 });
+  else state.mapInstance.setView([23.7, 121.0], 7);
+  $$("#map-district-tabs .district-tab").forEach(button => {
+    button.classList.toggle("active", button.dataset.district === name);
+  });
 }
 
 function renderRecord(record) {
@@ -2757,6 +2906,7 @@ function bindEvents() {
   $("#field-visit-previous").addEventListener("click", () => selectFieldVisitItem(state.fieldVisitIndex - 1));
   $("#field-visit-next").addEventListener("click", () => selectFieldVisitItem(state.fieldVisitIndex + 1));
   $("#refresh-followups").addEventListener("click", loadFollowups);
+  $("#refresh-map").addEventListener("click", loadMapPage);
   $("#contact-form").addEventListener("submit", submitContact);
   $("#contact-form").addEventListener("input", saveContactDraft);
   $("#contact-form").addEventListener("change", saveContactDraft);

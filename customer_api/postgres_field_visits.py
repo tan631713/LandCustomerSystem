@@ -165,6 +165,157 @@ class PostgreSQLFieldVisitMixin:
         with self._connect() as conn:
             return self._get_field_visit_route(conn, user, int(route_id))
 
+    def list_unresolved_field_visit_items(self, user, mine_only=False):
+        """List every field-visit item that has been scheduled but not yet
+        resolved, earliest scheduled date first.
+
+        Before this, the desktop client had no way at all to look back at
+        what had already been scheduled into a route -- 加入今日行程 could
+        only ADD an owner to a route (any date, despite the name), never
+        show what was still pending. A user who schedules ahead for a
+        future date, or whose route slips past its date without every item
+        being dealt with, had no way to see any of that from the desktop.
+
+        "Unresolved" is deliberately broader than just "in the future":
+        it includes anything still 'planned', 'in_progress', or
+        'postponed' regardless of whether its route's date has already
+        passed -- an item scheduled for three days ago that nobody
+        completed, skipped, or cancelled is arguably more worth surfacing
+        than a neatly upcoming one, and showing both together in one
+        date-sorted list makes overdue items visually obvious rather than
+        hiding them in a separate view.
+
+        mine_only mirrors list_contact_logs_by_date()'s pattern: everyone
+        sees everyone's schedule by default (this app treats 每日外勤紀錄
+        as a shared team activity feed, not a per-user silo, and this is
+        the same kind of view), narrowed to the current user's own routes
+        on request.
+        """
+        sql = """
+            SELECT item.id, item.route_id, item.ownership_id, item.status,
+                   item.priority, item.note, item.created_at,
+                   route.visit_date, route.title AS route_title,
+                   COALESCE(assignee.display_name, assignee.username, '')
+                       AS assigned_to_name,
+                   land.district, land.section, land.subsection, land.land_number,
+                   COALESCE(ownership.owner_name_override, owner.owner_name)
+                       AS owner_name
+            FROM field_visit_route_items item
+            JOIN field_visit_routes route ON route.id = item.route_id
+            JOIN ownerships ownership ON ownership.id = item.ownership_id
+            JOIN owners owner ON owner.id = item.owner_id
+            JOIN lands land ON land.id = item.land_id
+            LEFT JOIN users assignee ON assignee.id = route.user_id
+            WHERE item.status IN ('planned', 'in_progress', 'postponed')
+              AND route.status <> 'cancelled'
+        """
+        params = []
+        if mine_only:
+            sql += " AND route.user_id = %s"
+            params.append(int(user.id))
+        sql += " ORDER BY route.visit_date ASC, item.route_order ASC, item.id ASC"
+        with self._connect() as conn:
+            rows = conn.execute(sql, tuple(params)).fetchall()
+        return [_decrypt_record(row, user) for row in rows]
+
+    def list_visit_calendar_items(self, user, start_date, end_date, mine_only=False):
+        """Every field-visit route item and orphan (non-route) contact log
+        within [start_date, end_date], shaped for 行程月曆's calendar grid.
+
+        This is what replaced the desktop client's old separate 每日外勤紀錄
+        (today's actual contact-log results) and 未來排程 (unresolved
+        schedule items) dialogs -- the user asked for one calendar that
+        shows both a day's scheduled/overdue routes AND what was actually
+        done that day, color-coded by status, instead of two separate
+        reports to cross-reference by hand.
+
+        Two sources are unioned, deliberately without overlap:
+
+        - field_visit_route_items, EVERY status (not just the unresolved
+          ones list_unresolved_field_visit_items() returns), joined to its
+          route's visit_date -- this alone covers the full route-item
+          lifecycle (scheduled, overdue, completed, skipped/cancelled) for
+          anything that went through 加入今日行程 / the mobile field-visit
+          flow.
+        - contact_logs rows that have NO field_visit_route_item_id -- i.e.
+          contact that was logged without ever going through a route item
+          (a manual phone call, an office visit, anything logged directly
+          via ContactLogDialog). Route-linked contact logs are deliberately
+          excluded here: completing/skipping/postponing a route item
+          already auto-creates one of these (see AUTO_CONTACT_LOG_STATUSES
+          above), and including it too would just show the same activity
+          twice under two different statuses.
+
+        calendar_status is one of:
+          - "completed"  -- item.status = 'completed', or any orphan
+                            contact log (a contact happened; there is no
+                            further state to distinguish for a manually
+                            logged contact)
+          - "skipped"    -- item.status IN ('skipped', 'cancelled')
+          - "overdue"    -- still planned/in_progress/postponed AND the
+                            route's visit_date has already passed
+          - "scheduled"  -- still planned/in_progress/postponed, date not
+                            yet passed
+
+        mine_only mirrors list_unresolved_field_visit_items()'s pattern:
+        everyone sees everyone's activity by default, narrowed to the
+        current user's own routes/logs on request.
+        """
+        route_sql = """
+            SELECT item.id, item.ownership_id AS customer_id,
+                   route.visit_date AS "date",
+                   CASE
+                       WHEN item.status = 'completed' THEN 'completed'
+                       WHEN item.status IN ('skipped', 'cancelled') THEN 'skipped'
+                       WHEN route.visit_date < CURRENT_DATE THEN 'overdue'
+                       ELSE 'scheduled'
+                   END AS calendar_status,
+                   land.district, land.section, land.subsection, land.land_number,
+                   COALESCE(ownership.owner_name_override, owner.owner_name)
+                       AS owner_name
+            FROM field_visit_route_items item
+            JOIN field_visit_routes route ON route.id = item.route_id
+            JOIN ownerships ownership ON ownership.id = item.ownership_id
+            JOIN owners owner ON owner.id = item.owner_id
+            JOIN lands land ON land.id = item.land_id
+            WHERE route.status <> 'cancelled'
+              AND route.visit_date BETWEEN %s AND %s
+        """
+        route_params = [start_date, end_date]
+        if mine_only:
+            route_sql += " AND route.user_id = %s"
+            route_params.append(int(user.id))
+
+        log_sql = """
+            SELECT cl.id, cl.ownership_id AS customer_id,
+                   COALESCE(cl.contact_date, cl.contacted_at::date, cl.created_at::date)
+                       AS "date",
+                   'completed' AS calendar_status,
+                   land.district, land.section, land.subsection, land.land_number,
+                   COALESCE(ownership.owner_name_override, owner.owner_name)
+                       AS owner_name
+            FROM contact_logs cl
+            JOIN ownerships ownership ON ownership.id = cl.ownership_id
+            JOIN lands land ON land.id = ownership.land_id
+            JOIN owners owner ON owner.id = ownership.owner_id
+            WHERE cl.field_visit_route_item_id IS NULL
+              AND COALESCE(cl.contact_date, cl.contacted_at::date, cl.created_at::date)
+                  BETWEEN %s AND %s
+        """
+        log_params = [start_date, end_date]
+        if mine_only:
+            log_sql += " AND cl.created_by = %s"
+            log_params.append(int(user.id))
+
+        with self._connect() as conn:
+            route_rows = conn.execute(route_sql, tuple(route_params)).fetchall()
+            log_rows = conn.execute(log_sql, tuple(log_params)).fetchall()
+
+        items = [_decrypt_record(row, user) for row in route_rows]
+        items.extend(_decrypt_record(row, user) for row in log_rows)
+        items.sort(key=lambda item: (str(item.get("date") or ""), int(item.get("id") or 0)))
+        return items
+
     @staticmethod
     def _candidate_rows(conn, route_id, *, for_update=False):
         lock_sql = " FOR UPDATE OF item" if for_update else ""
@@ -205,7 +356,7 @@ class PostgreSQLFieldVisitMixin:
                    item.is_order_locked, item.estimated_distance_km,
                    item.arrived_at, item.completed_at, item.postponed_until,
                    item.note, item.created_at, item.updated_at,
-                   land.district, land.section, land.land_number,
+                   land.district, land.section, land.subsection, land.land_number,
                    ownership.registration_order,
                    COALESCE(ownership.owner_name_override, owner.owner_name) AS owner_name,
                    COALESCE(ownership.external_id_override, owner.external_id) AS external_id,
@@ -437,6 +588,27 @@ class PostgreSQLFieldVisitMixin:
             )
         return response
 
+    # Status changes that should leave a contact-log entry behind, so the
+    # visit shows up in the daily field-visit log even when the user never
+    # opens the separate "聯絡紀錄" form. See routes_field_visits.py /
+    # field_visit_service.py for how contact_date reaches this call.
+    #
+    # "completed" was originally left out of this set on the assumption
+    # that finishing a visit was somehow already recorded elsewhere. It
+    # was not: the mobile "完成拜訪" action collects the same note/GPS as
+    # skip/postpone through the exact same form, but silently discarded
+    # them instead of writing a contact_logs row -- so a fully completed
+    # visit, the most common outcome of a day's field work, never showed
+    # up in 每日外勤紀錄 at all. Reported directly by the user ("看不到已
+    # 完成的紀錄") after the report's UI was reworked and made the gap
+    # obvious. Included here now for the same reason skip/postpone are.
+    AUTO_CONTACT_LOG_STATUSES = frozenset({"skipped", "postponed", "completed"})
+    AUTO_CONTACT_LOG_RESULT_LABELS = {
+        "skipped": "略過",
+        "postponed": "延後",
+        "completed": "完成拜訪",
+    }
+
     def transition_field_visit_item(
         self,
         user,
@@ -447,6 +619,7 @@ class PostgreSQLFieldVisitMixin:
         longitude=None,
         note="",
         postponed_until=None,
+        contact_date=None,
         allowed_old_statuses=None,
         idempotency_key=None,
         request_hash="",
@@ -461,7 +634,8 @@ class PostgreSQLFieldVisitMixin:
                 return cached
             current = conn.execute(
                 """
-                SELECT item.id, item.route_id, item.status, route.user_id
+                SELECT item.id, item.route_id, item.status, item.ownership_id,
+                       route.user_id
                 FROM field_visit_route_items item
                 JOIN field_visit_routes route ON route.id = item.route_id
                 WHERE item.id = %s
@@ -489,6 +663,7 @@ class PostgreSQLFieldVisitMixin:
                     "old_status": old_status,
                     "new_status": new_status,
                     "changed": False,
+                    "contact_log_id": None,
                 }
                 self._save_idempotency_result(
                     conn,
@@ -546,6 +721,39 @@ class PostgreSQLFieldVisitMixin:
                     str(note or "") or None,
                 ),
             ).fetchone()
+            contact_log_id = None
+            if new_status in self.AUTO_CONTACT_LOG_STATUSES:
+                next_follow_up = (
+                    postponed_until.date()
+                    if new_status == "postponed" and postponed_until is not None
+                    else None
+                )
+                contact_log_row = conn.execute(
+                    """
+                    INSERT INTO contact_logs (
+                        ownership_id, contact_date, method, result,
+                        next_follow_up, note, latitude, longitude,
+                        field_visit_route_item_id, created_by
+                    ) VALUES (
+                        %s, COALESCE(%s::date, CURRENT_DATE), %s, %s,
+                        %s, %s, %s, %s, %s, %s
+                    )
+                    RETURNING id
+                    """,
+                    (
+                        int(current["ownership_id"]),
+                        contact_date,
+                        "外勤",
+                        self.AUTO_CONTACT_LOG_RESULT_LABELS[new_status],
+                        next_follow_up,
+                        str(note or "") or None,
+                        latitude,
+                        longitude,
+                        item_id,
+                        user.id,
+                    ),
+                ).fetchone()
+                contact_log_id = int(contact_log_row["id"])
             route_id = int(updated["route_id"])
             conn.execute(
                 """
@@ -600,6 +808,7 @@ class PostgreSQLFieldVisitMixin:
                     "old_status": old_status,
                     "new_status": new_status,
                     "history_id": int(history["id"]),
+                    "contact_log_id": contact_log_id,
                 },
             )
             response = {
@@ -609,6 +818,7 @@ class PostgreSQLFieldVisitMixin:
                 "new_status": new_status,
                 "changed": True,
                 "history_id": int(history["id"]),
+                "contact_log_id": contact_log_id,
             }
             self._save_idempotency_result(
                 conn,

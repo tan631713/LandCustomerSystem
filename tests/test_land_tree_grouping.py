@@ -41,6 +41,7 @@ def record(
     owner_id,
     district="彰化縣員林市",
     section="中路段",
+    subsection="",
     land_number="1-3",
     area="100",
     owner_name="王大明",
@@ -58,6 +59,7 @@ def record(
         "ownership_id": record_id,
         "district": district,
         "section": section,
+        "subsection": subsection,
         "land_number": land_number,
         "area": area,
         "declared_value": "1000",
@@ -108,6 +110,7 @@ def database_row(
     owner_id,
     owner_name,
     section="中路段",
+    subsection="",
     land_number="1-3",
 ):
     return {
@@ -117,6 +120,7 @@ def database_row(
         "owner_id": owner_id,
         "district": "桃園市桃園區",
         "section": section,
+        "subsection": subsection,
         "registration_order": str(record_id),
         "land_number": land_number,
         "area": "100",

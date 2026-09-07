@@ -3,6 +3,7 @@
 from customer_models import (
     CHECK_COLUMN,
     LandTreeProxyModel,
+    NODE_KIND_ROLE,
     RecordTableModel,
     TAGS_ROLE,
 )
@@ -89,8 +90,29 @@ class TagPillDelegate(QStyledItemDelegate):
     PILL_SPACING = 5
     VERTICAL_PADDING = 3
 
-    def paint(self, painter, option, index):
+    @staticmethod
+    def _visible_tags(option, index):
+        """Tags to actually draw for this cell.
+
+        A land group's header row shows its aggregated tags as a summary
+        while collapsed. Once expanded, its child row(s) directly beneath
+        already show those same tags, so the header suppresses its own
+        pills to avoid painting the identical tag twice.
+        """
+
         tags = list(index.data(TAGS_ROLE) or [])
+        if tags and index.data(NODE_KIND_ROLE) == "land":
+            view = option.widget
+            # QTreeView tracks expansion against the column-0 index; asking
+            # about any other column's index always reports collapsed.
+            if isinstance(view, QAbstractItemView) and view.isExpanded(
+                index.siblingAtColumn(0)
+            ):
+                return []
+        return tags
+
+    def paint(self, painter, option, index):
+        tags = self._visible_tags(option, index)
         if not tags:
             super().paint(painter, option, index)
             return
@@ -145,7 +167,7 @@ class TagPillDelegate(QStyledItemDelegate):
 
     def sizeHint(self, option, index):
         base = super().sizeHint(option, index)
-        tags = list(index.data(TAGS_ROLE) or [])
+        tags = self._visible_tags(option, index)
         if not tags:
             return base
         metrics = option.fontMetrics
@@ -346,15 +368,15 @@ def _build_data_menu(self):
     import_profiles_action = QAction("Excel 匯入設定檔", self)
     import_profiles_action.triggered.connect(self.manage_import_profiles)
     self.data_menu.addAction(import_profiles_action)
-    export_action = QAction("匯出 Excel", self)
-    export_action.triggered.connect(self.export_xlsx)
-    self.data_menu.addAction(export_action)
     export_selected_action = QAction("匯出選取資料", self)
     export_selected_action.triggered.connect(self.export_selected_xlsx)
     self.data_menu.addAction(export_selected_action)
     export_selected_word_action = QAction("匯出選取 Word", self)
     export_selected_word_action.triggered.connect(self.export_selected_word)
     self.data_menu.addAction(export_selected_word_action)
+    mail_duplicate_tag_action = QAction("設定寄信重複偵測標籤", self)
+    mail_duplicate_tag_action.triggered.connect(self.configure_mail_duplicate_tag)
+    self.data_menu.addAction(mail_duplicate_tag_action)
     report_templates_action = QAction("報表與列印範本", self)
     report_templates_action.triggered.connect(self.manage_report_templates)
     self.data_menu.addAction(report_templates_action)
@@ -366,9 +388,9 @@ def _build_data_menu(self):
         batch_add_action,
         import_action,
         import_profiles_action,
-        export_action,
         export_selected_action,
         export_selected_word_action,
+        mail_duplicate_tag_action,
         report_templates_action,
         share_mobile_action,
     )
@@ -505,9 +527,9 @@ def _build_report_menu(self):
     follow_up_list_action = QAction("追蹤提醒清單", self)
     follow_up_list_action.triggered.connect(self.show_follow_up_list)
     report_menu.addAction(follow_up_list_action)
-    daily_field_visit_log_action = QAction("每日外勤紀錄", self)
-    daily_field_visit_log_action.triggered.connect(self.show_daily_field_visit_log)
-    report_menu.addAction(daily_field_visit_log_action)
+    visit_calendar_action = QAction("行程月曆", self)
+    visit_calendar_action.triggered.connect(self.show_visit_calendar)
+    report_menu.addAction(visit_calendar_action)
     health_check_action = QAction("系統健康檢查", self)
     health_check_action.triggered.connect(self.show_health_check)
     report_menu.addAction(health_check_action)
@@ -680,7 +702,7 @@ def _configure_api_action_groups(self, actions):
         actions["data_quality_action"],
         actions["dashboard_action"],
         actions["follow_up_list_action"],
-        actions["daily_field_visit_log_action"],
+        actions["visit_calendar_action"],
         actions["health_check_action"],
         actions["duplicate_action"],
         actions["map_action"],

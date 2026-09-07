@@ -266,6 +266,14 @@ CREATE TABLE IF NOT EXISTS customer_locations (
     FOREIGN KEY(customer_id) REFERENCES customers(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS excel_exports (
+    customer_id INTEGER PRIMARY KEY,
+    export_count INTEGER NOT NULL DEFAULT 0,
+    first_exported_at TEXT,
+    last_exported_at TEXT,
+    FOREIGN KEY(customer_id) REFERENCES customers(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS duplicate_reviews (
     left_customer_id INTEGER NOT NULL,
     right_customer_id INTEGER NOT NULL,

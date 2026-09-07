@@ -110,12 +110,13 @@ class PostgreSQLRecordMixin:
         encrypted = _encrypted_record(user, values)
         owner_row = conn.execute(
             """
-            INSERT INTO owners (owner_key, owner_name, external_id, address)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO owners (owner_key, owner_name, external_id, address, birth_year)
+            VALUES (%s, %s, %s, %s, %s)
             ON CONFLICT (owner_key) DO UPDATE SET
                 owner_name = EXCLUDED.owner_name,
                 external_id = EXCLUDED.external_id,
                 address = EXCLUDED.address,
+                birth_year = EXCLUDED.birth_year,
                 updated_at = CURRENT_TIMESTAMP
             RETURNING id
             """,
@@ -124,6 +125,7 @@ class PostgreSQLRecordMixin:
                 encrypted["owner_name"],
                 encrypted.get("external_id"),
                 encrypted.get("address"),
+                encrypted.get("birth_year"),
             ),
         ).fetchone()
         land_row = self._save_land(conn, values)
@@ -142,6 +144,7 @@ class PostgreSQLRecordMixin:
 
         district = values.get("district") or ""
         section = values.get("section") or ""
+        subsection = values.get("subsection") or ""
         land_number = values.get("land_number") or ""
         land_key = land_key_for(values)
         row = conn.execute(
@@ -172,15 +175,16 @@ class PostgreSQLRecordMixin:
             return conn.execute(
                 """
                 INSERT INTO lands (
-                    land_key, district, section, land_number, area,
+                    land_key, district, section, subsection, land_number, area,
                     declared_value
-                ) VALUES (%s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
                     land_key,
                     district,
                     section,
+                    subsection,
                     land_number,
                     values.get("area"),
                     values.get("declared_value"),
@@ -200,6 +204,7 @@ class PostgreSQLRecordMixin:
                 END,
                 district = %s,
                 section = %s,
+                subsection = %s,
                 land_number = %s,
                 area = %s,
                 declared_value = %s,
@@ -213,6 +218,7 @@ class PostgreSQLRecordMixin:
                 land_key,
                 district,
                 section,
+                subsection,
                 land_number,
                 values.get("area"),
                 values.get("declared_value"),
@@ -455,7 +461,7 @@ class PostgreSQLRecordMixin:
             snapshot = self._capture_record_snapshot(conn, record_id)
             label = " / ".join(
                 str(row.get(key) or "")
-                for key in ("district", "section", "land_number")
+                for key in ("district", "section", "subsection", "land_number")
             ).strip(" / ") or f"ID {record_id}"
             conn.execute(
                 """

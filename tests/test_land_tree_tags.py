@@ -29,6 +29,7 @@ def tagged_record(record_id, land_id, owner_id, tags, *, owner_name="地主"):
         "ownership_id": record_id,
         "district": "桃園市",
         "section": "中路段",
+        "subsection": "",
         "land_number": "1-3",
         "area": "100",
         "declared_value": "1000",

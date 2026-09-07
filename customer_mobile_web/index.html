@@ -19,6 +19,7 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="apple-touch-icon" href="./app-icon.png">
   <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <title>地主開發助手｜管理台</title>
 </head>
 <body>
@@ -92,6 +93,7 @@
         <button type="button" data-page="owners"><span class="nav-icon" aria-hidden="true">人</span><span>地主搜尋</span></button>
         <button type="button" data-page="lands"><span class="nav-icon" aria-hidden="true">田</span><span>土地搜尋</span></button>
         <button type="button" data-page="followups"><span class="nav-icon" aria-hidden="true">✓</span><span>追蹤提醒</span><span id="nav-followup-count" class="nav-count hidden">0</span></button>
+        <button type="button" data-page="map"><span class="nav-icon" aria-hidden="true">圖</span><span>地圖</span></button>
       </nav>
       <div class="sidebar-foot">
         <span class="status-dot" aria-hidden="true"></span>
@@ -284,6 +286,17 @@
           </div>
           <div id="followup-results" class="result-list"></div>
         </section>
+
+        <section id="page-map" class="page" aria-labelledby="map-heading">
+          <div class="page-heading section-heading">
+            <div><p class="eyebrow">資產分布</p><h2 id="map-heading">地圖</h2><p class="page-lead">已定位的地主分布，可依地區切換只看單一地區。</p></div>
+            <button id="refresh-map" class="secondary-button" type="button">重新整理</button>
+          </div>
+          <p id="map-count" class="result-count" aria-live="polite"></p>
+          <div id="map-district-tabs" class="district-tabs"></div>
+          <div id="map-view" class="map-view" role="img" aria-label="地主位置地圖"></div>
+          <div id="map-empty" class="empty-state hidden"></div>
+        </section>
       </main>
     </div>
 
@@ -293,6 +306,7 @@
       <button type="button" data-page="owners"><span aria-hidden="true">人</span><small>地主</small></button>
       <button type="button" data-page="lands"><span aria-hidden="true">田</span><small>土地</small></button>
       <button type="button" data-page="followups"><span aria-hidden="true">✓</span><small>追蹤</small></button>
+      <button type="button" data-page="map"><span aria-hidden="true">圖</span><small>地圖</small></button>
     </nav>
   </div>
 
@@ -508,7 +522,8 @@
     </div>
   </section>
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
   <script src="./field-visit.js?v=2" defer></script>
-  <script src="./app.js?v=26" defer></script>
+  <script src="./app.js?v=29" defer></script>
 </body>
 </html>

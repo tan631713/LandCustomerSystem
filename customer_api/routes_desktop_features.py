@@ -10,6 +10,7 @@ from customer_api.schemas import (
     CustomFieldWrite,
     CustomValuesWrite,
     DuplicateReviewWrite,
+    ExcelExportMark,
     OperationLogCreate,
     RecordChangeLogBatch,
     RecordLocationWrite,
@@ -237,6 +238,27 @@ def register_desktop_feature_routes(
         except KeyError as exc:
             _missing_resource(exc, "找不到資料。")
         return {"id": saved_id}
+
+    @app.get("/api/v1/excel-export-status")
+    def excel_export_status(
+        session: Annotated[ApiSession, Depends(current_session)],
+        ids: str = Query(default="", max_length=50_000),
+    ):
+        record_ids = [
+            int(part) for part in ids.split(",") if part.strip().lstrip("-").isdigit()
+        ]
+        exported_ids = source.list_previously_exported_record_ids(
+            session.user, record_ids
+        )
+        return {"exported_ids": sorted(exported_ids)}
+
+    @app.post("/api/v1/excel-export-status", status_code=201)
+    def mark_excel_export_status(
+        payload: ExcelExportMark,
+        session: Annotated[ApiSession, Depends(current_session)],
+    ):
+        source.mark_records_exported_to_excel(session.user, payload.record_ids)
+        return {"status": "ok"}
 
     @app.get("/api/v1/duplicate-reviews")
     def duplicate_reviews(

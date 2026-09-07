@@ -72,6 +72,14 @@ class _FieldVisitApiSource:
         self.calls.append(("today", user.role, visit_date))
         return {"id": 10, "visit_date": visit_date.isoformat(), "items": []}
 
+    def list_unresolved_field_visit_items(self, user, mine_only=False):
+        self.calls.append(("unresolved", user.role, mine_only))
+        return [{"id": 1, "route_id": 10, "status": "planned"}]
+
+    def list_visit_calendar_items(self, user, start_date, end_date, mine_only=False):
+        self.calls.append(("calendar", user.role, start_date, end_date, mine_only))
+        return [{"id": 1, "calendar_status": "scheduled"}]
+
     def get_field_visit_route(self, user, route_id):
         self.calls.append(("get", user.role, route_id))
         if route_id == 999:
@@ -188,6 +196,49 @@ class FieldVisitApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["item"]["id"], 10)
         self.assertEqual(self.source.calls[-1], ("today", "viewer", date(2026, 7, 24)))
+
+    def test_unresolved_requires_login_and_allows_viewer_with_mine_only(self):
+        unauthorized = self.client.get("/api/v1/field-visits/unresolved/items")
+        self.assertEqual(unauthorized.status_code, 401)
+
+        response = self.client.get(
+            "/api/v1/field-visits/unresolved/items",
+            params={"mine_only": "true"},
+            headers=self.login("viewer"),
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(len(response.json()["items"]), 1)
+        self.assertEqual(self.source.calls[-1], ("unresolved", "viewer", True))
+
+        default_call = self.client.get(
+            "/api/v1/field-visits/unresolved/items",
+            headers=self.login("viewer"),
+        )
+        self.assertEqual(default_call.status_code, 200, default_call.text)
+        self.assertEqual(self.source.calls[-1], ("unresolved", "viewer", False))
+
+    def test_calendar_requires_login_and_passes_date_range_through(self):
+        unauthorized = self.client.get(
+            "/api/v1/field-visits/calendar/items",
+            params={"start_date": "2026-08-01", "end_date": "2026-08-31"},
+        )
+        self.assertEqual(unauthorized.status_code, 401)
+
+        response = self.client.get(
+            "/api/v1/field-visits/calendar/items",
+            params={
+                "start_date": "2026-08-01",
+                "end_date": "2026-08-31",
+                "mine_only": "true",
+            },
+            headers=self.login("viewer"),
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(len(response.json()["items"]), 1)
+        self.assertEqual(
+            self.source.calls[-1],
+            ("calendar", "viewer", date(2026, 8, 1), date(2026, 8, 31), True),
+        )
 
     def test_create_requires_editor_and_idempotency_key(self):
         payload = {"visit_date": "2026-07-24", "title": "今日外勤"}

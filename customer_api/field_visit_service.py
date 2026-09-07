@@ -294,6 +294,18 @@ class FieldVisitService:
         require_field_visit_capability(user, FIELD_VISIT_VIEW)
         return self.source.get_field_visit_route(user, int(route_id))
 
+    def list_unresolved(self, user, *, mine_only: bool = False):
+        require_field_visit_capability(user, FIELD_VISIT_VIEW)
+        return self.source.list_unresolved_field_visit_items(user, mine_only=mine_only)
+
+    def list_calendar_items(
+        self, user, *, start_date: date, end_date: date, mine_only: bool = False
+    ):
+        require_field_visit_capability(user, FIELD_VISIT_VIEW)
+        return self.source.list_visit_calendar_items(
+            user, start_date, end_date, mine_only=mine_only
+        )
+
     def create_route(
         self,
         user,
@@ -360,6 +372,7 @@ class FieldVisitService:
         longitude: float | None = None,
         note: str = "",
         postponed_until: datetime | None = None,
+        contact_date: date | None = None,
         idempotency_key: str | None = None,
         allowed_old_statuses: Iterable[str] | None = None,
     ):
@@ -388,6 +401,7 @@ class FieldVisitService:
             "longitude": longitude,
             "note": note,
             "postponed_until": postponed_until,
+            "contact_date": contact_date,
             "allowed_old_statuses": sorted(
                 str(status).strip().lower()
                 for status in (allowed_old_statuses or [])
@@ -402,6 +416,7 @@ class FieldVisitService:
             longitude=longitude,
             note=note,
             postponed_until=postponed_until,
+            contact_date=contact_date,
             allowed_old_statuses=set(payload["allowed_old_statuses"]) or None,
             idempotency_key=key,
             request_hash=field_visit_request_hash("transition_item", payload),

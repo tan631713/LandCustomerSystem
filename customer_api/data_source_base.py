@@ -21,6 +21,7 @@ from customer_security import ENCRYPTED_FIELDS, decrypt_value, encrypt_record, m
 RECORD_SEARCH_FIELDS = (
     "district",
     "section",
+    "subsection",
     "registration_order",
     "land_number",
     "owner_name",
@@ -393,4 +394,7 @@ def _filter_records(records, *, query="", filters=None):
 def _encrypted_record(user, values):
     plain = {key: values.get(key) for key, _label in LAND_FIELDS}
     plain["name"] = plain.get("owner_name") or ""
+    # birth_year rides along outside LAND_FIELDS on purpose -- see
+    # customer_repository.customer_data_columns for why.
+    plain["birth_year"] = values.get("birth_year")
     return encrypt_record(make_fernet(user.data_key), plain)

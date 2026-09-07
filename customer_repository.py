@@ -30,6 +30,7 @@ class CustomerRepository:
         "rowid": "id",
         "district": "district",
         "section": "section",
+        "subsection": "subsection",
         "registration_order": "registration_order",
         "land_number": "land_number",
         "area": "area",
@@ -41,12 +42,13 @@ class CustomerRepository:
         "registration_reason": "registration_reason",
     }
     CUSTOMER_PAGE_COLUMNS = """
-        customers.id, customers.district, customers.section,
+        customers.id, customers.district, customers.section, customers.subsection,
         customers.registration_order, customers.land_number, customers.area,
         customers.declared_value, customers.numerator, customers.denominator,
         customers.ping, customers.total_declared_value, customers.owner_name,
         customers.external_id, customers.address, customers.registration_reason,
         customers.note, customers.visit_log, customers.name,
+        customers.birth_year,
         customers.created_at, customers.updated_at,
         COALESCE((
             SELECT GROUP_CONCAT(case_title, '、')
@@ -165,7 +167,15 @@ class CustomerRepository:
         self.schema_path = schema_path
         self.seed_path = seed_path
         self.land_fields = tuple(land_fields)
-        self.customer_data_columns = tuple(key for key, _label in self.land_fields) + ("name",)
+        # birth_year is deliberately kept out of land_fields/LAND_FIELDS: it
+        # only needs to persist through save/load for the edit-form's age
+        # display, not flow into Excel import/export, report templates, the
+        # column picker, or migration tooling. "name" is appended the same
+        # way for the same reason.
+        self.customer_data_columns = tuple(key for key, _label in self.land_fields) + (
+            "name",
+            "birth_year",
+        )
         self.admin_username = admin_username
         self.migrations = MigrationRunner(self.land_fields)
         self.data_revision = 0
@@ -180,8 +190,8 @@ class CustomerRepository:
         with self.database.connect() as conn:
             return conn.execute(
                 """
-                SELECT id, district, section, registration_order, land_number,
-                       owner_name, external_id
+                SELECT id, district, section, subsection, registration_order,
+                       land_number, owner_name, external_id
                 FROM customers
                 """
             ).fetchall()
@@ -220,6 +230,10 @@ class CustomerRepository:
         columns = ", ".join(self.customer_data_columns)
         placeholders = ", ".join(f":{key}" for key in self.customer_data_columns)
         inserted_ids = []
+        records = [
+            {key: record.get(key) for key in self.customer_data_columns}
+            for record in records
+        ]
         with self.database.connect() as conn:
             for record in records:
                 cursor = conn.execute(
@@ -284,7 +298,7 @@ class CustomerRepository:
                 customer = payload["customer"]
                 label = " / ".join(
                     str(customer.get(key) or "")
-                    for key in ("district", "section", "land_number")
+                    for key in ("district", "section", "subsection", "land_number")
                 ).strip(" / ") or f"ID {record_id}"
                 conn.execute(
                     """
@@ -927,7 +941,7 @@ class CustomerRepository:
                 """
                 SELECT r.id AS reminder_id, r.customer_id, r.due_date, r.status, r.note,
                        r.created_at, r.updated_at,
-                       c.district, c.section, c.registration_order, c.land_number,
+                       c.district, c.section, c.subsection, c.registration_order, c.land_number,
                        c.area, c.declared_value, c.numerator, c.denominator, c.ping,
                        c.total_declared_value, c.owner_name, c.external_id, c.address,
                        c.registration_reason, c.note AS customer_note, c.visit_log
@@ -1592,14 +1606,24 @@ class CustomerRepository:
                 (int(customer_id),),
             ).fetchall()
 
-    def list_contact_logs_by_date(self, target_date):
+    def list_contact_logs_by_date(self, target_date, mine_only=False):
+        # mine_only is accepted (not just silently rejected with a
+        # TypeError, which is what calling this with that keyword used to
+        # do) but has nothing to filter by: the local SQLite schema has no
+        # per-user "created_by" column on contact_logs at all -- multi-user
+        # attribution only exists in the PostgreSQL/API-mode backend (see
+        # customer_api/postgres_collaboration.py's version of this same
+        # method), which is what the company-laptop client actually talks
+        # to. A single-machine SQLite database has no "other users" to
+        # exclude, so mine_only here is a no-op rather than an error.
+        del mine_only
         with self.database.connect() as conn:
             return conn.execute(
                 """
                 SELECT cl.id, cl.customer_id, cl.contact_date, cl.method,
                        cl.result, cl.next_follow_up, cl.note AS log_note,
                        cl.created_at,
-                       c.district, c.section, c.land_number, c.owner_name
+                       c.district, c.section, c.subsection, c.land_number, c.owner_name
                 FROM contact_logs cl
                 JOIN customers c ON c.id = cl.customer_id
                 WHERE COALESCE(cl.contact_date, substr(cl.created_at, 1, 10)) = ?
@@ -1607,6 +1631,38 @@ class CustomerRepository:
                 """,
                 (str(target_date),),
             ).fetchall()
+
+    def list_visit_calendar_items(self, start_date, end_date, mine_only=False):
+        """Calendar-shaped activity for a date range, used by 行程月曆 (see
+        customer_productivity_workflows.py's load_visit_calendar_items()).
+
+        Local/SQLite mode has no field-visit-route concept at all (routes
+        only exist against the real PostgreSQL server -- see
+        list_unresolved_field_visit_items()'s docstring on the API side),
+        so this only ever surfaces contact_logs rows within the range,
+        each bucketed as "completed" (a contact happened; there is no
+        scheduled/overdue distinction to draw without route data).
+        mine_only is accepted but is a no-op for the same reason
+        list_contact_logs_by_date() ignores it -- SQLite has no per-user
+        created_by column.
+        """
+        del mine_only
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT cl.id, cl.customer_id,
+                       COALESCE(cl.contact_date, substr(cl.created_at, 1, 10)) AS date,
+                       'completed' AS calendar_status,
+                       c.district, c.section, c.subsection, c.land_number, c.owner_name
+                FROM contact_logs cl
+                JOIN customers c ON c.id = cl.customer_id
+                WHERE COALESCE(cl.contact_date, substr(cl.created_at, 1, 10))
+                    BETWEEN ? AND ?
+                ORDER BY date ASC, cl.id ASC
+                """,
+                (str(start_date), str(end_date)),
+            ).fetchall()
+        return rows
 
     def add_contact_log(
         self,
@@ -1731,7 +1787,7 @@ class CustomerRepository:
             reminders = conn.execute(
                 """
                 SELECT r.customer_id, r.due_date, r.status, c.district, c.section,
-                       c.land_number
+                       c.subsection, c.land_number
                 FROM follow_up_reminders r
                 JOIN customers c ON c.id = r.customer_id
                 WHERE COALESCE(r.status, '') <> '完成'
@@ -1760,7 +1816,8 @@ class CustomerRepository:
             entries = []
             for row in reminders:
                 label = " ".join(
-                    str(row[key] or "") for key in ("district", "section", "land_number")
+                    str(row[key] or "")
+                    for key in ("district", "section", "subsection", "land_number")
                 ).strip()
                 entries.append(
                     (
@@ -1965,13 +2022,45 @@ class CustomerRepository:
         with self.database.connect() as conn:
             return conn.execute(
                 """
-                SELECT location.*, c.district, c.section, c.land_number,
+                SELECT location.*, c.district, c.section, c.subsection, c.land_number,
                        c.owner_name, c.address
                 FROM customer_locations location
                 JOIN customers c ON c.id = location.customer_id
                 ORDER BY c.district, c.section, c.land_number
                 """
             ).fetchall()
+
+    def list_previously_exported_customer_ids(self, customer_ids):
+        """Given a candidate list of customer ids, return the subset that
+        has been exported to Excel at least once before -- used by the
+        main "匯出 Excel" flow to warn about re-exporting the same land
+        owners rather than tracking every export in full detail."""
+        customer_ids = [int(customer_id) for customer_id in customer_ids]
+        if not customer_ids:
+            return set()
+        placeholders = ",".join("?" for _ in customer_ids)
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                f"SELECT customer_id FROM excel_exports WHERE customer_id IN ({placeholders})",
+                customer_ids,
+            ).fetchall()
+        return {int(row["customer_id"]) for row in rows}
+
+    def mark_customers_exported_to_excel(self, customer_ids):
+        customer_ids = [int(customer_id) for customer_id in customer_ids]
+        if not customer_ids:
+            return
+        with self.database.connect() as conn:
+            conn.executemany(
+                """
+                INSERT INTO excel_exports (customer_id, export_count, first_exported_at, last_exported_at)
+                VALUES (?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT(customer_id) DO UPDATE SET
+                    export_count = export_count + 1,
+                    last_exported_at = CURRENT_TIMESTAMP
+                """,
+                [(customer_id,) for customer_id in customer_ids],
+            )
 
     def ignore_duplicate_pair(self, left_id, right_id):
         left_id, right_id = sorted((int(left_id), int(right_id)))

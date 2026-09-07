@@ -85,6 +85,7 @@ def _record_label(record):
     parts = [
         _text(record.get("district")),
         _text(record.get("section")),
+        _text(record.get("subsection")),
         _text(record.get("registration_order")),
         _text(record.get("land_number")),
     ]
@@ -171,6 +172,7 @@ def inspect_customer_quality(records, enabled_rules=None):
             duplicate_key = (
                 normalize_match_text(record.get("district")),
                 normalize_match_text(record.get("section")),
+                normalize_match_text(record.get("subsection")),
                 normalize_match_text(record.get("registration_order")),
                 normalize_match_text(record.get("land_number")),
                 normalize_match_text(record.get("owner_name")),

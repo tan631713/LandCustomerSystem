@@ -10,6 +10,7 @@ from customer_openpyxl_compat import ensure_openpyxl_numpy_compat
 
 HEADER_MAP = {
     "區": "district", "地區": "district", "段": "section", "地段": "section",
+    "小段": "subsection",
     "序號": "registration_order", "登記次序": "registration_order",
     "地號": "land_number", "面積": "area", "面積/m2": "area", "面積m2": "area",
     "公告現值": "declared_value", "權利範圍": "rights_scope",
@@ -39,7 +40,7 @@ HEADER_CONTAINS_MAP = [
 ]
 
 FORWARD_FILL_FIELDS = {
-    "district", "section", "registration_order", "owner_name", "external_id",
+    "district", "section", "subsection", "registration_order", "owner_name", "external_id",
     "address", "registration_reason", "rights_scope", "numerator", "denominator",
 }
 

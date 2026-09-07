@@ -87,7 +87,8 @@ class CustomerMigrationTests(unittest.TestCase):
 
         self.assertEqual(version, LATEST_SCHEMA_VERSION)
         self.assertEqual(
-            [row["version"] for row in history], [1, 2, 3, 4, 5, 6, 7, 8, 9]
+            [row["version"] for row in history],
+            list(range(1, LATEST_SCHEMA_VERSION + 1)),
         )
         self.assertEqual(customer["owner_name"], "王小明")
         self.assertEqual(customer["external_id"], "A123456789")
@@ -143,7 +144,11 @@ class CustomerMigrationTests(unittest.TestCase):
     def test_version_nine_adds_attachment_uploader_to_existing_database(self):
         self.repository.init_db()
         with self.database.connect() as conn:
-            conn.execute("DELETE FROM schema_migrations WHERE version = 9")
+            # The runner resumes from MAX(version) in schema_migrations, not
+            # from the highest *missing* row, so any later version's row
+            # (10+) must also be cleared for a resume-from-9 replay to
+            # actually happen.
+            conn.execute("DELETE FROM schema_migrations WHERE version >= 9")
             conn.execute("ALTER TABLE customer_attachments DROP COLUMN created_by")
 
         self.repository.init_db()
@@ -154,7 +159,7 @@ class CustomerMigrationTests(unittest.TestCase):
             }
             version = self.repository.migrations.current_version(conn)
 
-        self.assertEqual(version, 9)
+        self.assertEqual(version, LATEST_SCHEMA_VERSION)
         self.assertIn("created_by", columns)
 
     def test_legacy_contact_log_shape_is_rebuilt_without_losing_data(self):

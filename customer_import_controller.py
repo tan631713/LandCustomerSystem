@@ -8,8 +8,8 @@ from customer_domain import (
 )
 from customer_excel import ExcelImportWorker
 from customer_security import decrypt_value, encrypt_record
-from PySide6.QtCore import QThread
-from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox
+from PySide6.QtCore import QThread, QTimer
+from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 LAND_FIELDS = ()
 EXCEL_SERVICE = None
@@ -159,7 +159,7 @@ class ImportControllerMixin:
             f"對應欄位：{imported_labels}",
         ]
         dialog = ImportResultDialog(summary_lines, detail_lines, error_rows, self)
-        dialog.exec()
+        self._show_non_modal_dialog(dialog)
 
     def start_excel_worker(self, worker, finished_handler, status_message):
         if self.excel_thread is not None and self.excel_thread.isRunning():
@@ -227,9 +227,44 @@ class ImportControllerMixin:
             preview_dialog = ImportPreviewDialog(
                 records, preview_columns, duplicate_indexes, self
             )
-            if records and preview_dialog.exec() != QDialog.Accepted:
-                return
 
+            def proceed():
+                self._continue_excel_import(
+                    result,
+                    repository,
+                    column_map,
+                    records,
+                    error_rows,
+                    original_records,
+                    duplicate_indexes,
+                    watchlist_indexes,
+                    preview_dialog,
+                )
+
+            # Original short-circuit behavior preserved: with no records at
+            # all, the preview dialog is never shown (nothing to preview),
+            # so proceed straight to error-row-only handling instead of
+            # waiting on a dialog that would never open.
+            if records:
+                self._show_non_modal_dialog(preview_dialog, on_accepted=proceed)
+            else:
+                proceed()
+        except Exception as exc:
+            QMessageBox.critical(self, "匯入失敗", f"處理匯入結果時發生錯誤：{exc}")
+
+    def _continue_excel_import(
+        self,
+        result,
+        repository,
+        column_map,
+        records,
+        error_rows,
+        original_records,
+        duplicate_indexes,
+        watchlist_indexes,
+        preview_dialog,
+    ):
+        try:
             skipped_duplicate_count = 0
             updated_count = 0
             records_to_insert = list(records)
@@ -381,39 +416,71 @@ class ImportControllerMixin:
         if hasattr(self, "ensure_can_modify") and not self.ensure_can_modify("同地號批量新增"):
             return
         base_data = self.get_form_data()
-        dialog = SharedLandBatchDialog(base_data, self)
-        while True:
-            if dialog.exec() != QDialog.Accepted:
-                return
-            shared_values, rows_text = dialog.values()
-            missing = [
-                label
-                for key, label in (
-                    ("district", "地區"),
-                    ("section", "地段"),
-                    ("land_number", "地號"),
-                )
-                if not shared_values.get(key)
-            ]
-            parsed_rows, errors = parse_shared_land_rows(rows_text)
-            if missing:
-                errors.insert(0, f"請填寫共用欄位：{'、'.join(missing)}")
-            area = parse_number(shared_values.get("area"))
-            declared_value = parse_number(shared_values.get("declared_value"))
-            if shared_values.get("area") and (area is None or area <= 0):
-                errors.append("面積必須是大於 0 的數字")
-            if shared_values.get("declared_value") and (
-                declared_value is None or declared_value < 0
-            ):
-                errors.append("公告現值必須是大於或等於 0 的數字")
-            if errors:
-                shown_errors = errors[:10]
-                if len(errors) > len(shown_errors):
-                    shown_errors.append(f"…其餘 {len(errors) - len(shown_errors)} 項錯誤")
-                QMessageBox.warning(self, "批量資料有誤", "\n".join(shown_errors))
-                continue
-            break
+        district_options = {
+            str((record.get("raw") or {}).get("district") or "").strip()
+            for record in getattr(self.table_model, "all_rows", ())
+        }
+        district_options.discard("")
+        section_options = {
+            str((record.get("raw") or {}).get("section") or "").strip()
+            for record in getattr(self.table_model, "all_rows", ())
+        }
+        section_options.discard("")
+        subsection_options = {
+            str((record.get("raw") or {}).get("subsection") or "").strip()
+            for record in getattr(self.table_model, "all_rows", ())
+        }
+        subsection_options.discard("")
+        # Used to be a `while True: ... if invalid: continue` loop around a
+        # blocking .exec() call -- re-showing the same dialog (values kept)
+        # whenever validation found errors. Non-modal has no loop to
+        # "continue"; open_shared_dialog() calling itself again inside its
+        # own on_accepted callback is the equivalent.
+        def open_shared_dialog():
+            dialog = SharedLandBatchDialog(
+                base_data,
+                self,
+                district_options=district_options,
+                section_options=section_options,
+                subsection_options=subsection_options,
+            )
 
+            def on_accepted():
+                shared_values, rows_text = dialog.values()
+                missing = [
+                    label
+                    for key, label in (
+                        ("district", "地區"),
+                        ("section", "地段"),
+                        ("land_number", "地號"),
+                    )
+                    if not shared_values.get(key)
+                ]
+                parsed_rows, errors = parse_shared_land_rows(rows_text)
+                if missing:
+                    errors.insert(0, f"請填寫共用欄位：{'、'.join(missing)}")
+                area = parse_number(shared_values.get("area"))
+                declared_value = parse_number(shared_values.get("declared_value"))
+                if shared_values.get("area") and (area is None or area <= 0):
+                    errors.append("面積必須是大於 0 的數字")
+                if shared_values.get("declared_value") and (
+                    declared_value is None or declared_value < 0
+                ):
+                    errors.append("公告現值必須是大於或等於 0 的數字")
+                if errors:
+                    shown_errors = errors[:10]
+                    if len(errors) > len(shown_errors):
+                        shown_errors.append(f"…其餘 {len(errors) - len(shown_errors)} 項錯誤")
+                    QMessageBox.warning(self, "批量資料有誤", "\n".join(shown_errors))
+                    open_shared_dialog()
+                    return
+                self._continue_batch_add_shared_land(base_data, shared_values, parsed_rows)
+
+            self._show_non_modal_dialog(dialog, on_accepted=on_accepted)
+
+        open_shared_dialog()
+
+    def _continue_batch_add_shared_land(self, base_data, shared_values, parsed_rows):
         records = []
         for parsed_row in parsed_rows:
             record = dict(base_data)
@@ -429,60 +496,72 @@ class ImportControllerMixin:
             ("address", "地址"),
             ("numerator", "分子"),
             ("denominator", "分母"),
+            ("registration_reason", "原因"),
             ("note", "備註"),
             ("visit_log", "出訪記錄"),
             ("district", "地區"),
             ("section", "地段"),
+            ("subsection", "小段"),
             ("land_number", "地號"),
             ("area", "面積/m²"),
             ("declared_value", "公告現值"),
         ]
         preview = ImportPreviewDialog(records, preview_columns, duplicate_indexes, self)
-        if preview.exec() != QDialog.Accepted:
-            return
-        skipped_count = 0
-        if preview.import_mode == "skip_duplicates":
-            skipped_count = len(duplicate_indexes)
-            records = [
-                record
-                for index, record in enumerate(records)
-                if index not in duplicate_indexes
-            ]
-        if not records:
-            QMessageBox.information(self, "沒有新增資料", "全部資料都已略過。")
-            return
 
-        watchlist_count = sum(1 for record in records if "_watchlist_note" in record)
-        if watchlist_count:
-            reply = QMessageBox.question(
-                self,
-                "注意名單提醒",
-                f"有 {watchlist_count} 筆命中注意名單，仍要繼續新增嗎？",
-            )
-            if reply != QMessageBox.Yes:
+        def on_preview_accepted():
+            skipped_count = 0
+            filtered_records = records
+            if preview.import_mode == "skip_duplicates":
+                skipped_count = len(duplicate_indexes)
+                filtered_records = [
+                    record
+                    for index, record in enumerate(records)
+                    if index not in duplicate_indexes
+                ]
+            if not filtered_records:
+                QMessageBox.information(self, "沒有新增資料", "全部資料都已略過。")
                 return
 
-        repository = self.active_import_repository()
-        is_api_import = bool(getattr(self, "api_mode", False))
-        if not is_api_import:
-            self.create_safety_backup("batch-add")
-        encrypted_records = [encrypt_record(self.fernet, record) for record in records]
-        inserted_count = repository.insert_customers(encrypted_records)
-        if not is_api_import:
-            repository.record_insert_undo(
-                "同地號批量新增",
-                repository.last_inserted_customer_ids,
-                f"同地號批量新增 {inserted_count} 筆",
+            watchlist_count = sum(1 for record in filtered_records if "_watchlist_note" in record)
+            if watchlist_count:
+                reply = QMessageBox.question(
+                    self,
+                    "注意名單提醒",
+                    f"有 {watchlist_count} 筆命中注意名單，仍要繼續新增嗎？",
+                )
+                if reply != QMessageBox.Yes:
+                    return
+
+            repository = self.active_import_repository()
+            is_api_import = bool(getattr(self, "api_mode", False))
+            if not is_api_import:
+                self.create_safety_backup("batch-add")
+            encrypted_records = [encrypt_record(self.fernet, record) for record in filtered_records]
+            inserted_count = repository.insert_customers(encrypted_records)
+            if not is_api_import:
+                repository.record_insert_undo(
+                    "同地號批量新增",
+                    repository.last_inserted_customer_ids,
+                    f"同地號批量新增 {inserted_count} 筆",
+                )
+                repository.log_operation(
+                    "批量新增",
+                    f"新增 {inserted_count} 筆同地號資料",
+                    f"{shared_values['district']} {shared_values['section']} "
+                    f"{shared_values['land_number']}；略過重複 {skipped_count} 筆",
+                )
+            # See the matching comment in customer_record_workflows.save_record()
+            # for why this refresh is deferred instead of called synchronously
+            # here: batch-add is the other action production crash reports
+            # showed taking down the whole process with a raw access violation
+            # (no Python traceback) -- this is called from inside a button
+            # click's own event dispatch, and resetting the tree model
+            # synchronously from there is the reentrant pattern that caused it.
+            QTimer.singleShot(0, self.refresh_records)
+            QMessageBox.information(
+                self,
+                "批量新增完成",
+                f"已新增 {inserted_count} 筆資料；略過重複 {skipped_count} 筆。",
             )
-            repository.log_operation(
-                "批量新增",
-                f"新增 {inserted_count} 筆同地號資料",
-                f"{shared_values['district']} {shared_values['section']} "
-                f"{shared_values['land_number']}；略過重複 {skipped_count} 筆",
-            )
-        self.refresh_records()
-        QMessageBox.information(
-            self,
-            "批量新增完成",
-            f"已新增 {inserted_count} 筆資料；略過重複 {skipped_count} 筆。",
-        )
+
+        self._show_non_modal_dialog(preview, on_accepted=on_preview_accepted)

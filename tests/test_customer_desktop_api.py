@@ -537,6 +537,7 @@ class FakeRecordClient:
                 "id": record_id,
                 "district": "桃園區",
                 "section": "測試段",
+                "subsection": "",
                 "land_number": str(record_id),
                 "owner_name": owner_name,
                 "case_names": "",
@@ -892,6 +893,7 @@ class DesktopApiRecordRepositoryTests(unittest.TestCase):
             {
                 "district": "中壢區",
                 "section": "青埔段",
+                "subsection": "",
                 "land_number": "200",
                 "owner_name": "陳先生",
                 "address": "測試地址",

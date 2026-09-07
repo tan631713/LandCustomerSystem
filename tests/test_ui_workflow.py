@@ -160,6 +160,10 @@ class UiWorkflowTests(unittest.TestCase):
             self.assertEqual(positions["district"][1:], (0, 1, 3))
             self.assertEqual(positions["section"][1:], (3, 1, 3))
 
+            self.assertEqual(positions["subsection"][0], positions["land_number"][0])
+            self.assertEqual(positions["subsection"][1:], (0, 1, 3))
+            self.assertEqual(positions["land_number"][1:], (3, 1, 3))
+
             compact_row = positions["registration_order"][0]
             self.assertEqual(positions["numerator"][0], compact_row)
             self.assertEqual(positions["denominator"][0], compact_row)
@@ -167,7 +171,6 @@ class UiWorkflowTests(unittest.TestCase):
             self.assertEqual(positions["numerator"][3], 2)
             self.assertEqual(positions["denominator"][3], 2)
 
-            self.assertEqual(positions["land_number"][3], 6)
             self.assertEqual(positions["total_declared_value"][3], 6)
             self.assertEqual(positions["owner_name"][0], positions["external_id"][0])
             self.assertEqual(positions["owner_name"][3], 3)
@@ -269,6 +272,7 @@ class UiWorkflowTests(unittest.TestCase):
                 values = {
                     "district": "中正區",
                     "section": "一段",
+                    "subsection": "",
                     "land_number": "100",
                     "area": "100",
                     "declared_value": "20,000",
@@ -442,6 +446,7 @@ class UiWorkflowTests(unittest.TestCase):
                 {
                     "district": "D",
                     "section": "S",
+                    "subsection": "",
                     "land_number": "100",
                     "owner_name": "Owner 1",
                     "note": "",
@@ -452,6 +457,7 @@ class UiWorkflowTests(unittest.TestCase):
                 {
                     "district": "D",
                     "section": "S",
+                    "subsection": "",
                     "land_number": "100",
                     "owner_name": "Owner 2",
                     "external_id": "A2",
@@ -700,6 +706,7 @@ class UiWorkflowTests(unittest.TestCase):
                         {
                             "district": "桃園區",
                             "section": "中路段",
+                            "subsection": "",
                             "land_number": "10",
                             "owner_name": "Owner A",
                         }
@@ -713,6 +720,7 @@ class UiWorkflowTests(unittest.TestCase):
                         {
                             "district": "桃園區",
                             "section": "中路段",
+                            "subsection": "",
                             "land_number": "20",
                             "owner_name": "Owner B",
                         }
@@ -826,6 +834,7 @@ class UiWorkflowTests(unittest.TestCase):
                 {
                     "district": "桃園區",
                     "section": "一段",
+                    "subsection": "",
                     "land_number": "100",
                     "owner_name": "王小明",
                     "address": "舊地址",
@@ -870,6 +879,7 @@ class UiWorkflowTests(unittest.TestCase):
                     {
                         "district": "桃園區",
                         "section": "一段",
+                        "subsection": "",
                         "land_number": "100",
                         "owner_name": "王小明",
                         "address": "新地址",
@@ -976,6 +986,7 @@ class UiWorkflowTests(unittest.TestCase):
                     {
                         "district": "中壢區",
                         "section": "青埔段",
+                        "subsection": "",
                         "land_number": "200-8",
                         "owner_name": "李小華",
                         "name": "李小華",
@@ -1382,6 +1393,7 @@ class UiWorkflowTests(unittest.TestCase):
                 return {
                     "district": "中壢區",
                     "section": "中原段",
+                    "subsection": "",
                     "land_number": "382-2",
                 }
 
@@ -1404,6 +1416,7 @@ class UiWorkflowTests(unittest.TestCase):
                 {
                     "district": "中壢區",
                     "section": "中原段",
+                    "subsection": "",
                     "land_number": "382-2",
                 },
             )
@@ -1758,6 +1771,7 @@ class UiWorkflowTests(unittest.TestCase):
                     {
                         "district": "中正區",
                         "section": "一段",
+                        "subsection": "",
                         "land_number": "100",
                         "area": "100",
                         "declared_value": "20,000",

@@ -1,3 +1,4 @@
+import gc
 import json
 import os
 import sqlite3
@@ -36,7 +37,6 @@ from customer_dialogs import (
     BatchEditDialog,
     BatchEditPreviewDialog,
     ChangePasswordDialog,
-    DailyContactLogDialog,
     DashboardDialog,
     FontSizeDialog,
     FollowUpListDialog,
@@ -46,6 +46,7 @@ from customer_dialogs import (
     DataQualityRulesDialog,
     OperationLogDialog,
     RecordHistoryDialog,
+    VisitCalendarDialog,
     WatchlistDialog,
     configure_dialogs,
 )
@@ -54,7 +55,6 @@ from customer_extra_dialogs import (
     AttachmentDialog,
     BatchCustomerCustomValuesDialog,
     BatchCustomerTagsDialog,
-    CaseManagementDialog,
     CaseSelectDialog,
     ContactLogDialog,
     CustomFieldManagementDialog,
@@ -178,6 +178,39 @@ from PySide6.QtWidgets import (
 )
 
 
+# Python's cyclic garbage collector can run its collection pass at any
+# allocation point, including deep inside PySide6/shiboken's C++ callback
+# handling for a QThread's cross-thread queued signal delivery (search,
+# Excel import, and offsite-backup workers all use this pattern -- see
+# customer_search_controller.py, customer_import_controller.py, and
+# customer_productivity_workflows.py). If a collection happens to land while
+# such a callback is mid-flight, PySide6 can crash with a Windows access
+# violation; this was reproduced reliably by running the full desktop test
+# suite (disabling the collector made it disappear across many repeated
+# runs, while every other mitigation attempted on the app's own thread
+# lifecycle left it unchanged). Reference counting still reclaims ordinary
+# objects immediately without the collector; only reference *cycles* would
+# accumulate, so periodic_gc_collect() below reclaims those explicitly, but
+# only while no background QThread could be in flight.
+gc.disable()
+
+
+def periodic_gc_collect(window):
+    """Run a manual collection pass, but only when it's actually safe to.
+
+    Never called while a search, Excel import, or offsite-backup QThread
+    might still be delivering a queued cross-thread signal -- see the
+    gc.disable() comment above.
+    """
+    if window.record_searches:
+        return
+    if getattr(window, "excel_thread", None) is not None:
+        return
+    if getattr(window, "offsite_backup_thread", None) is not None:
+        return
+    gc.collect()
+
+
 def get_app_dir():
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
@@ -282,6 +315,7 @@ FILTERABLE_FIELDS = [
     ("all", "全部欄位"),
     ("district", "地區"),
     ("section", "地段"),
+    ("subsection", "小段"),
     ("registration_order", "序號"),
     ("land_number", "地號"),
     ("owner_name", "姓名"),
@@ -297,6 +331,7 @@ SORTABLE_FIELDS = [
     ("rowid", "系統ID"),
     ("district", "地區"),
     ("section", "地段"),
+    ("subsection", "小段"),
     ("registration_order", "序號"),
     ("land_number", "地號"),
     ("area", "面積/m2"),
@@ -322,6 +357,7 @@ SORTABLE_FIELDS = [
 TABLE_BATCH_SIZE = 100
 ASYNC_SEARCH_THRESHOLD = 500
 SELECTION_SAVE_DELAY_MS = 300
+GC_COLLECT_INTERVAL_MS = 10 * 60 * 1000
 
 TABLE_WIDTHS = {
     "checked": 52,
@@ -333,6 +369,7 @@ TABLE_WIDTHS = {
     "status_summary": 170,
     "district": 95,
     "section": 100,
+    "subsection": 100,
     "registration_order": 82,
     "land_number": 105,
     "area": 84,
@@ -365,6 +402,7 @@ TABLE_WIDTHS = {
 ADVANCED_SEARCH_FIELDS = [
     ("district", "地區"),
     ("section", "地段"),
+    ("subsection", "小段"),
     ("registration_order", "序號"),
     ("land_number", "地號"),
     ("owner_name", "姓名"),
@@ -379,6 +417,7 @@ ADVANCED_SEARCH_FIELDS = [
 BATCH_EDITABLE_FIELDS = [
     ("district", "地區"),
     ("section", "地段"),
+    ("subsection", "小段"),
     ("registration_order", "序號"),
     ("land_number", "地號"),
     ("area", "面積/m2"),
@@ -1124,8 +1163,23 @@ class LandApp(
         self.excel_worker = None
         self.record_search_request_id = 0
         self.record_searches = {}
+        # (target_id, tree_state, search_auto_expand) for each in-flight
+        # record_searches request id -- see start_record_search()'s signal
+        # connections for why this is kept separate from record_searches.
+        self._record_search_context = {}
         self.offsite_backup_thread = None
         self.offsite_backup_worker = None
+
+        # The process-wide collector is off (see the gc.disable() comment
+        # at the top of this module); reclaim reference cycles manually on
+        # an interval, but only at moments no background QThread could be
+        # mid-signal -- periodic_gc_collect() checks that itself.
+        self.gc_collect_timer = QTimer(self)
+        self.gc_collect_timer.setInterval(GC_COLLECT_INTERVAL_MS)
+        self.gc_collect_timer.timeout.connect(
+            lambda: periodic_gc_collect(self)
+        )
+        self.gc_collect_timer.start()
 
         self.create_layout()
         if self.api_mode:
@@ -1136,8 +1190,22 @@ class LandApp(
             self.setup_backup_status()
             self.setup_notification_status()
             self.setup_offsite_backup()
-        self.refresh_records()
+        # Apply the saved font size (which touches the tree view's
+        # stylesheet and triggers Qt to synchronously walk every row for
+        # layout recomputation) BEFORE refresh_records() populates any
+        # data. For a large database, refresh_records() sets a preview into
+        # the table model and starts a background search thread; a report
+        # from real use showed the stylesheet-triggered walk landing while
+        # that background thread's queued "results ready" signal was
+        # already pending delivery, so the walk was reading QModelIndex
+        # objects into _TreeNode instances the model had already replaced
+        # via beginResetModel()/endResetModel() -- an
+        # AttributeError: '_TreeNode' object has no attribute 'kind' from
+        # a stale internalPointer(). Doing this while the tree is still
+        # empty removes the race entirely; row content plays no part in
+        # font-size/row-height application.
         self.apply_saved_font_size()
+        self.refresh_records()
         if self.startup_backup_path:
             QTimer.singleShot(0, self.show_startup_backup_notice)
 

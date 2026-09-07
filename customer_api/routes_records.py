@@ -20,6 +20,7 @@ def register_record_routes(app, *, settings, source, current_session, editor_use
         q: str = Query(default="", max_length=200),
         district: str = Query(default="", max_length=100),
         section: str = Query(default="", max_length=100),
+        subsection: str = Query(default="", max_length=100),
         land_number: str = Query(default="", max_length=100),
         owner_name: str = Query(default="", max_length=100),
         offset: int = Query(default=0, ge=0),
@@ -31,6 +32,7 @@ def register_record_routes(app, *, settings, source, current_session, editor_use
             filters={
                 "district": district,
                 "section": section,
+                "subsection": subsection,
                 "land_number": land_number,
                 "owner_name": owner_name,
             },

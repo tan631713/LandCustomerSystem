@@ -102,6 +102,37 @@ def register_field_visit_routes(
         except Exception as exc:
             _raise_field_visit_error(exc)
 
+    @app.get("/api/v1/field-visits/unresolved/items")
+    def unresolved_field_visit_items(
+        session: Annotated[ApiSession, Depends(current_session)],
+        mine_only: bool = Query(default=False),
+    ):
+        try:
+            return {
+                "items": service.list_unresolved(session.user, mine_only=mine_only)
+            }
+        except Exception as exc:
+            _raise_field_visit_error(exc)
+
+    @app.get("/api/v1/field-visits/calendar/items")
+    def visit_calendar_items(
+        session: Annotated[ApiSession, Depends(current_session)],
+        start_date: date = Query(...),
+        end_date: date = Query(...),
+        mine_only: bool = Query(default=False),
+    ):
+        try:
+            return {
+                "items": service.list_calendar_items(
+                    session.user,
+                    start_date=start_date,
+                    end_date=end_date,
+                    mine_only=mine_only,
+                )
+            }
+        except Exception as exc:
+            _raise_field_visit_error(exc)
+
     @app.post("/api/v1/field-visits/{route_id}/items", status_code=201)
     def add_field_visit_items(
         route_id: int,
@@ -211,6 +242,7 @@ def register_field_visit_routes(
                 longitude=payload.longitude,
                 note=payload.note,
                 postponed_until=payload.postponed_until,
+                contact_date=payload.contact_date,
                 allowed_old_statuses=allowed_old_statuses,
                 idempotency_key=idempotency_key,
             )
