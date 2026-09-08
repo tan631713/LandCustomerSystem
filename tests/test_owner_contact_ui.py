@@ -285,6 +285,22 @@ class OwnerContactUiTests(unittest.TestCase):
         self.assertEqual(widget.table.currentRow(), 0)
         self.assertIn(("get", 7, 1), self.repository.calls)
 
+    def test_tree_relation_labels_paint_above_their_own_backing_rect(self):
+        # Regression test from a real user screenshot: the relationship
+        # label ("兒子", "配偶"...) on each connecting line showed as a
+        # blank rectangular notch with no visible text. Root cause: the
+        # label's opaque backing rect was added to the scene *after* the
+        # label itself, and QGraphicsScene paints equal-Z items in
+        # insertion order -- so the backing silently painted over the
+        # text on every single relation, every time, with no exception
+        # or warning anywhere to catch it.
+        widget = OwnerContactsWidget(self.repository, current_role="editor")
+        widget.set_record(7, "地主甲")
+
+        self.assertTrue(widget.tree_view._relation_labels)
+        for label, backing in widget.tree_view._relation_labels:
+            self.assertGreater(label.zValue(), backing.zValue())
+
     def test_tree_view_with_no_rows_shows_a_placeholder_instead_of_nodes(self):
         tree = OwnerContactTreeView()
         tree.set_data("", [])

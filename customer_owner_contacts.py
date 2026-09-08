@@ -863,12 +863,14 @@ class OwnerContactTreeView(QGraphicsView):
         self.setBackgroundBrush(QBrush(self._BACKGROUND_COLOR))
         self.setScene(QGraphicsScene(self))
         self._row_boxes = []  # [(QGraphicsRectItem, row_index)]
+        self._relation_labels = []  # [(label_item, backing_rect_item)]
         self._empty_label = None
 
     def set_data(self, owner_label, rows):
         scene = self.scene()
         scene.clear()
         self._row_boxes = []
+        self._relation_labels = []
         if not rows:
             text = scene.addSimpleText(
                 "目前尚未建立關係人資料。" if owner_label else "請先選取地主"
@@ -941,11 +943,21 @@ class OwnerContactTreeView(QGraphicsView):
             if not active:
                 pen.setStyle(Qt.DashLine)
             line.setPen(pen)
-            line.setZValue(-1)
+            # Stacking order matters here, not just visually but for
+            # painting *correctness*: QGraphicsScene paints equal-Z items
+            # in insertion order, so without an explicit order the
+            # label's own opaque backing rect -- added to the scene after
+            # the label itself -- was painting directly on top of the
+            # text and hiding it completely (a real bug caught from a
+            # user screenshot: every relationship label showed as a
+            # blank notch on the connecting line, not text). line sits at
+            # the bottom, backing above it (so it still blanks out the
+            # line under the label), and the label text on top of both.
+            line.setZValue(-2)
             scene.addItem(line)
 
             label_text = _relation_label(row) or "關係人"
-            label = scene.addSimpleText(label_text)
+            label = QGraphicsSimpleTextItem(label_text)
             label.setBrush(QBrush(self._LABEL_COLOR))
             label_font = QFont(label.font())
             label_font.setPointSize(max(label_font.pointSize() - 1, 7))
@@ -963,8 +975,12 @@ class OwnerContactTreeView(QGraphicsView):
             )
             backing.setBrush(QBrush(self._BACKGROUND_COLOR))
             backing.setPen(QPen(Qt.NoPen))
+            backing.setZValue(-1)
             scene.addItem(backing)
             label.setPos(mid_x - label_rect.width() / 2, mid_y - label_rect.height() / 2)
+            label.setZValue(0)
+            scene.addItem(label)
+            self._relation_labels.append((label, backing))
 
             cursor_x += width + self._NODE_GAP
 
