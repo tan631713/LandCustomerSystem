@@ -819,8 +819,12 @@ class OwnerContactDialog(QDialog):
 class OwnerContactTreeView(QGraphicsView):
     """Draws the current owner and their contacts as a simple one-level
     tree: the owner as a root box at the top, one child box per contact
-    below it, each connected by a line labeled with that contact's
-    relationship (e.g. "配偶", "兒子（雙胞胎）"). There is no deeper
+    below it, connected by right-angle "org chart" connectors -- a
+    vertical stem down from the root to a shared horizontal trunk, then
+    one vertical drop to each contact, labeled with that contact's
+    relationship (e.g. "配偶", "兒子（雙胞胎）") -- per an explicit user
+    request to match a reference org-chart image, instead of the
+    original straight diagonal line per contact. There is no deeper
     nesting -- owner_contact_relations only ever links an owner directly
     to a contact, never a contact to another contact -- so this is a
     star/radial relationship, just drawn top-down like a family tree
@@ -832,9 +836,20 @@ class OwnerContactTreeView(QGraphicsView):
     table and re-uses view_selected()/edit_selected(), so every existing
     action (查看/編輯/停用/複製電話/複製地址) still goes through the one
     already-tested code path instead of a second copy of it here.
+
+    Zoomable/pannable so a large family (many contacts) doesn't just
+    shrink into unreadable boxes or run off the edge with no way back:
+    set_data() always fits the whole tree in view first (reset_zoom()),
+    the mouse wheel zooms in/out around the cursor, and left-drag pans
+    (QGraphicsView's own ScrollHandDrag) once zoomed in far enough that
+    the tree no longer fits.
     """
 
     node_activated = Signal(int)
+
+    _MIN_ZOOM = 0.3
+    _MAX_ZOOM = 4.0
+    _ZOOM_STEP = 1.15
 
     _ROOT_FILL = QColor("#1e3a5f")
     _ROOT_BORDER = QColor("#60a5fa")
@@ -856,15 +871,60 @@ class OwnerContactTreeView(QGraphicsView):
     _NODE_GAP = 28
     _ROOT_TOP = 16
     _CHILD_TOP = 140
+    _TRUNK_DROP = 40  # distance below the root box where the shared horizontal trunk sits
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setRenderHint(QPainter.Antialiasing)
         self.setBackgroundBrush(QBrush(self._BACKGROUND_COLOR))
         self.setScene(QGraphicsScene(self))
+        self.setDragMode(QGraphicsView.ScrollHandDrag)
+        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
         self._row_boxes = []  # [(QGraphicsRectItem, row_index)]
         self._relation_labels = []  # [(label_item, backing_rect_item)]
         self._empty_label = None
+        self._zoom = 1.0
+
+    def zoom_in(self):
+        self._apply_zoom(self._zoom * self._ZOOM_STEP)
+
+    def zoom_out(self):
+        self._apply_zoom(self._zoom / self._ZOOM_STEP)
+
+    def reset_zoom(self):
+        """Fit the whole tree in view -- the default after every
+        set_data(), so a large family starts as a full overview instead
+        of shrunken, unreadable boxes or a tree that runs off the edge."""
+        scene_rect = self.scene().itemsBoundingRect()
+        if scene_rect.isEmpty():
+            return
+        self.resetTransform()
+        self.fitInView(scene_rect, Qt.KeepAspectRatio)
+        # fitInView() scales by the *viewport's* current pixel size, which
+        # is genuinely 0x0 before this widget has ever been shown/resized
+        # (true in headless tests, and briefly true for any widget that
+        # hasn't been laid out yet) -- that leaves the transform's scale
+        # at 0, and every later zoom_in()/zoom_out() divides by
+        # self._zoom, so a stray 0 here would raise ZeroDivisionError the
+        # next time either is called instead of just doing nothing.
+        computed_zoom = self.transform().m11()
+        self._zoom = computed_zoom if computed_zoom > 0 else 1.0
+
+    def _apply_zoom(self, target_zoom):
+        target_zoom = max(self._MIN_ZOOM, min(self._MAX_ZOOM, target_zoom))
+        factor = target_zoom / self._zoom
+        if factor == 1:
+            return
+        self.scale(factor, factor)
+        self._zoom = target_zoom
+
+    def wheelEvent(self, event):
+        if event.angleDelta().y() > 0:
+            self.zoom_in()
+        elif event.angleDelta().y() < 0:
+            self.zoom_out()
+        event.accept()
 
     def set_data(self, owner_label, rows):
         scene = self.scene()
@@ -878,6 +938,7 @@ class OwnerContactTreeView(QGraphicsView):
             text.setBrush(QBrush(self._MUTED_TEXT_COLOR))
             text.setPos(16, 16)
             self.setSceneRect(scene.itemsBoundingRect().adjusted(-16, -16, 16, 16))
+            self.reset_zoom()
             return
 
         root_text = owner_label or "地主"
@@ -895,7 +956,40 @@ class OwnerContactTreeView(QGraphicsView):
         widths = [self._node_width(_node_lines(row)) for row in rows]
         total_width = sum(widths) + self._NODE_GAP * (len(widths) - 1)
         cursor_x = root_center_x - total_width / 2
-        for row_index, (row, width) in enumerate(zip(rows, widths)):
+        child_center_xs = []
+        for width in widths:
+            child_center_xs.append(cursor_x + width / 2)
+            cursor_x += width + self._NODE_GAP
+
+        # Right-angle "org chart" connectors per explicit user request
+        # (they supplied a reference image): one vertical stem down from
+        # the root to a shared horizontal trunk, then one vertical drop
+        # from the trunk to each contact -- instead of the previous
+        # straight diagonal line per contact. The stem+trunk are shared
+        # structure, so they always stay solid; only each contact's own
+        # final drop segment (and its relationship label) reflects that
+        # one relation's active/inactive state.
+        root_bottom_y = self._ROOT_TOP + self._NODE_HEIGHT
+        trunk_y = root_bottom_y + self._TRUNK_DROP
+        stem = QGraphicsLineItem(root_center_x, root_bottom_y, root_center_x, trunk_y)
+        stem_pen = QPen(self._LINE_COLOR)
+        stem_pen.setWidth(2)
+        stem.setPen(stem_pen)
+        stem.setZValue(-2)
+        scene.addItem(stem)
+        if len(child_center_xs) > 1:
+            trunk = QGraphicsLineItem(
+                min(child_center_xs), trunk_y, max(child_center_xs), trunk_y
+            )
+            trunk_pen = QPen(self._LINE_COLOR)
+            trunk_pen.setWidth(2)
+            trunk.setPen(trunk_pen)
+            trunk.setZValue(-2)
+            scene.addItem(trunk)
+
+        for row_index, (row, width, child_center_x) in enumerate(
+            zip(rows, widths, child_center_xs)
+        ):
             active = bool(row.get("is_active"))
             primary = bool(row.get("is_primary"))
             if not active:
@@ -916,7 +1010,6 @@ class OwnerContactTreeView(QGraphicsView):
                     self._NODE_BORDER,
                     self._TEXT_COLOR,
                 )
-            child_center_x = cursor_x + width / 2
             child_box, _child_center_x, child_top_y = self._add_node(
                 scene,
                 text="\n".join(_node_lines(row)),
@@ -934,15 +1027,12 @@ class OwnerContactTreeView(QGraphicsView):
                 item.setData(0, row_index)
             self._row_boxes.append((child_box, row_index))
 
-            line = QGraphicsLineItem(
-                root_center_x, self._ROOT_TOP + self._NODE_HEIGHT,
-                child_center_x, child_top_y,
-            )
+            drop = QGraphicsLineItem(child_center_x, trunk_y, child_center_x, child_top_y)
             pen = QPen(self._LINE_COLOR)
             pen.setWidth(2)
             if not active:
                 pen.setStyle(Qt.DashLine)
-            line.setPen(pen)
+            drop.setPen(pen)
             # Stacking order matters here, not just visually but for
             # painting *correctness*: QGraphicsScene paints equal-Z items
             # in insertion order, so without an explicit order the
@@ -953,8 +1043,8 @@ class OwnerContactTreeView(QGraphicsView):
             # blank notch on the connecting line, not text). line sits at
             # the bottom, backing above it (so it still blanks out the
             # line under the label), and the label text on top of both.
-            line.setZValue(-2)
-            scene.addItem(line)
+            drop.setZValue(-2)
+            scene.addItem(drop)
 
             label_text = _relation_label(row) or "關係人"
             label = QGraphicsSimpleTextItem(label_text)
@@ -963,10 +1053,8 @@ class OwnerContactTreeView(QGraphicsView):
             label_font.setPointSize(max(label_font.pointSize() - 1, 7))
             label.setFont(label_font)
             label_rect = label.boundingRect()
-            mid_x = (root_center_x + child_center_x) / 2
-            mid_y = self._ROOT_TOP + self._NODE_HEIGHT + (
-                child_top_y - (self._ROOT_TOP + self._NODE_HEIGHT)
-            ) / 2
+            mid_x = child_center_x
+            mid_y = (trunk_y + child_top_y) / 2
             backing = QGraphicsRectItem(
                 mid_x - label_rect.width() / 2 - 4,
                 mid_y - label_rect.height() / 2 - 1,
@@ -985,6 +1073,7 @@ class OwnerContactTreeView(QGraphicsView):
             cursor_x += width + self._NODE_GAP
 
         self.setSceneRect(scene.itemsBoundingRect().adjusted(-24, -24, 24, 24))
+        self.reset_zoom()
 
     def _node_width(self, lines):
         metrics = QFontMetrics(self.font())
@@ -1122,6 +1211,17 @@ class OwnerContactsWidget(QWidget, DesktopSupportMixin):
             button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
             view_toggle_row.addWidget(button)
         self.list_view_button.setChecked(True)
+        self.tree_zoom_out_button = QPushButton("－", self)
+        self.tree_zoom_in_button = QPushButton("＋", self)
+        self.tree_zoom_reset_button = QPushButton("重置縮放", self)
+        for button in (
+            self.tree_zoom_out_button,
+            self.tree_zoom_in_button,
+            self.tree_zoom_reset_button,
+        ):
+            button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+            button.setEnabled(False)
+            view_toggle_row.addWidget(button)
         view_toggle_row.addStretch(1)
         layout.addLayout(view_toggle_row)
 
@@ -1145,6 +1245,9 @@ class OwnerContactsWidget(QWidget, DesktopSupportMixin):
 
         self.list_view_button.clicked.connect(lambda: self._set_tree_view_active(False))
         self.tree_view_button.clicked.connect(lambda: self._set_tree_view_active(True))
+        self.tree_zoom_in_button.clicked.connect(self.tree_view.zoom_in)
+        self.tree_zoom_out_button.clicked.connect(self.tree_view.zoom_out)
+        self.tree_zoom_reset_button.clicked.connect(self.tree_view.reset_zoom)
 
         self.status_label = QLabel("", self)
         self.status_label.setWordWrap(True)
@@ -1199,6 +1302,12 @@ class OwnerContactsWidget(QWidget, DesktopSupportMixin):
         self.list_view_button.setChecked(not show_tree)
         self.tree_view_button.setChecked(show_tree)
         self.view_stack.setCurrentWidget(self.tree_view if show_tree else self.table)
+        for button in (
+            self.tree_zoom_out_button,
+            self.tree_zoom_in_button,
+            self.tree_zoom_reset_button,
+        ):
+            button.setEnabled(show_tree)
 
     def _activate_tree_node(self, row_index):
         if 0 <= row_index < self.table.rowCount():

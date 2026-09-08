@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
+from PySide6.QtWidgets import QApplication, QDialog, QGraphicsLineItem, QMessageBox
 
 from customer_owner_contacts import (
     DeactivateRelationDialog,
@@ -308,6 +308,87 @@ class OwnerContactUiTests(unittest.TestCase):
 
         tree.set_data("地主甲", [])
         self.assertEqual(tree._row_boxes, [])
+
+    def test_tree_uses_right_angle_org_chart_connectors_not_diagonal_lines(self):
+        # Per explicit user request (they supplied a reference org-chart
+        # image): one vertical stem from the root down to a shared
+        # horizontal trunk, then one vertical drop per contact -- not the
+        # original single diagonal line per contact. For 3 contacts that
+        # is 1 stem + 1 trunk + 3 drops = 5 line items, and every one of
+        # them must be perfectly horizontal or vertical (a diagonal line
+        # sneaking back in would have both a nonzero dx and dy).
+        tree = OwnerContactTreeView()
+        tree.set_data(
+            "地主甲",
+            [
+                {"name": "陳美玉", "relationship_type": "配偶", "is_active": True},
+                {"name": "王大明", "relationship_type": "兒子", "is_active": True},
+                {"name": "王小華", "relationship_type": "女兒", "is_active": False},
+            ],
+        )
+        lines = [item for item in tree.scene().items() if isinstance(item, QGraphicsLineItem)]
+        self.assertEqual(len(lines), 5)
+        for line in lines:
+            segment = line.line()
+            self.assertTrue(
+                segment.x1() == segment.x2() or segment.y1() == segment.y2(),
+                "connector line is diagonal, not right-angled",
+            )
+
+    def test_tree_zoom_in_and_out_change_scale_and_stay_within_bounds(self):
+        # set_data()'s own reset_zoom() fits the tree to whatever this
+        # (headless, never shown/resized) view's default viewport size
+        # happens to be -- not a fixed number -- so read back the actual
+        # starting zoom instead of assuming one, and check zoom_in/
+        # zoom_out relative to it.
+        tree = OwnerContactTreeView()
+        tree.set_data("地主甲", [{"name": "王小明", "relationship_type": "兒子", "is_active": True}])
+        starting_zoom = tree._zoom
+        self.assertGreater(starting_zoom, 0)
+
+        tree.zoom_in()
+        self.assertAlmostEqual(tree._zoom, starting_zoom * tree._ZOOM_STEP, places=4)
+        self.assertAlmostEqual(tree.transform().m11(), tree._zoom, places=4)
+
+        tree.zoom_out()
+        tree.zoom_out()
+        self.assertAlmostEqual(tree._zoom, starting_zoom / tree._ZOOM_STEP, places=4)
+
+        for _ in range(60):
+            tree.zoom_out()
+        self.assertGreaterEqual(tree._zoom, tree._MIN_ZOOM)
+
+        for _ in range(60):
+            tree.zoom_in()
+        self.assertLessEqual(tree._zoom, tree._MAX_ZOOM)
+
+    def test_tree_reset_zoom_never_divides_by_zero_with_no_viewport_size(self):
+        # Regression guard: fitInView() scales by the viewport's current
+        # pixel size, which is genuinely 0x0 before a widget has ever
+        # been shown/resized (true for every headless test, and briefly
+        # true for a real one too) -- that used to leave self._zoom at 0,
+        # and zoom_in()/zoom_out() divide by self._zoom, so the very next
+        # call after a reset would raise ZeroDivisionError.
+        tree = OwnerContactTreeView()
+        tree.set_data("地主甲", [{"name": "王小明", "relationship_type": "兒子", "is_active": True}])
+        self.assertGreater(tree._zoom, 0)
+        tree.zoom_in()
+        tree.zoom_out()
+        tree.reset_zoom()
+        self.assertGreater(tree._zoom, 0)
+
+    def test_zoom_buttons_are_only_enabled_while_the_tree_view_is_active(self):
+        widget = OwnerContactsWidget(self.repository, current_role="editor")
+        widget.set_record(7, "地主甲")
+        self.assertFalse(widget.tree_zoom_in_button.isEnabled())
+
+        widget.tree_view_button.click()
+        self.assertTrue(widget.tree_zoom_in_button.isEnabled())
+        self.assertTrue(widget.tree_zoom_out_button.isEnabled())
+        self.assertTrue(widget.tree_zoom_reset_button.isEnabled())
+
+        widget.list_view_button.click()
+        self.assertFalse(widget.tree_zoom_in_button.isEnabled())
 
     def test_identity_is_masked_revealed_and_preserved_when_unchanged(self):
         existing = dict(self.repository.rows[0])
