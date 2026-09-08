@@ -278,6 +278,11 @@ class ExportControllerMixin:
         export from that dialog."""
         ids = [int(row["id"]) for row in rows]
         try:
+            from customer_error_handler import log_diagnostic_event
+        except Exception:
+            def log_diagnostic_event(*_args, **_kwargs):
+                pass
+        try:
             previously_exported_ids = (
                 self.active_record_repository().list_previously_exported_customer_ids(ids)
             )
@@ -290,8 +295,6 @@ class ExportControllerMixin:
             # mode is indistinguishable from "genuinely nothing was
             # exported before" and unattributable from a bug report alone.
             try:
-                from customer_error_handler import log_diagnostic_event
-
                 log_diagnostic_event(
                     "ExportControllerMixin.list_previously_exported_customer_ids",
                     f"lookup failed for ids={ids!r}: {exc!r}",
@@ -299,6 +302,23 @@ class ExportControllerMixin:
             except Exception:
                 pass
             return rows
+        # Unconditional (not just on-exception) diagnostic: a second real
+        # bug report said the check runs with no exception at all (no
+        # application-error.log entry either) but still never flags a
+        # record exported moments earlier via "匯出選取資料". That means
+        # either this call is genuinely returning an empty set every time
+        # (the write in handle_excel_export_ready never reached the
+        # database) or something before this point never even calls
+        # in -- logging every call's inputs/outputs, not just failures,
+        # is the only way to tell those apart from a real report instead
+        # of guessing blind.
+        try:
+            log_diagnostic_event(
+                "ExportControllerMixin.list_previously_exported_customer_ids",
+                f"checked ids={ids!r}, previously_exported_ids={sorted(previously_exported_ids)!r}",
+            )
+        except Exception:
+            pass
         if not previously_exported_ids:
             return rows
         duplicate_rows = [row for row in rows if int(row["id"]) in previously_exported_ids]
@@ -360,8 +380,29 @@ class ExportControllerMixin:
         # thread via Qt's own auto-queued connection -- exactly the same
         # crash-prevention rule documented on BatchGeocodeWorker and
         # start_record_search() elsewhere in this app.
+        try:
+            from customer_error_handler import log_diagnostic_event
+        except Exception:
+            def log_diagnostic_event(*_args, **_kwargs):
+                pass
         exported_ids = getattr(self, "_pending_excel_export_ids", None) or []
         self._pending_excel_export_ids = None
+        # Unconditional: a bug report said "exported once, then re-
+        # exporting the same record never flags it as a duplicate" with
+        # no application-error.log entry at all -- so either
+        # exported_ids ends up empty here (nothing to mark, silently, no
+        # exception) or mark_customers_exported_to_excel() itself
+        # succeeds but the write never actually lands. Logging what this
+        # call actually saw, every time, is the only way to tell those
+        # apart from the matching log in
+        # _exclude_previously_exported_rows instead of guessing blind.
+        try:
+            log_diagnostic_event(
+                "ExportControllerMixin.mark_customers_exported_to_excel",
+                f"about to mark exported_ids={exported_ids!r}",
+            )
+        except Exception:
+            pass
         if exported_ids:
             try:
                 self.active_record_repository().mark_customers_exported_to_excel(exported_ids)
@@ -375,11 +416,17 @@ class ExportControllerMixin:
                 # attributable instead of indistinguishable from working
                 # correctly.
                 try:
-                    from customer_error_handler import log_diagnostic_event
-
                     log_diagnostic_event(
                         "ExportControllerMixin.mark_customers_exported_to_excel",
                         f"marking failed for ids={exported_ids!r}: {exc!r}",
+                    )
+                except Exception:
+                    pass
+            else:
+                try:
+                    log_diagnostic_event(
+                        "ExportControllerMixin.mark_customers_exported_to_excel",
+                        f"marking succeeded for ids={exported_ids!r}",
                     )
                 except Exception:
                     pass

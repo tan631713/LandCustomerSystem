@@ -304,11 +304,18 @@ class ExportDuplicateDetectionTests(unittest.TestCase):
         # The export must still proceed rather than being blocked by the
         # lookup failure.
         self.assertEqual(self.harness.ready_calls, [(target, 1)])
-        mocked_log.assert_called_once()
-        self.assertIn(
-            "ExportControllerMixin.list_previously_exported_customer_ids",
-            mocked_log.call_args.args,
-        )
+        # log_diagnostic_event() now also fires unconditionally (not just
+        # on failure) around this same check and the later mark step, so
+        # more than one call is expected here -- find the specific
+        # lookup-failure entry among them instead of assuming it is the
+        # only one.
+        failure_calls = [
+            call
+            for call in mocked_log.call_args_list
+            if call.args[0] == "ExportControllerMixin.list_previously_exported_customer_ids"
+            and "lookup failed" in call.args[1]
+        ]
+        self.assertEqual(len(failure_calls), 1)
 
     def test_marking_failure_is_logged_and_does_not_hide_export_success(self):
         customer_id = self._save_customer(owner_name="王小明")
@@ -329,11 +336,18 @@ class ExportDuplicateDetectionTests(unittest.TestCase):
         # The export itself must be reported as successful even though
         # the bookkeeping write failed.
         self.assertEqual(self.harness.ready_calls, [(target, 1)])
-        mocked_log.assert_called_once()
-        self.assertIn(
-            "ExportControllerMixin.mark_customers_exported_to_excel",
-            mocked_log.call_args.args,
-        )
+        # log_diagnostic_event() now also fires unconditionally (not just
+        # on failure) around this same mark step and the earlier lookup,
+        # so more than one call is expected here -- find the specific
+        # marking-failure entry among them instead of assuming it is the
+        # only one.
+        failure_calls = [
+            call
+            for call in mocked_log.call_args_list
+            if call.args[0] == "ExportControllerMixin.mark_customers_exported_to_excel"
+            and "marking failed" in call.args[1]
+        ]
+        self.assertEqual(len(failure_calls), 1)
         # And the failed write genuinely left no trace -- next time this
         # customer is exported, it should still be treated as new.
         self.assertEqual(
