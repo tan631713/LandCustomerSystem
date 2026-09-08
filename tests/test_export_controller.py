@@ -375,12 +375,16 @@ class ExportDuplicateDetectionTests(unittest.TestCase):
 
 class MailDuplicateTagTests(unittest.TestCase):
     """Tests for the "設定寄信重複偵測標籤" workflow. User request: 匯出
-    「選取 Word」（信封/寄信名單常用的匯出方式）前，自動偵測已經有某個
-    使用者自選標籤（例如「已寄信」）的地主並提示排除-- separate from,
-    and much simpler than, the Excel export-history tracking: which tag
-    to watch is a local preference, and matching a tag is just inspecting
-    data already loaded with each row, not a new database table or a new
-    round trip to the server."""
+    「選取資料」前，自動偵測已經有某個使用者自選標籤（例如「已寄信」）的
+    地主並提示排除 -- separate from, and much simpler than, the Excel
+    export-history tracking: which tag to watch is a local preference,
+    and matching a tag is just inspecting data already loaded with each
+    row, not a new database table or a new round trip to the server.
+
+    Originally wired to "匯出選取 Word" (信封/寄信名單常用的匯出方式);
+    moved to "匯出選取資料" per explicit follow-up user request, once
+    they confirmed their actual mailing workflow exports through Excel
+    instead."""
 
     @classmethod
     def setUpClass(cls):
@@ -553,6 +557,46 @@ class MailDuplicateTagTests(unittest.TestCase):
         ):
             result = self.harness._exclude_rows_with_mail_duplicate_tag(rows)
         self.assertIsNone(result)
+
+    def test_export_selected_data_runs_the_mail_duplicate_tag_check(self):
+        # Moved from export_selected_word() to export_rows_to_xlsx() per
+        # explicit user request: their real mailing workflow exports
+        # through "匯出選取資料" (Excel), not Word, so the check needs to
+        # run here to actually catch anything.
+        save_mail_duplicate_tag(self.repository, "已寄信")
+        customer_id = self.repository.save_customer(_land_record(owner_name="王小明"))
+        row = _row(
+            customer_id, owner_name="王小明",
+            tag_items=[{"name": "已寄信", "tag_id": 1}],
+        )
+
+        with patch.object(
+            PreviousExportDuplicatesDialog, "exec", return_value=QDialog.Rejected
+        ) as mocked_exec:
+            result = self.harness.export_rows_to_xlsx([row])
+
+        mocked_exec.assert_called_once()
+        self.assertIsNone(result)
+
+    def test_export_selected_word_no_longer_runs_the_mail_duplicate_tag_check(self):
+        save_mail_duplicate_tag(self.repository, "已寄信")
+        customer_id = self.repository.save_customer(_land_record(owner_name="王小明"))
+        row = _row(
+            customer_id, owner_name="王小明",
+            tag_items=[{"name": "已寄信", "tag_id": 1}],
+        )
+        self.harness.selected_or_checked_rows = lambda: [row]
+        target = str(self.root / "export-word-no-tag-check.docx")
+
+        with (
+            patch.object(PreviousExportDuplicatesDialog, "exec") as mocked_exec,
+            patch("customer_export_controller.write_records_docx", return_value=1),
+            patch.object(QFileDialog, "getSaveFileName", return_value=(target, "")),
+            patch("customer_export_controller.QMessageBox"),
+        ):
+            self.harness.export_selected_word()
+
+        mocked_exec.assert_not_called()
 
     def test_mail_duplicate_tag_setting_is_local_not_tied_to_record_repository(self):
         # Mirrors the Google API key lesson (see load_mail_duplicate_tag's

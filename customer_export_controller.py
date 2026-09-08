@@ -115,7 +115,7 @@ MAIL_DUPLICATE_TAG_SETTING = "mail_duplicate_detection_tag_name"
 
 
 def load_mail_duplicate_tag(repository):
-    """Which tag (if any) "匯出選取 Word" should check for before exporting
+    """Which tag (if any) "匯出選取資料" should check for before exporting
     -- e.g. "已寄信", so re-mailing the same land owner isn't accidentally
     included in a new mailing list. This is a plain local machine setting
     (same treatment as the Google Geocoding API key -- see its own
@@ -344,6 +344,17 @@ class ExportControllerMixin:
             QMessageBox.information(self, "沒有資料", "已全部排除已匯出過的資料，沒有資料可匯出。")
             return
 
+        # Moved here from export_selected_word() per explicit user request
+        # -- their actual mailing workflow exports through "匯出選取資料"
+        # (Excel), not Word, so the "already mailed" tag check needs to
+        # run here instead to actually catch anything.
+        rows = self._exclude_rows_with_mail_duplicate_tag(rows)
+        if rows is None:
+            return
+        if not rows:
+            QMessageBox.information(self, "沒有資料", "已全部排除已有標籤的資料，沒有資料可匯出。")
+            return
+
         file_path, _selected_filter = QFileDialog.getSaveFileName(
             self,
             "匯出 Excel",
@@ -463,7 +474,7 @@ class ExportControllerMixin:
         choice, accepted = QInputDialog.getItem(
             self,
             "設定寄信重複偵測標籤",
-            "匯出「選取 Word」前，自動偵測已有下列標籤的地主並提示排除：",
+            "匯出「選取資料」前，自動偵測已有下列標籤的地主並提示排除：",
             options,
             current_index,
             editable=False,
@@ -519,7 +530,7 @@ class ExportControllerMixin:
         check uses. Unlike that check, this never writes anything back:
         the tag itself is still applied manually by the user after
         actually mailing the letters, matching the existing workflow --
-        exporting a Word file is not the same as having mailed it.
+        exporting this data is not the same as having mailed it.
         Returns the rows to actually export, or None if the user
         cancelled from the dialog."""
         tag_name = load_mail_duplicate_tag(self.repository)
@@ -578,12 +589,9 @@ class ExportControllerMixin:
         if not rows:
             QMessageBox.warning(self, "未選取資料", "請先選取或勾選要匯出的資料。")
             return
-        rows = self._exclude_rows_with_mail_duplicate_tag(rows)
-        if rows is None:
-            return
-        if not rows:
-            QMessageBox.information(self, "沒有資料", "已全部排除已有標籤的資料，沒有資料可匯出。")
-            return
+        # The "already mailed" tag check used to run here -- moved to
+        # export_rows_to_xlsx() (匯出選取資料) per explicit user request,
+        # since that is where their actual mailing workflow exports from.
         export_columns = self.get_export_columns()
         if not export_columns:
             QMessageBox.information(self, "沒有可匯出欄位", "目前沒有可匯出的顯示欄位。")

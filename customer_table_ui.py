@@ -371,12 +371,12 @@ def _build_data_menu(self):
     export_selected_action = QAction("匯出選取資料", self)
     export_selected_action.triggered.connect(self.export_selected_xlsx)
     self.data_menu.addAction(export_selected_action)
-    export_selected_word_action = QAction("匯出選取 Word", self)
-    export_selected_word_action.triggered.connect(self.export_selected_word)
-    self.data_menu.addAction(export_selected_word_action)
     mail_duplicate_tag_action = QAction("設定寄信重複偵測標籤", self)
     mail_duplicate_tag_action.triggered.connect(self.configure_mail_duplicate_tag)
     self.data_menu.addAction(mail_duplicate_tag_action)
+    export_selected_word_action = QAction("匯出選取 Word", self)
+    export_selected_word_action.triggered.connect(self.export_selected_word)
+    self.data_menu.addAction(export_selected_word_action)
     report_templates_action = QAction("報表與列印範本", self)
     report_templates_action.triggered.connect(self.manage_report_templates)
     self.data_menu.addAction(report_templates_action)
@@ -389,8 +389,8 @@ def _build_data_menu(self):
         import_action,
         import_profiles_action,
         export_selected_action,
-        export_selected_word_action,
         mail_duplicate_tag_action,
+        export_selected_word_action,
         report_templates_action,
         share_mobile_action,
     )
