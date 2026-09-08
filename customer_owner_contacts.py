@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from customer_desktop_support import DesktopSupportMixin
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import QBrush, QColor, QFont, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -13,6 +13,11 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QGraphicsLineItem,
+    QGraphicsRectItem,
+    QGraphicsScene,
+    QGraphicsSimpleTextItem,
+    QGraphicsView,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -25,6 +30,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSpinBox,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -810,6 +816,217 @@ class OwnerContactDialog(QDialog):
         self.accept()
 
 
+class OwnerContactTreeView(QGraphicsView):
+    """Draws the current owner and their contacts as a simple one-level
+    tree: the owner as a root box at the top, one child box per contact
+    below it, each connected by a line labeled with that contact's
+    relationship (e.g. "配偶", "兒子（雙胞胎）"). There is no deeper
+    nesting -- owner_contact_relations only ever links an owner directly
+    to a contact, never a contact to another contact -- so this is a
+    star/radial relationship, just drawn top-down like a family tree
+    since that is the shape users actually expect from "關係人樹狀圖".
+
+    A pure alternate view onto OwnerContactsWidget's own `rows`/
+    `owner_label` state (set via set_data()), not a separate data
+    source: double-clicking a node re-selects that same row in the
+    table and re-uses view_selected()/edit_selected(), so every existing
+    action (查看/編輯/停用/複製電話/複製地址) still goes through the one
+    already-tested code path instead of a second copy of it here.
+    """
+
+    node_activated = Signal(int)
+
+    _ROOT_FILL = QColor("#1e3a5f")
+    _ROOT_BORDER = QColor("#60a5fa")
+    _NODE_FILL = QColor("#1f2937")
+    _NODE_BORDER = QColor("#4b5563")
+    _PRIMARY_FILL = QColor("#3f3116")
+    _PRIMARY_BORDER = QColor("#f5a524")
+    _INACTIVE_FILL = QColor("#111827")
+    _INACTIVE_BORDER = QColor("#4b5563")
+    _TEXT_COLOR = QColor("#f8fafc")
+    _MUTED_TEXT_COLOR = QColor("#6b7280")
+    _LINE_COLOR = QColor("#4b5563")
+    _LABEL_COLOR = QColor("#9ca3af")
+    _BACKGROUND_COLOR = QColor("#111827")
+
+    _NODE_HEIGHT = 58
+    _NODE_MIN_WIDTH = 110
+    _NODE_MAX_WIDTH = 220
+    _NODE_GAP = 28
+    _ROOT_TOP = 16
+    _CHILD_TOP = 140
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setRenderHint(QPainter.Antialiasing)
+        self.setBackgroundBrush(QBrush(self._BACKGROUND_COLOR))
+        self.setScene(QGraphicsScene(self))
+        self._row_boxes = []  # [(QGraphicsRectItem, row_index)]
+        self._empty_label = None
+
+    def set_data(self, owner_label, rows):
+        scene = self.scene()
+        scene.clear()
+        self._row_boxes = []
+        if not rows:
+            text = scene.addSimpleText(
+                "目前尚未建立關係人資料。" if owner_label else "請先選取地主"
+            )
+            text.setBrush(QBrush(self._MUTED_TEXT_COLOR))
+            text.setPos(16, 16)
+            self.setSceneRect(scene.itemsBoundingRect().adjusted(-16, -16, 16, 16))
+            return
+
+        root_text = owner_label or "地主"
+        root_box, root_center_x, _root_bottom_y = self._add_node(
+            scene,
+            text=f"地主\n{root_text}",
+            center_x=0,
+            top=self._ROOT_TOP,
+            fill=self._ROOT_FILL,
+            border=self._ROOT_BORDER,
+            text_color=self._TEXT_COLOR,
+            bold=True,
+        )
+
+        widths = [self._node_width(_node_lines(row)) for row in rows]
+        total_width = sum(widths) + self._NODE_GAP * (len(widths) - 1)
+        cursor_x = root_center_x - total_width / 2
+        for row_index, (row, width) in enumerate(zip(rows, widths)):
+            active = bool(row.get("is_active"))
+            primary = bool(row.get("is_primary"))
+            if not active:
+                fill, border, text_color = (
+                    self._INACTIVE_FILL,
+                    self._INACTIVE_BORDER,
+                    self._MUTED_TEXT_COLOR,
+                )
+            elif primary:
+                fill, border, text_color = (
+                    self._PRIMARY_FILL,
+                    self._PRIMARY_BORDER,
+                    self._TEXT_COLOR,
+                )
+            else:
+                fill, border, text_color = (
+                    self._NODE_FILL,
+                    self._NODE_BORDER,
+                    self._TEXT_COLOR,
+                )
+            child_center_x = cursor_x + width / 2
+            child_box, _child_center_x, child_top_y = self._add_node(
+                scene,
+                text="\n".join(_node_lines(row)),
+                center_x=child_center_x,
+                top=self._CHILD_TOP,
+                fill=fill,
+                border=border,
+                text_color=text_color,
+                bold=primary,
+                width=width,
+                dashed=not active,
+            )
+            child_box.setData(0, row_index)
+            for item in child_box.childItems():
+                item.setData(0, row_index)
+            self._row_boxes.append((child_box, row_index))
+
+            line = QGraphicsLineItem(
+                root_center_x, self._ROOT_TOP + self._NODE_HEIGHT,
+                child_center_x, child_top_y,
+            )
+            pen = QPen(self._LINE_COLOR)
+            pen.setWidth(2)
+            if not active:
+                pen.setStyle(Qt.DashLine)
+            line.setPen(pen)
+            line.setZValue(-1)
+            scene.addItem(line)
+
+            label_text = _relation_label(row) or "關係人"
+            label = scene.addSimpleText(label_text)
+            label.setBrush(QBrush(self._LABEL_COLOR))
+            label_font = QFont(label.font())
+            label_font.setPointSize(max(label_font.pointSize() - 1, 7))
+            label.setFont(label_font)
+            label_rect = label.boundingRect()
+            mid_x = (root_center_x + child_center_x) / 2
+            mid_y = self._ROOT_TOP + self._NODE_HEIGHT + (
+                child_top_y - (self._ROOT_TOP + self._NODE_HEIGHT)
+            ) / 2
+            backing = QGraphicsRectItem(
+                mid_x - label_rect.width() / 2 - 4,
+                mid_y - label_rect.height() / 2 - 1,
+                label_rect.width() + 8,
+                label_rect.height() + 2,
+            )
+            backing.setBrush(QBrush(self._BACKGROUND_COLOR))
+            backing.setPen(QPen(Qt.NoPen))
+            scene.addItem(backing)
+            label.setPos(mid_x - label_rect.width() / 2, mid_y - label_rect.height() / 2)
+
+            cursor_x += width + self._NODE_GAP
+
+        self.setSceneRect(scene.itemsBoundingRect().adjusted(-24, -24, 24, 24))
+
+    def _node_width(self, lines):
+        metrics = QFontMetrics(self.font())
+        widest = max((metrics.horizontalAdvance(line) for line in lines), default=0)
+        return min(max(widest + 32, self._NODE_MIN_WIDTH), self._NODE_MAX_WIDTH)
+
+    def _add_node(
+        self, scene, *, text, center_x, top, fill, border, text_color, bold,
+        width=None, dashed=False,
+    ):
+        lines = text.split("\n")
+        width = width if width is not None else self._node_width(lines)
+        rect = QGraphicsRectItem(
+            center_x - width / 2, top, width, self._NODE_HEIGHT
+        )
+        rect.setBrush(QBrush(fill))
+        pen = QPen(border)
+        pen.setWidth(2)
+        if dashed:
+            pen.setStyle(Qt.DashLine)
+        rect.setPen(pen)
+        scene.addItem(rect)
+
+        label = QGraphicsSimpleTextItem(text, rect)
+        font = QFont(self.font())
+        font.setBold(bold)
+        label.setFont(font)
+        label.setBrush(QBrush(text_color))
+        label_rect = label.boundingRect()
+        label.setPos(
+            center_x - label_rect.width() / 2,
+            top + (self._NODE_HEIGHT - label_rect.height()) / 2,
+        )
+        return rect, center_x, top + self._NODE_HEIGHT
+
+    def mouseDoubleClickEvent(self, event):
+        item = self.itemAt(event.pos())
+        row_index = item.data(0) if item is not None else None
+        if row_index is None and item is not None:
+            row_index = item.parentItem().data(0) if item.parentItem() else None
+        if row_index is not None:
+            self.node_activated.emit(int(row_index))
+            return
+        super().mouseDoubleClickEvent(event)
+
+
+def _node_lines(row):
+    lines = [_text(row.get("name")) or "（未命名）"]
+    if not bool(row.get("is_active")):
+        lines.append("已停用")
+    elif row.get("is_primary"):
+        lines.append("★ 主要聯絡人")
+    phones = phone_choices(row)
+    if phones:
+        lines.append(phones[0][1])
+    return lines
+
+
 class OwnerContactsWidget(QWidget, DesktopSupportMixin):
     HEADERS = (
         "主要",
@@ -880,6 +1097,18 @@ class OwnerContactsWidget(QWidget, DesktopSupportMixin):
             toolbar.setColumnStretch(column, 1)
         layout.addLayout(toolbar)
 
+        view_toggle_row = QHBoxLayout()
+        view_toggle_row.setContentsMargins(0, 0, 0, 0)
+        self.list_view_button = QPushButton("列表", self)
+        self.tree_view_button = QPushButton("樹狀圖", self)
+        for button in (self.list_view_button, self.tree_view_button):
+            button.setCheckable(True)
+            button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+            view_toggle_row.addWidget(button)
+        self.list_view_button.setChecked(True)
+        view_toggle_row.addStretch(1)
+        layout.addLayout(view_toggle_row)
+
         self.table = QTableWidget(0, len(self.HEADERS), self)
         self.table.setHorizontalHeaderLabels(self.HEADERS)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -889,7 +1118,17 @@ class OwnerContactsWidget(QWidget, DesktopSupportMixin):
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.itemSelectionChanged.connect(self._update_buttons)
         self.table.doubleClicked.connect(lambda _index: self.view_selected())
-        layout.addWidget(self.table, 1)
+
+        self.tree_view = OwnerContactTreeView(self)
+        self.tree_view.node_activated.connect(self._activate_tree_node)
+
+        self.view_stack = QStackedWidget(self)
+        self.view_stack.addWidget(self.table)
+        self.view_stack.addWidget(self.tree_view)
+        layout.addWidget(self.view_stack, 1)
+
+        self.list_view_button.clicked.connect(lambda: self._set_tree_view_active(False))
+        self.tree_view_button.clicked.connect(lambda: self._set_tree_view_active(True))
 
         self.status_label = QLabel("", self)
         self.status_label.setWordWrap(True)
@@ -931,10 +1170,24 @@ class OwnerContactsWidget(QWidget, DesktopSupportMixin):
         self.record_id = None
         self.owner_label = ""
         self.rows = []
-        self.table.setRowCount(0)
+        self._clear_views()
         self.owner_label_widget.setText("請先選取地主")
         self.status_label.setText("沒有選取地主，關係人操作已停用。")
         self._update_buttons()
+
+    def _clear_views(self):
+        self.table.setRowCount(0)
+        self.tree_view.set_data(self.owner_label, [])
+
+    def _set_tree_view_active(self, show_tree):
+        self.list_view_button.setChecked(not show_tree)
+        self.tree_view_button.setChecked(show_tree)
+        self.view_stack.setCurrentWidget(self.tree_view if show_tree else self.table)
+
+    def _activate_tree_node(self, row_index):
+        if 0 <= row_index < self.table.rowCount():
+            self.table.setCurrentCell(row_index, 0)
+            self.view_selected()
 
     def refresh(self):
         if self.record_id is None:
@@ -943,7 +1196,7 @@ class OwnerContactsWidget(QWidget, DesktopSupportMixin):
         repository = self.repository()
         if not hasattr(repository, "list_owner_contacts"):
             self.rows = []
-            self.table.setRowCount(0)
+            self._clear_views()
             self.status_label.setText("此功能需要連線至支援關係人管理的正式伺服器。")
             self._update_buttons()
             return
@@ -956,7 +1209,7 @@ class OwnerContactsWidget(QWidget, DesktopSupportMixin):
             )
         except Exception as exc:
             self.rows = []
-            self.table.setRowCount(0)
+            self._clear_views()
             self.status_label.setText(f"關係人載入失敗：{exc}")
             self._update_buttons()
             return
@@ -1001,6 +1254,7 @@ class OwnerContactsWidget(QWidget, DesktopSupportMixin):
             self.table.setColumnWidth(
                 column, min(self.table.columnWidth(column), 260)
             )
+        self.tree_view.set_data(self.owner_label, self.rows)
         self._update_buttons()
 
     def selected_relation(self):

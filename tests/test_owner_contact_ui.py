@@ -13,6 +13,7 @@ from customer_owner_contacts import (
     DeactivateRelationDialog,
     OwnerContactDialog,
     OwnerContactsWidget,
+    OwnerContactTreeView,
     address_choices,
     phone_choices,
 )
@@ -258,6 +259,39 @@ class OwnerContactUiTests(unittest.TestCase):
         self.assertEqual(widget.table.rowCount(), 0)
         self.assertFalse(widget.add_button.isEnabled())
         self.assertFalse(widget.refresh_button.isEnabled())
+
+    def test_tree_view_toggle_builds_one_node_per_visible_contact(self):
+        widget = OwnerContactsWidget(self.repository, current_role="editor")
+        widget.set_record(7, "地主甲")
+        self.assertIs(widget.view_stack.currentWidget(), widget.table)
+
+        widget.tree_view_button.click()
+        self.assertIs(widget.view_stack.currentWidget(), widget.tree_view)
+        self.assertTrue(widget.tree_view_button.isChecked())
+        self.assertFalse(widget.list_view_button.isChecked())
+        # One row is active (visible in the table by default) -- the tree
+        # must show exactly the same rows, not a separate data source.
+        self.assertEqual(len(widget.tree_view._row_boxes), widget.table.rowCount())
+
+        widget.list_view_button.click()
+        self.assertIs(widget.view_stack.currentWidget(), widget.table)
+
+    def test_tree_node_double_click_opens_the_same_detail_as_the_table(self):
+        widget = OwnerContactsWidget(self.repository, current_role="editor")
+        widget.set_record(7, "地主甲")
+
+        widget.tree_view.node_activated.emit(0)
+
+        self.assertEqual(widget.table.currentRow(), 0)
+        self.assertIn(("get", 7, 1), self.repository.calls)
+
+    def test_tree_view_with_no_rows_shows_a_placeholder_instead_of_nodes(self):
+        tree = OwnerContactTreeView()
+        tree.set_data("", [])
+        self.assertEqual(tree._row_boxes, [])
+
+        tree.set_data("地主甲", [])
+        self.assertEqual(tree._row_boxes, [])
 
     def test_identity_is_masked_revealed_and_preserved_when_unchanged(self):
         existing = dict(self.repository.rows[0])
