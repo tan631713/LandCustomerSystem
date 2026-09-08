@@ -13,6 +13,7 @@ from customer_land_tree import (
 )
 from customer_models import CHECK_COLUMN, LandTreeProxyModel, RecordTableModel
 from customer_api.postgres_source import PostgreSQLCustomerDataSource
+from customer_desktop_support import DesktopSupportMixin
 from customer_record_workflows import RecordWorkflowMixin
 from customer_search_controller import SearchControllerMixin
 from customer_selection_workflows import SelectionWorkflowMixin
@@ -151,6 +152,7 @@ class _WorkflowHarness(
     RecordWorkflowMixin,
     SelectionWorkflowMixin,
     SearchControllerMixin,
+    DesktopSupportMixin,
 ):
     def __init__(self, rows):
         self.table_model = RecordTableModel(lambda *_args: None)

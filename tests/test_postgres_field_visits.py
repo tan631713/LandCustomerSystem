@@ -243,7 +243,13 @@ class PostgreSQLFieldVisitTests(unittest.TestCase):
                 None,  # advisory transaction lock
                 None,  # expired idempotency cleanup
                 None,  # no cached response
-                {"id": 9, "route_id": 4, "status": "in_progress", "user_id": 2},
+                {
+                    "id": 9,
+                    "route_id": 4,
+                    "status": "in_progress",
+                    "user_id": 2,
+                    "ownership_id": 42,
+                },
                 {
                     "id": 9,
                     "route_id": 4,
@@ -254,6 +260,7 @@ class PostgreSQLFieldVisitTests(unittest.TestCase):
                     "updated_at": "2026-07-24T10:30:00+08:00",
                 },
                 {"id": 15},
+                {"id": 20},  # auto contact-log insert for the completed status
                 None,  # mark route in progress
                 {"remaining": 0},
                 None,  # complete route

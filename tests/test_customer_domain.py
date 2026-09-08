@@ -78,7 +78,7 @@ class CustomerDomainTests(unittest.TestCase):
         self.assertIn("分母必須大於 0", errors[0])
 
         records, errors = parse_shared_land_rows(
-            "林先生、C123456789、桃園市、2、5、追蹤、二訪"
+            "林先生、C123456789、桃園市、2、5、收購、追蹤、二訪"
         )
         self.assertFalse(errors)
         self.assertEqual(
@@ -89,6 +89,7 @@ class CustomerDomainTests(unittest.TestCase):
                 "address",
                 "numerator",
                 "denominator",
+                "registration_reason",
                 "note",
                 "visit_log",
             ],

@@ -108,8 +108,8 @@ class CustomerApiTests(unittest.TestCase):
         health = self.client.get("/health")
         self.assertEqual(health.status_code, 200)
         self.assertEqual(health.json()["backend"], "sqlite")
-        self.assertEqual(health.json()["schema_version"], 9)
-        self.assertEqual(health.json()["mobile_asset_version"], 26)
+        self.assertEqual(health.json()["schema_version"], 11)
+        self.assertEqual(health.json()["mobile_asset_version"], 32)
 
         bad_login = self.client.post(
             "/api/v1/auth/login",
@@ -175,7 +175,7 @@ class CustomerApiTests(unittest.TestCase):
         self.assertEqual(page.status_code, 200)
         self.assertIn("地主開發助手", page.text)
         self.assertIn('src="./field-visit.js?v=2"', page.text)
-        self.assertIn('src="./app.js?v=26"', page.text)
+        self.assertIn('src="./app.js?v=30"', page.text)
         self.assertIn('id="login-connection-check"', page.text)
         self.assertIn('id="login-connection-retry"', page.text)
         self.assertIn('id="connection-banner-retry"', page.text)
@@ -230,9 +230,9 @@ class CustomerApiTests(unittest.TestCase):
         service_worker = self.client.get("/mobile/service-worker.js")
         self.assertEqual(service_worker.status_code, 200)
         self.assertIn('url.pathname.startsWith("/api/")', service_worker.text)
-        self.assertIn('land-customer-mobile-v26', service_worker.text)
+        self.assertIn('land-customer-mobile-v30', service_worker.text)
         self.assertIn('/mobile/field-visit.js?v=2', service_worker.text)
-        self.assertIn('/mobile/app.js?v=26', service_worker.text)
+        self.assertIn('/mobile/app.js?v=30', service_worker.text)
         self.assertIn('fetch(event.request, { cache: "no-store" })', service_worker.text)
         self.assertIn("no-store", service_worker.headers["cache-control"])
 
@@ -251,11 +251,11 @@ class CustomerApiTests(unittest.TestCase):
         self.assertIn("window.isSecureContext === false", field_visit_script.text)
         self.assertIn("navigator.geolocation.getCurrentPosition(", field_visit_script.text)
 
-        app_script = self.client.get("/mobile/app.js?v=26")
+        app_script = self.client.get("/mobile/app.js?v=30")
         self.assertEqual(app_script.status_code, 200)
         self.assertEqual(app_script.headers["cache-control"], "no-store")
         self.assertIn("function maskIdentity(value)", app_script.text)
-        self.assertIn("const MOBILE_ASSET_VERSION = 26", app_script.text)
+        self.assertIn("const MOBILE_ASSET_VERSION = 32", app_script.text)
         self.assertIn("function checkMobileAssetVersion(", app_script.text)
         self.assertIn("health.mobile_asset_version", app_script.text)
         self.assertIn("async function registerMobileServiceWorker(", app_script.text)

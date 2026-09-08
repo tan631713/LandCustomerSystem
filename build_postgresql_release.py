@@ -226,7 +226,7 @@ def package_release() -> tuple[Path, Path]:
             "packaged_at": datetime.now().astimezone().isoformat(),
             "channel": "formal",
             "official_data_source": "postgresql",
-            "postgresql_schema_version": 12,
+            "postgresql_schema_version": 13,
             "mobile_asset_version": MOBILE_ASSET_VERSION,
             "field_visit_phase_one": True,
             "owner_contacts_phase_one": True,
