@@ -49,7 +49,7 @@ from PySide6.QtWidgets import (
 
 from customer_responsive_dialog import ResponsiveDialog as QDialog
 
-from customer_domain import normalize_match_text
+from customer_domain import mask_owner_display_name, normalize_match_text
 from customer_excel import HEADER_MAP, normalize_header
 from customer_word import write_report_docx
 from customer_security import decrypt_value
@@ -1526,8 +1526,17 @@ class BatchGeocodeWorker(QObject):
 
 
 class MapLocationsDialog(QDialog):
-    def __init__(self, repository, fernet, selected_customer_id=None, parent=None, settings_repository=None):
+    def __init__(
+        self,
+        repository,
+        fernet,
+        selected_customer_id=None,
+        parent=None,
+        settings_repository=None,
+        mask_owner_names=False,
+    ):
         super().__init__(parent); self.repository = repository; self.fernet = fernet; self.export_requested = False
+        self.mask_owner_names = mask_owner_names
         self.geocode_thread = None
         self.geocode_worker = None
         self.progress_dialog = None
@@ -1645,7 +1654,11 @@ class MapLocationsDialog(QDialog):
                     "section": row.get("section") or "",
                     "subsection": row.get("subsection") or "",
                     "land_number": row.get("land_number") or "",
-                    "owner_name": decrypt_value(self.fernet, row.get("owner_name")),
+                    "owner_name": (
+                        mask_owner_display_name(decrypt_value(self.fernet, row.get("owner_name")))
+                        if self.mask_owner_names
+                        else decrypt_value(self.fernet, row.get("owner_name"))
+                    ),
                     "address": decrypt_value(self.fernet, row.get("address")),
                     "latitude": located["latitude"] if located else None,
                     "longitude": located["longitude"] if located else None,

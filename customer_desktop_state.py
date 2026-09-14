@@ -3,9 +3,11 @@
 import os
 from pathlib import Path
 
+from customer_desktop_api import DesktopApiError
 from customer_error_handler import get_error_log_path
 from customer_health import SystemHealthCheckService
 from customer_quality import inspect_customer_quality
+from PySide6.QtWidgets import QInputDialog, QLineEdit
 
 
 class DesktopStateMixin:
@@ -36,6 +38,69 @@ class DesktopStateMixin:
             3500,
         )
 
+    def _verify_current_user_password(self, password):
+        """Re-check the given password against the currently logged-in user.
+
+        Local (SQLite) mode has one admin account, checked directly against
+        the local password hash. API/server mode has to ask the home
+        server instead -- DesktopApiClient.login() is the only endpoint
+        that verifies a password, so this reuses it purely to confirm the
+        password is correct; the fresh access token it returns simply
+        replaces the (still valid) one already in use.
+        """
+        username = self.current_user.get("username") or self.admin_username
+        if self.api_mode:
+            client = getattr(self.active_record_repository(), "client", None)
+            if client is None:
+                return False
+            try:
+                client.login(username, password)
+            except DesktopApiError:
+                return False
+            return True
+        return self.repository.authenticate_user(username, password) is not None
+
+    def _confirm_action_password(self, prompt_text):
+        password, accepted = QInputDialog.getText(
+            self, "密碼確認", prompt_text, QLineEdit.Password,
+        )
+        if not accepted:
+            return False
+        if not password or not self._verify_current_user_password(password):
+            self._app_component("QMessageBox").warning(self, "密碼錯誤", "密碼不正確，操作已取消。")
+            return False
+        return True
+
+    def toggle_privacy_mask_mode(self, enabled):
+        # Checkable QAction.toggled has already flipped the checkbox by the
+        # time this fires; a declined/failed password confirmation has to
+        # flip it back without re-entering this handler (setChecked() would
+        # re-emit toggled and recurse), hence the blockSignals() pair below.
+        if not self._confirm_action_password("請輸入使用者密碼以確認操作："):
+            action = self.privacy_mask_action
+            if action is not None:
+                action.blockSignals(True)
+                action.setChecked(not enabled)
+                action.blockSignals(False)
+            return
+        self.repository.set_setting(self.privacy_mask_setting_key, "1" if enabled else "0")
+        self.privacy_mask_enabled = enabled
+        self.apply_owner_name_visibility()
+        self.apply_owner_contacts_tab_visibility()
+        self.refresh_records(self.selected_record_id)
+        self.statusBar().showMessage(
+            "已啟用遮罩，地主姓名只顯示姓氏，關係人分頁已隱藏。" if enabled else "已還原正常顯示。",
+            3500,
+        )
+
+    def apply_owner_contacts_tab_visibility(self):
+        tabs = getattr(self, "detail_tabs", None)
+        widget = getattr(self, "owner_contacts_widget", None)
+        if tabs is None or widget is None:
+            return
+        index = tabs.indexOf(widget)
+        if index != -1:
+            tabs.setTabVisible(index, not self.privacy_mask_enabled)
 
     def show_health_check(self):
         self._show_non_modal_report_dialog(

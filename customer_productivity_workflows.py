@@ -310,6 +310,7 @@ class ProductivityWorkflowMixin:
         dialog = self._app_component("MapLocationsDialog")(
             self.active_record_repository(), self.fernet, self.selected_record_id, self,
             settings_repository=self.repository,
+            mask_owner_names=self.privacy_mask_enabled,
         )
 
         def on_accepted():

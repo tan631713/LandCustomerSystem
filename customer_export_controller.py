@@ -3,6 +3,7 @@
 import json
 from datetime import datetime
 
+from customer_domain import mask_owner_display_name
 from customer_excel import ExcelExportWorker
 from customer_mobile_share import MobileShareDialog
 from customer_security import decrypt_value
@@ -367,6 +368,15 @@ class ExportControllerMixin:
             file_path += ".xlsx"
 
         raw_rows = [dict(row["raw"]) for row in rows]
+        if self.privacy_mask_enabled:
+            # Privacy mask covers a deliberate Excel export too (explicit
+            # user request) -- unlike show_full_external_id's on-screen-
+            # only masking, this must not leave the real owner name
+            # sitting in an exported file while the mask is meant to hide
+            # it. raw_rows are per-export copies (dict(row["raw"]) above),
+            # so mutating them here never touches the live table model.
+            for raw_row in raw_rows:
+                raw_row["owner_name"] = mask_owner_display_name(raw_row.get("owner_name"))
         # start_excel_worker() only guards against a *second* export
         # starting while one is already running, so there is never more
         # than one export in flight -- safe to stash the ids here and
@@ -606,5 +616,17 @@ class ExportControllerMixin:
             return
         if not file_path.lower().endswith(".docx"):
             file_path += ".docx"
-        row_count = write_records_docx(file_path, [row["raw"] for row in rows], export_columns)
+        if self.privacy_mask_enabled:
+            # See the matching comment in export_rows_to_xlsx(): the
+            # privacy mask has to cover a deliberate Word export too, and
+            # these dicts must be copied before mutating -- row["raw"] is
+            # the live table model's cached data, not a per-export copy.
+            docx_rows = []
+            for row in rows:
+                raw_row = dict(row["raw"])
+                raw_row["owner_name"] = mask_owner_display_name(raw_row.get("owner_name"))
+                docx_rows.append(raw_row)
+        else:
+            docx_rows = [row["raw"] for row in rows]
+        row_count = write_records_docx(file_path, docx_rows, export_columns)
         QMessageBox.information(self, "匯出完成", f"已匯出 {row_count} 筆資料：\n{file_path}")

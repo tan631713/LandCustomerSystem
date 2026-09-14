@@ -15,6 +15,7 @@ from customer_domain import (
     format_number_text,
     format_ping_text,
     mask_identity_text,
+    mask_owner_display_name,
 )
 from customer_fields import LAND_FIELDS
 from customer_land_details import LandDetailsDialog
@@ -343,6 +344,17 @@ class RecordWorkflowMixin:
             widget.setText(mask_identity_text(self.current_external_id_plain))
             widget.setReadOnly(True)
 
+    def apply_owner_name_visibility(self):
+        widget = self.field_widgets.get("owner_name")
+        if widget is None:
+            return
+        if self.privacy_mask_enabled:
+            widget.setText(mask_owner_display_name(self.current_owner_name_plain))
+            widget.setReadOnly(True)
+        else:
+            widget.setReadOnly(False)
+            widget.setText(self.current_owner_name_plain)
+
     def select_record_in_table(self, record_id):
         with self._programmatic_land_expansion(restoring=True):
             source_index = self.table_model.index_for_record_id(record_id)
@@ -621,9 +633,12 @@ class RecordWorkflowMixin:
                 value = decrypt_value(self.fernet, value)
             if key == "external_id":
                 self.current_external_id_plain = value
+            elif key == "owner_name":
+                self.current_owner_name_plain = value
             self.set_field_text(key, value)
 
         self.apply_external_id_visibility()
+        self.apply_owner_name_visibility()
         self.format_declared_value()
         self.update_total_declared_value()
         self.update_age_field()
@@ -667,10 +682,12 @@ class RecordWorkflowMixin:
         self.selected_record_id = None
         self.schedule_selection_state_save()
         self.current_external_id_plain = ""
+        self.current_owner_name_plain = ""
         self.table_view.clearSelection()
         for key in self.fields:
             self.set_field_text(key, "")
         self.apply_external_id_visibility()
+        self.apply_owner_name_visibility()
         self.update_management_summary()
         if getattr(self, "owner_contacts_widget", None) is not None:
             self.owner_contacts_widget.clear_owner()
@@ -686,6 +703,15 @@ class RecordWorkflowMixin:
             self.current_external_id_plain = data.get("external_id") or ""
         else:
             data["external_id"] = self.current_external_id_plain or None
+        if self.privacy_mask_enabled:
+            # The owner_name field is read-only and showing only the
+            # surname while masked (see apply_owner_name_visibility()) --
+            # its widget text must never be trusted here, or saving while
+            # masked would permanently truncate the real name in the
+            # database.
+            data["owner_name"] = self.current_owner_name_plain or None
+        else:
+            self.current_owner_name_plain = data.get("owner_name") or ""
         data["ping"] = format_ping_text(data.get("ping") or "")
         data["name"] = data.get("owner_name") or ""
         return data

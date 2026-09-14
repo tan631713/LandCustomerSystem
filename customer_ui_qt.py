@@ -259,6 +259,7 @@ SELECTED_RECORD_SETTING_KEY = "selected_record_id"
 IGNORED_QUALITY_ISSUES_SETTING_KEY = "ignored_quality_issue_signatures"
 QUALITY_RULES_SETTING_KEY = "quality_rule_keys"
 READONLY_MODE_SETTING_KEY = "readonly_mode"
+PRIVACY_MASK_SETTING_KEY = "privacy_mask_enabled"
 BACKUP_COMPRESSION_SETTING_KEY = "backup_compression_enabled"
 BACKUP_RETENTION_DAYS_SETTING_KEY = "backup_retention_days"
 BACKUP_MAX_COUNT_SETTING_KEY = "backup_max_count"
@@ -1069,6 +1070,7 @@ class LandApp(
         self.admin_username = ADMIN_USERNAME
         self.advanced_search_setting_key = ADVANCED_SEARCH_SETTING_KEY
         self.readonly_setting_key = READONLY_MODE_SETTING_KEY
+        self.privacy_mask_setting_key = PRIVACY_MASK_SETTING_KEY
         self.record_repository = record_repository or self.repository
         self.data_access = DesktopDataAccess(self.repository, self.record_repository)
         self.api_mode = bool(api_mode)
@@ -1118,6 +1120,10 @@ class LandApp(
         self.field_widgets = {}
         self.show_full_external_id = False
         self.current_external_id_plain = ""
+        self.privacy_mask_enabled = (
+            self.repository.get_setting(self.privacy_mask_setting_key, "0") == "1"
+        )
+        self.current_owner_name_plain = ""
         self.advanced_search_criteria = decode_table_preferences(get_setting(ADVANCED_SEARCH_SETTING_KEY, "")) or {}
         self.saving_table_preferences = False
 
@@ -1159,6 +1165,7 @@ class LandApp(
         self.management_summary_label = None
         self.show_checked_only_action = None
         self.readonly_mode_action = None
+        self.privacy_mask_action = None
         self.excel_thread = None
         self.excel_worker = None
         self.record_search_request_id = 0
@@ -1182,6 +1189,7 @@ class LandApp(
         self.gc_collect_timer.start()
 
         self.create_layout()
+        self.apply_owner_contacts_tab_visibility()
         if self.api_mode:
             self.configure_api_mode_ui()
             self.setup_notification_status()

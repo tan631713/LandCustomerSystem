@@ -52,6 +52,7 @@ class _ExportWorkflowHarness(ExportControllerMixin, QWidget):
         # same as when no table view has been built yet.
         self.table_view = None
         self.ready_calls = []
+        self.privacy_mask_enabled = False
 
     def active_record_repository(self):
         return self.repository
@@ -597,6 +598,68 @@ class MailDuplicateTagTests(unittest.TestCase):
             self.harness.export_selected_word()
 
         mocked_exec.assert_not_called()
+
+    @staticmethod
+    def _owner_name_column_value(target):
+        from openpyxl import load_workbook
+
+        # read_only workbooks keep the file memory-mapped on Windows until
+        # explicitly closed -- without this, tearDown()'s temp-directory
+        # cleanup fails with PermissionError ("still in use by another
+        # process").
+        workbook = load_workbook(target, read_only=True, data_only=True)
+        try:
+            header, *data_rows = workbook.active.iter_rows(values_only=True)
+            owner_name_column = header.index("姓名")
+            return data_rows[0][owner_name_column]
+        finally:
+            workbook.close()
+
+    def test_excel_export_masks_owner_name_when_privacy_mask_is_enabled(self):
+        customer_id = self.repository.save_customer(_land_record(owner_name="王小明"))
+        row = _row(customer_id, owner_name="王小明")
+        self.harness.privacy_mask_enabled = True
+        target = str(self.root / "export-masked.xlsx")
+
+        with patch.object(QFileDialog, "getSaveFileName", return_value=(target, "")):
+            self.harness.export_rows_to_xlsx([row])
+
+        self.assertEqual(self._owner_name_column_value(target), "王")
+        # The live table-model row itself must be untouched -- only the
+        # per-export copy is masked.
+        self.assertEqual(row["raw"]["owner_name"], "王小明")
+
+    def test_excel_export_keeps_full_owner_name_when_privacy_mask_is_disabled(self):
+        customer_id = self.repository.save_customer(_land_record(owner_name="王小明"))
+        row = _row(customer_id, owner_name="王小明")
+        target = str(self.root / "export-unmasked.xlsx")
+
+        with patch.object(QFileDialog, "getSaveFileName", return_value=(target, "")):
+            self.harness.export_rows_to_xlsx([row])
+
+        self.assertEqual(self._owner_name_column_value(target), "王小明")
+
+    def test_word_export_masks_owner_name_when_privacy_mask_is_enabled(self):
+        self.harness.privacy_mask_enabled = True
+        customer_id = self.repository.save_customer(_land_record(owner_name="王小明"))
+        row = _row(customer_id, owner_name="王小明")
+        self.harness.selected_or_checked_rows = lambda: [row]
+        target = str(self.root / "export-masked.docx")
+        captured = {}
+
+        def fake_write_records_docx(_file_path, rows, _columns):
+            captured["owner_name"] = rows[0]["owner_name"]
+            return len(rows)
+
+        with (
+            patch("customer_export_controller.write_records_docx", side_effect=fake_write_records_docx),
+            patch.object(QFileDialog, "getSaveFileName", return_value=(target, "")),
+            patch("customer_export_controller.QMessageBox"),
+        ):
+            self.harness.export_selected_word()
+
+        self.assertEqual(captured["owner_name"], "王")
+        self.assertEqual(row["raw"]["owner_name"], "王小明")
 
     def test_mail_duplicate_tag_setting_is_local_not_tied_to_record_repository(self):
         # Mirrors the Google API key lesson (see load_mail_duplicate_tag's

@@ -135,6 +135,26 @@ def mask_identity_text(value):
     return text[:4] + ("*" * (len(text) - 5)) + text[-1]
 
 
+def mask_owner_display_name(value):
+    """Reduce an owner name to just its surname for the privacy mask toggle.
+
+    A 1-3 character name keeps only its first character (covers the
+    overwhelming majority of Chinese names -- a single-character surname
+    plus a 1-2 character given name). A 4+ character name keeps its first
+    two characters instead, so a two-character compound surname (歐陽,
+    司馬, ...) followed by a given name is not truncated into a different,
+    unrelated surname. This is a length heuristic, not a real compound-
+    surname dictionary lookup -- it will occasionally keep one character
+    too many/few for an unusual name shape, but never leaks more of the
+    given name than that.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return text
+    keep = 2 if len(text) >= 4 else 1
+    return text[:keep]
+
+
 TAIWAN_ID_LETTER_VALUES = {
     letter: value
     for letter, value in zip(

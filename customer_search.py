@@ -8,6 +8,7 @@ from customer_domain import (
     format_number_text,
     format_ping_text,
     mask_identity_text,
+    mask_owner_display_name,
     normalize_match_text,
     normalize_search_text,
     parse_number,
@@ -70,6 +71,7 @@ class CustomerRecordProcessor:
         checked_ids=(),
         watchlist_names=(),
         show_full_external_id=False,
+        mask_owner_names=False,
         checked_color=None,
         watchlist_color=None,
         overdue_color=None,
@@ -87,6 +89,7 @@ class CustomerRecordProcessor:
         self.checked_ids = frozenset(checked_ids)
         self.watchlist_names = frozenset(watchlist_names)
         self.show_full_external_id = show_full_external_id
+        self.mask_owner_names = mask_owner_names
         self.checked_color = checked_color
         self.watchlist_color = watchlist_color
         self.overdue_color = overdue_color
@@ -287,6 +290,9 @@ class CustomerRecordProcessor:
             "total_declared_value": format_number_text(row["total_declared_value"] or ""),
             "external_id": (
                 external_id if self.show_full_external_id else mask_identity_text(external_id)
+            ),
+            "owner_name": (
+                mask_owner_display_name(owner_name) if self.mask_owner_names else owner_name
             ),
         }
         return {

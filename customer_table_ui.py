@@ -628,6 +628,11 @@ def _build_settings_menu(self):
     column_visibility_action = QAction("欄位顯示", self)
     column_visibility_action.triggered.connect(self.change_column_visibility)
     self.settings_menu.addAction(column_visibility_action)
+    self.privacy_mask_action = QAction("測試", self)
+    self.privacy_mask_action.setCheckable(True)
+    self.privacy_mask_action.setChecked(self.privacy_mask_enabled)
+    self.privacy_mask_action.toggled.connect(self.toggle_privacy_mask_mode)
+    self.settings_menu.addAction(self.privacy_mask_action)
     self.readonly_mode_action = QAction("唯讀模式", self)
     self.readonly_mode_action.setCheckable(True)
     self.readonly_mode_action.setChecked(self.is_readonly_mode())
@@ -722,6 +727,7 @@ def _configure_api_action_groups(self, actions):
         actions["operation_log_action"],
         actions["font_size_action"],
         actions["column_visibility_action"],
+        self.privacy_mask_action,
         self.readonly_mode_action,
         actions["attachment_check_action"],
         actions["help_action"],

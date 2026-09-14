@@ -5,6 +5,7 @@ from customer_domain import (
     calculate_ping,
     calculate_total_declared_value,
     mask_identity_text,
+    mask_owner_display_name,
     normalize_taiwan_identity,
     normalize_search_text,
     parse_number,
@@ -33,6 +34,18 @@ class CustomerDomainTests(unittest.TestCase):
 
         self.assertEqual(calculate_total_declared_value(record), "1,000,000")
         self.assertEqual(calculate_ping(record), "15.12")
+
+    def test_owner_display_name_mask_keeps_only_the_surname(self):
+        self.assertEqual(mask_owner_display_name(""), "")
+        self.assertEqual(mask_owner_display_name(None), "")
+        self.assertEqual(mask_owner_display_name("王"), "王")
+        self.assertEqual(mask_owner_display_name("王小"), "王")
+        self.assertEqual(mask_owner_display_name("王小明"), "王")
+        # 4+ characters keeps 2 -- covers a two-character compound surname
+        # (歐陽, 司馬, ...) followed by a given name without truncating
+        # into an unrelated single character.
+        self.assertEqual(mask_owner_display_name("歐陽小華"), "歐陽")
+        self.assertEqual(mask_owner_display_name("  王小明  "), "王")
 
     def test_identity_mask_and_duplicate_signature(self):
         self.assertEqual(mask_identity_text("A123456789"), "A123*****9")

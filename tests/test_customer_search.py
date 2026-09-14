@@ -60,6 +60,47 @@ class CustomerSearchWorkerTests(unittest.TestCase):
         self.assertIn("owner_name", record["highlighted_fields"])
         self.assertEqual(processor.process([row]), [record])
 
+    def test_mask_owner_names_only_changes_the_display_copy(self):
+        # The privacy mask toggle must never touch search/sort/highlight
+        # matching (all driven by raw/filter_values) -- only what is
+        # actually painted in the table cell (display) should shrink to
+        # the surname.
+        fernet = make_fernet(Fernet.generate_key())
+        columns = [("checked", ""), ("rowid", ""), ("owner_name", "")]
+        row = {
+            "id": 9,
+            "district": "D",
+            "section": "S",
+            "subsection": "",
+            "registration_order": "1",
+            "land_number": "100",
+            "area": "10",
+            "declared_value": "2000",
+            "numerator": "1",
+            "denominator": "2",
+            "ping": "",
+            "total_declared_value": "10000",
+            "owner_name": encrypt_value(fernet, "王小明"),
+            "external_id": encrypt_value(fernet, "A123456789"),
+            "address": encrypt_value(fernet, "Address"),
+            "registration_reason": "sale",
+            "note": encrypt_value(fernet, "note"),
+            "visit_log": encrypt_value(fernet, "visit"),
+        }
+        masked_processor = CustomerRecordProcessor(
+            fernet=fernet, table_columns=columns, mask_owner_names=True,
+        )
+        record = masked_processor.build_record(row)
+        self.assertEqual(record["display"]["owner_name"], "王")
+        self.assertEqual(record["raw"]["owner_name"], "王小明")
+        self.assertEqual(record["filter_values"]["owner_name"], "王小明")
+
+        unmasked_processor = CustomerRecordProcessor(
+            fernet=fernet, table_columns=columns, mask_owner_names=False,
+        )
+        unmasked_record = unmasked_processor.build_record(row)
+        self.assertEqual(unmasked_record["display"]["owner_name"], "王小明")
+
     def test_processor_requires_all_advanced_search_conditions(self):
         fernet = make_fernet(Fernet.generate_key())
         base_row = {
