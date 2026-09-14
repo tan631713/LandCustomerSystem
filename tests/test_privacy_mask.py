@@ -178,14 +178,14 @@ class PrivacyMaskTests(unittest.TestCase):
         self._enable_mask(window)
         window.load_record(record_id)
         external_id_widget = window.field_widgets["external_id"]
-        self.assertEqual(external_id_widget.text(), "A123")
+        self.assertEqual(external_id_widget.text(), "A1239")
         self.assertTrue(external_id_widget.isReadOnly())
         self.assertFalse(window.toggle_external_id_action.isEnabled())
 
         # The lightweight "顯示身分證" button must not be able to defeat
         # the password-gated mask even if clicked while masked.
         window.toggle_external_id_visibility()
-        self.assertEqual(external_id_widget.text(), "A123")
+        self.assertEqual(external_id_widget.text(), "A1239")
         self.assertTrue(external_id_widget.isReadOnly())
 
         with patch.object(app.QMessageBox, "information"):
@@ -224,7 +224,7 @@ class PrivacyMaskTests(unittest.TestCase):
         window.refresh_records(record_id)
         row = next(row for row in window.table_model.all_rows if row["id"] == record_id)
         self.assertEqual(row["display"]["owner_name"], "王")
-        self.assertEqual(row["display"]["external_id"], "A123")
+        self.assertEqual(row["display"]["external_id"], "A1239")
         self.assertEqual(row["raw"]["owner_name"], "王小明")
         self.assertEqual(row["raw"]["external_id"], "A123456789")
 

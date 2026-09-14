@@ -92,7 +92,7 @@ class CustomerSearchWorkerTests(unittest.TestCase):
         )
         record = masked_processor.build_record(row)
         self.assertEqual(record["display"]["owner_name"], "王")
-        self.assertEqual(record["display"]["external_id"], "A123")
+        self.assertEqual(record["display"]["external_id"], "A1239")
         self.assertEqual(record["raw"]["owner_name"], "王小明")
         self.assertEqual(record["raw"]["external_id"], "A123456789")
         self.assertEqual(record["filter_values"]["owner_name"], "王小明")
@@ -139,7 +139,7 @@ class CustomerSearchWorkerTests(unittest.TestCase):
             privacy_mask_enabled=True,
         )
         record = processor.build_record(row)
-        self.assertEqual(record["display"]["external_id"], "A123")
+        self.assertEqual(record["display"]["external_id"], "A1239")
 
     def test_processor_requires_all_advanced_search_conditions(self):
         fernet = make_fernet(Fernet.generate_key())

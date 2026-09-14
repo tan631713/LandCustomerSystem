@@ -627,7 +627,7 @@ class MailDuplicateTagTests(unittest.TestCase):
             self.harness.export_rows_to_xlsx([row])
 
         self.assertEqual(self._column_value(target, "姓名"), "王")
-        self.assertEqual(self._column_value(target, "身分證"), "A123")
+        self.assertEqual(self._column_value(target, "身分證"), "A1239")
         # The live table-model row itself must be untouched -- only the
         # per-export copy is masked.
         self.assertEqual(row["raw"]["owner_name"], "王小明")
@@ -669,7 +669,7 @@ class MailDuplicateTagTests(unittest.TestCase):
             self.harness.export_selected_word()
 
         self.assertEqual(captured["owner_name"], "王")
-        self.assertEqual(captured["external_id"], "A123")
+        self.assertEqual(captured["external_id"], "A1239")
         self.assertEqual(row["raw"]["owner_name"], "王小明")
         self.assertEqual(row["raw"]["external_id"], "A123456789")
 

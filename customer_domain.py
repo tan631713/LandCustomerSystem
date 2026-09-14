@@ -136,14 +136,23 @@ def mask_identity_text(value):
 
 
 def mask_identity_to_four_digits(value):
-    """Privacy-mask an identity number down to just its first 4 characters.
+    """Privacy-mask an identity number to its leading letter + first 3
+    digits + last digit -- explicit user spec for the "測試" privacy mask
+    toggle: "英文+數字前三碼+數字最後一碼", no filler characters (unlike
+    mask_identity_text()'s lighter, always-on "前4碼+星號+末1碼"
+    convenience mask used elsewhere). "H123456789" becomes "H1239".
 
-    Explicit user request for the "測試" privacy mask toggle: no filler
-    characters (unlike mask_identity_text()'s lighter, always-on "前4碼
-    +星號+末1碼" convenience mask used elsewhere) -- just the prefix, so a
-    10-character Taiwan ID like "Q201623129" becomes "Q201".
+    Structurally this is just "first 4 characters + last character" --
+    text[:4] happens to already be the leading letter plus the first 3
+    digits for a real Taiwan ID, so no special-casing of the letter
+    itself is needed. Values too short to have a real middle portion to
+    hide (<=4 characters) are returned unchanged rather than duplicating
+    their own last character.
     """
-    return str(value or "").strip()[:4]
+    text = str(value or "").strip()
+    if len(text) <= 4:
+        return text
+    return text[:4] + text[-1]
 
 
 def mask_owner_display_name(value):

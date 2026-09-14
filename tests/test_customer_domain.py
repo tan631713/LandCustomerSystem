@@ -51,7 +51,8 @@ class CustomerDomainTests(unittest.TestCase):
     def test_identity_mask_and_duplicate_signature(self):
         self.assertEqual(mask_identity_text("A123456789"), "A123*****9")
         self.assertEqual(mask_identity_text("A1234"), "A1234")
-        self.assertEqual(mask_identity_to_four_digits("A123456789"), "A123")
+        self.assertEqual(mask_identity_to_four_digits("H123456789"), "H1239")
+        self.assertEqual(mask_identity_to_four_digits("A1234"), "A1234")
         self.assertEqual(mask_identity_to_four_digits("A12"), "A12")
         self.assertEqual(mask_identity_to_four_digits(""), "")
         self.assertEqual(mask_identity_to_four_digits(None), "")
