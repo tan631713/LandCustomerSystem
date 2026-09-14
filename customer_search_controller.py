@@ -91,7 +91,7 @@ class SearchControllerMixin:
             checked_ids=(self.checked_record_ids if checked_ids is None else checked_ids),
             watchlist_names=self.watchlist_names,
             show_full_external_id=self.show_full_external_id,
-            mask_owner_names=self.privacy_mask_enabled,
+            privacy_mask_enabled=self.privacy_mask_enabled,
             checked_color=ROW_COLOR_CHECKED,
             watchlist_color=ROW_COLOR_WATCHLIST,
             overdue_color=ROW_COLOR_OVERDUE,

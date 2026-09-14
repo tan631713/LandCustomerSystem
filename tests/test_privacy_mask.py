@@ -162,6 +162,41 @@ class PrivacyMaskTests(unittest.TestCase):
         self.assertEqual(window.field_widgets["owner_name"].text(), "王小明")
         self.assertFalse(window.field_widgets["owner_name"].isReadOnly())
 
+    def test_external_id_field_is_masked_to_four_digits_and_saving_keeps_the_real_value(self):
+        window = self._make_window()
+        window.set_field_text("district", "桃園區")
+        window.set_field_text("section", "一段")
+        window.set_field_text("land_number", "100")
+        window.set_field_text("owner_name", "王小明")
+        window.show_full_external_id = True
+        window.apply_external_id_visibility()
+        window.set_field_text("external_id", "A123456789")
+        with patch.object(app.QMessageBox, "information"):
+            window.save_record()
+        record_id = window.selected_record_id
+
+        self._enable_mask(window)
+        window.load_record(record_id)
+        external_id_widget = window.field_widgets["external_id"]
+        self.assertEqual(external_id_widget.text(), "A123")
+        self.assertTrue(external_id_widget.isReadOnly())
+        self.assertFalse(window.toggle_external_id_action.isEnabled())
+
+        # The lightweight "顯示身分證" button must not be able to defeat
+        # the password-gated mask even if clicked while masked.
+        window.toggle_external_id_visibility()
+        self.assertEqual(external_id_widget.text(), "A123")
+        self.assertTrue(external_id_widget.isReadOnly())
+
+        with patch.object(app.QMessageBox, "information"):
+            window.save_record()
+        saved_row = app.REPOSITORY.get_customer(record_id)
+        plain = window.get_plain_record_data(saved_row)
+        self.assertEqual(plain["external_id"], "A123456789")
+
+        self._disable_mask(window)
+        self.assertTrue(window.toggle_external_id_action.isEnabled())
+
     def test_new_record_owner_name_field_is_locked_while_masked(self):
         # A deliberate trade-off, not an oversight: unlocking the field
         # while masked would defeat the point of the mask, so entering a
@@ -172,12 +207,15 @@ class PrivacyMaskTests(unittest.TestCase):
         self.assertTrue(window.field_widgets["owner_name"].isReadOnly())
         self.assertEqual(window.field_widgets["owner_name"].text(), "")
 
-    def test_main_table_display_masks_owner_name_when_enabled(self):
+    def test_main_table_display_masks_owner_name_and_external_id_when_enabled(self):
         window = self._make_window()
         window.set_field_text("district", "桃園區")
         window.set_field_text("section", "一段")
         window.set_field_text("land_number", "100")
         window.set_field_text("owner_name", "王小明")
+        window.show_full_external_id = True
+        window.apply_external_id_visibility()
+        window.set_field_text("external_id", "A123456789")
         with patch.object(app.QMessageBox, "information"):
             window.save_record()
         record_id = window.selected_record_id
@@ -186,7 +224,9 @@ class PrivacyMaskTests(unittest.TestCase):
         window.refresh_records(record_id)
         row = next(row for row in window.table_model.all_rows if row["id"] == record_id)
         self.assertEqual(row["display"]["owner_name"], "王")
+        self.assertEqual(row["display"]["external_id"], "A123")
         self.assertEqual(row["raw"]["owner_name"], "王小明")
+        self.assertEqual(row["raw"]["external_id"], "A123456789")
 
     def test_mask_state_persists_across_app_restart(self):
         window = self._make_window()

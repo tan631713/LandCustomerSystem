@@ -15,6 +15,7 @@ from customer_domain import (
     format_number_text,
     format_ping_text,
     mask_identity_text,
+    mask_identity_to_four_digits,
     mask_owner_display_name,
 )
 from customer_fields import LAND_FIELDS
@@ -333,9 +334,26 @@ class RecordWorkflowMixin:
         self.apply_external_id_visibility()
         self.refresh_records(self.selected_record_id)
 
+    def apply_external_id_button_availability(self):
+        # The privacy mask forces external_id to stay 4-digits/read-only
+        # regardless of this action's state (see
+        # apply_external_id_visibility()) -- disabling it while masked
+        # keeps that override from looking like a dead, do-nothing action.
+        action = getattr(self, "toggle_external_id_action", None)
+        if action is not None:
+            action.setEnabled(not self.privacy_mask_enabled)
+
     def apply_external_id_visibility(self):
         widget = self.field_widgets.get("external_id")
         if widget is None:
+            return
+        if self.privacy_mask_enabled:
+            # Overrides show_full_external_id unconditionally -- the
+            # privacy mask is a stronger, password-gated guarantee than
+            # the lightweight per-session "顯示身分證" button, so that
+            # button must not be able to defeat it while masked.
+            widget.setText(mask_identity_to_four_digits(self.current_external_id_plain))
+            widget.setReadOnly(True)
             return
         if self.show_full_external_id:
             widget.setReadOnly(False)
@@ -699,7 +717,13 @@ class RecordWorkflowMixin:
         for key in self.fields:
             value = self.get_field_text(key)
             data[key] = value or None
-        if self.show_full_external_id:
+        if self.privacy_mask_enabled:
+            # apply_external_id_visibility() forces this field to 4-digit/
+            # read-only while masked regardless of show_full_external_id --
+            # the widget text must never be trusted here either, for the
+            # same reason as owner_name below.
+            data["external_id"] = self.current_external_id_plain or None
+        elif self.show_full_external_id:
             self.current_external_id_plain = data.get("external_id") or ""
         else:
             data["external_id"] = self.current_external_id_plain or None

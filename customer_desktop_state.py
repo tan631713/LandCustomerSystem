@@ -86,6 +86,8 @@ class DesktopStateMixin:
         self.repository.set_setting(self.privacy_mask_setting_key, "1" if enabled else "0")
         self.privacy_mask_enabled = enabled
         self.apply_owner_name_visibility()
+        self.apply_external_id_visibility()
+        self.apply_external_id_button_availability()
         self.apply_owner_contacts_tab_visibility()
         self.refresh_records(self.selected_record_id)
         self.statusBar().showMessage(

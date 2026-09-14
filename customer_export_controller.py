@@ -3,7 +3,7 @@
 import json
 from datetime import datetime
 
-from customer_domain import mask_owner_display_name
+from customer_domain import mask_identity_to_four_digits, mask_owner_display_name
 from customer_excel import ExcelExportWorker
 from customer_mobile_share import MobileShareDialog
 from customer_security import decrypt_value
@@ -377,6 +377,7 @@ class ExportControllerMixin:
             # so mutating them here never touches the live table model.
             for raw_row in raw_rows:
                 raw_row["owner_name"] = mask_owner_display_name(raw_row.get("owner_name"))
+                raw_row["external_id"] = mask_identity_to_four_digits(raw_row.get("external_id"))
         # start_excel_worker() only guards against a *second* export
         # starting while one is already running, so there is never more
         # than one export in flight -- safe to stash the ids here and
@@ -625,6 +626,7 @@ class ExportControllerMixin:
             for row in rows:
                 raw_row = dict(row["raw"])
                 raw_row["owner_name"] = mask_owner_display_name(raw_row.get("owner_name"))
+                raw_row["external_id"] = mask_identity_to_four_digits(raw_row.get("external_id"))
                 docx_rows.append(raw_row)
         else:
             docx_rows = [row["raw"] for row in rows]

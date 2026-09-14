@@ -1190,6 +1190,7 @@ class LandApp(
 
         self.create_layout()
         self.apply_owner_contacts_tab_visibility()
+        self.apply_external_id_button_availability()
         if self.api_mode:
             self.configure_api_mode_ui()
             self.setup_notification_status()

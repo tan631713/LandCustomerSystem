@@ -5,6 +5,7 @@ from customer_domain import (
     calculate_ping,
     calculate_total_declared_value,
     mask_identity_text,
+    mask_identity_to_four_digits,
     mask_owner_display_name,
     normalize_taiwan_identity,
     normalize_search_text,
@@ -50,6 +51,10 @@ class CustomerDomainTests(unittest.TestCase):
     def test_identity_mask_and_duplicate_signature(self):
         self.assertEqual(mask_identity_text("A123456789"), "A123*****9")
         self.assertEqual(mask_identity_text("A1234"), "A1234")
+        self.assertEqual(mask_identity_to_four_digits("A123456789"), "A123")
+        self.assertEqual(mask_identity_to_four_digits("A12"), "A12")
+        self.assertEqual(mask_identity_to_four_digits(""), "")
+        self.assertEqual(mask_identity_to_four_digits(None), "")
         self.assertEqual(
             normalize_taiwan_identity(" a123456789 "), "A123456789"
         )

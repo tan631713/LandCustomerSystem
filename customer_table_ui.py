@@ -416,9 +416,9 @@ def _build_single_record_menu(self):
     single_record_menu = QMenu("單筆資料工具", self.tools_menu)
     self.tools_menu.addMenu(single_record_menu)
     self.tool_submenus["單筆資料工具"] = single_record_menu
-    toggle_external_id_action = QAction("顯示/隱藏身分證", self)
-    toggle_external_id_action.triggered.connect(self.toggle_external_id_visibility)
-    single_record_menu.addAction(toggle_external_id_action)
+    self.toggle_external_id_action = QAction("顯示/隱藏身分證", self)
+    self.toggle_external_id_action.triggered.connect(self.toggle_external_id_visibility)
+    single_record_menu.addAction(self.toggle_external_id_action)
     follow_up_action = QAction("設定追蹤提醒", self)
     follow_up_action.triggered.connect(self.edit_follow_up_reminder)
     single_record_menu.addAction(follow_up_action)
@@ -679,7 +679,7 @@ def _configure_api_action_groups(self, actions):
         actions["advanced_search_action"],
         actions["save_search_action"],
         actions["load_search_action"],
-        actions["toggle_external_id_action"],
+        self.toggle_external_id_action,
         actions["follow_up_action"],
         actions["record_history_action"],
         actions["contact_log_action"],

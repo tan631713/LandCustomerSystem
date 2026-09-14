@@ -600,7 +600,7 @@ class MailDuplicateTagTests(unittest.TestCase):
         mocked_exec.assert_not_called()
 
     @staticmethod
-    def _owner_name_column_value(target):
+    def _column_value(target, header_label):
         from openpyxl import load_workbook
 
         # read_only workbooks keep the file memory-mapped on Windows until
@@ -610,45 +610,55 @@ class MailDuplicateTagTests(unittest.TestCase):
         workbook = load_workbook(target, read_only=True, data_only=True)
         try:
             header, *data_rows = workbook.active.iter_rows(values_only=True)
-            owner_name_column = header.index("姓名")
-            return data_rows[0][owner_name_column]
+            column = header.index(header_label)
+            return data_rows[0][column]
         finally:
             workbook.close()
 
-    def test_excel_export_masks_owner_name_when_privacy_mask_is_enabled(self):
-        customer_id = self.repository.save_customer(_land_record(owner_name="王小明"))
-        row = _row(customer_id, owner_name="王小明")
+    def test_excel_export_masks_owner_name_and_external_id_when_privacy_mask_is_enabled(self):
+        customer_id = self.repository.save_customer(
+            _land_record(owner_name="王小明", external_id="A123456789")
+        )
+        row = _row(customer_id, owner_name="王小明", external_id="A123456789")
         self.harness.privacy_mask_enabled = True
         target = str(self.root / "export-masked.xlsx")
 
         with patch.object(QFileDialog, "getSaveFileName", return_value=(target, "")):
             self.harness.export_rows_to_xlsx([row])
 
-        self.assertEqual(self._owner_name_column_value(target), "王")
+        self.assertEqual(self._column_value(target, "姓名"), "王")
+        self.assertEqual(self._column_value(target, "身分證"), "A123")
         # The live table-model row itself must be untouched -- only the
         # per-export copy is masked.
         self.assertEqual(row["raw"]["owner_name"], "王小明")
+        self.assertEqual(row["raw"]["external_id"], "A123456789")
 
-    def test_excel_export_keeps_full_owner_name_when_privacy_mask_is_disabled(self):
-        customer_id = self.repository.save_customer(_land_record(owner_name="王小明"))
-        row = _row(customer_id, owner_name="王小明")
+    def test_excel_export_keeps_full_owner_name_and_external_id_when_privacy_mask_is_disabled(self):
+        customer_id = self.repository.save_customer(
+            _land_record(owner_name="王小明", external_id="A123456789")
+        )
+        row = _row(customer_id, owner_name="王小明", external_id="A123456789")
         target = str(self.root / "export-unmasked.xlsx")
 
         with patch.object(QFileDialog, "getSaveFileName", return_value=(target, "")):
             self.harness.export_rows_to_xlsx([row])
 
-        self.assertEqual(self._owner_name_column_value(target), "王小明")
+        self.assertEqual(self._column_value(target, "姓名"), "王小明")
+        self.assertEqual(self._column_value(target, "身分證"), "A123456789")
 
-    def test_word_export_masks_owner_name_when_privacy_mask_is_enabled(self):
+    def test_word_export_masks_owner_name_and_external_id_when_privacy_mask_is_enabled(self):
         self.harness.privacy_mask_enabled = True
-        customer_id = self.repository.save_customer(_land_record(owner_name="王小明"))
-        row = _row(customer_id, owner_name="王小明")
+        customer_id = self.repository.save_customer(
+            _land_record(owner_name="王小明", external_id="A123456789")
+        )
+        row = _row(customer_id, owner_name="王小明", external_id="A123456789")
         self.harness.selected_or_checked_rows = lambda: [row]
         target = str(self.root / "export-masked.docx")
         captured = {}
 
         def fake_write_records_docx(_file_path, rows, _columns):
             captured["owner_name"] = rows[0]["owner_name"]
+            captured["external_id"] = rows[0]["external_id"]
             return len(rows)
 
         with (
@@ -659,7 +669,9 @@ class MailDuplicateTagTests(unittest.TestCase):
             self.harness.export_selected_word()
 
         self.assertEqual(captured["owner_name"], "王")
+        self.assertEqual(captured["external_id"], "A123")
         self.assertEqual(row["raw"]["owner_name"], "王小明")
+        self.assertEqual(row["raw"]["external_id"], "A123456789")
 
     def test_mail_duplicate_tag_setting_is_local_not_tied_to_record_repository(self):
         # Mirrors the Google API key lesson (see load_mail_duplicate_tag's
