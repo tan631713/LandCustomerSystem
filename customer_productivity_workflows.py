@@ -311,6 +311,7 @@ class ProductivityWorkflowMixin:
             self.active_record_repository(), self.fernet, self.selected_record_id, self,
             settings_repository=self.repository,
             mask_owner_names=self.privacy_mask_enabled,
+            app_directory=self.app_dir,
         )
 
         def on_accepted():

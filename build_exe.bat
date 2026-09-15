@@ -25,7 +25,7 @@ echo [3/4] Sync EXE version resource with customer_version.py
 if errorlevel 1 exit /b 1
 
 echo [4/4] Build EXE
-"%PYTHON_EXE%" -m PyInstaller --noconfirm --clean --windowed --name LandCustomerSystem --icon "assets\app_icon.ico" --version-file "version_info_client.txt" --exclude-module numpy --exclude-module lxml --add-data "schema.sql;." --add-data "seed.sql;." --add-data "assets\app_icon.png;assets" customer_ui.py
+"%PYTHON_EXE%" -m PyInstaller --noconfirm --clean --windowed --name LandCustomerSystem --icon "assets\app_icon.ico" --version-file "version_info_client.txt" --exclude-module numpy --exclude-module lxml --add-data "schema.sql;." --add-data "seed.sql;." --add-data "assets\app_icon.png;assets" --add-data "assets\leaflet;assets\leaflet" customer_ui.py
 if errorlevel 1 (
     echo Build failed. Preserved customer data remains in .build-preserved-data
     exit /b 1

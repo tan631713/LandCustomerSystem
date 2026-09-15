@@ -18,7 +18,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from PySide6.QtCore import QDate, QObject, QThread, Qt, Signal, Slot
+from PySide6.QtCore import QDate, QObject, QThread, QUrl, Qt, Signal, Slot
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -46,10 +46,17 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from customer_responsive_dialog import ResponsiveDialog as QDialog
 
 from customer_domain import mask_owner_display_name, normalize_match_text
+from customer_offline_map import (
+    leaflet_assets_dir,
+    local_file_url,
+    local_tile_url_template,
+    offline_tile_cache_available,
+)
 from customer_excel import HEADER_MAP, normalize_header
 from customer_word import write_report_docx
 from customer_security import decrypt_value
@@ -118,6 +125,185 @@ def apply_default_import_profile(repository):
             HEADER_MAP[normalized] = target_key
             applied += 1
     return applied
+
+
+def render_map_html_document(locations, app_directory):
+    """Builds the "土地位置與地號視覺化" map HTML itself. A module-level
+    function (not a ProductivityService method) so it can be called from
+    MapLocationsDialog too -- for its embedded QWebEngineView (renders
+    the map live in-app) as well as ProductivityService.build_map_html()
+    (writes it to a file for "匯出") -- without either one needing a full
+    ProductivityService instance just to get at this. Returns
+    (html_document, row_count)."""
+    # v1.9.56 changed the map dialog to list every customer, including
+    # ones with no coordinates yet (latitude/longitude come back as
+    # None) -- filter those out here rather than assuming every row
+    # handed in already has real coordinates, otherwise the plain
+    # float(...) conversion below raises TypeError the moment a single
+    # un-located customer is present in the dialog's row list.
+    rows = []
+    for row in locations:
+        row = dict(row)
+        try:
+            row["latitude"] = float(row["latitude"])
+            row["longitude"] = float(row["longitude"])
+        except (TypeError, ValueError):
+            continue
+        rows.append(row)
+    district_counts = defaultdict(int)
+    section_counts = defaultdict(int)
+    for row in rows:
+        district_counts[row.get("district") or "未填地區"] += 1
+        section_counts[
+            f"{row.get('district') or '未填地區'}／{row.get('section') or '未填地段'}"
+        ] += 1
+
+    markers = []
+    for row in rows:
+        label = " ".join(
+            str(row.get(key) or "")
+            for key in (
+                "district", "section", "subsection", "land_number", "owner_name",
+            )
+        ).strip()
+        markers.append(
+            {
+                "lat": float(row["latitude"]),
+                "lon": float(row["longitude"]),
+                "label": label or "（未命名）",
+                # "未填地區" here matches district_counts' own fallback
+                # above -- a marker with no district recorded still
+                # needs a tab to live under, not to silently vanish
+                # whenever a district other than "全部" is selected.
+                "district": str(row.get("district") or "") or "未填地區",
+                "section": str(row.get("section") or ""),
+                "subsection": str(row.get("subsection") or ""),
+                "landNumber": str(row.get("land_number") or ""),
+                "ownerName": str(row.get("owner_name") or ""),
+            }
+        )
+    markers_json = json.dumps(markers, ensure_ascii=False).replace("</", "<\\/")
+
+    # Tab order follows district_counts' own sort (busiest district
+    # first) -- "全部" always comes first as the default view.
+    district_tabs = ["全部"] + [
+        name for name, _count in sorted(district_counts.items(), key=lambda item: -item[1])
+    ]
+    district_tabs_json = json.dumps(district_tabs, ensure_ascii=False).replace("</", "<\\/")
+    district_tab_buttons = "".join(
+        f'<button class="district-tab" data-district="{html.escape(name)}">'
+        f"{html.escape(name)}</button>"
+        for name in district_tabs
+    )
+
+    district_html = "".join(
+        f"<tr><td>{html.escape(name)}</td><td>{count}</td></tr>"
+        for name, count in sorted(district_counts.items(), key=lambda item: -item[1])
+    )
+    section_html = "".join(
+        f"<tr><td>{html.escape(name)}</td><td>{count}</td></tr>"
+        for name, count in sorted(section_counts.items(), key=lambda item: -item[1])[:50]
+    )
+
+    # Explicit user request: the map must not depend on a live
+    # network connection or a CDN. Leaflet itself is vendored locally
+    # (assets/leaflet/, bundled with the app) rather than fetched
+    # from unpkg.com; the 桃園市 offline tile cache (downloaded once
+    # by download_offline_map_tiles.bat -- see customer_offline_map.py)
+    # becomes the default base layer whenever it actually has tiles,
+    # with the existing live 國土測繪中心/CARTO layers kept as a
+    # fallback for anywhere outside that coverage or a machine with
+    # no offline cache set up yet.
+    leaflet_css_url = local_file_url(leaflet_assets_dir() / "leaflet.css")
+    leaflet_js_url = local_file_url(leaflet_assets_dir() / "leaflet.js")
+    offline_available = offline_tile_cache_available(app_directory)
+    offline_tile_url = local_tile_url_template(app_directory)
+    default_layer_js = "offlineLayer" if offline_available else "nlscLayer"
+    offline_layer_entry_js = (
+        '"本地離線地圖（桃園市）": offlineLayer, ' if offline_available else ""
+    )
+
+    document = f"""<!doctype html><html lang="zh-Hant"><meta charset="utf-8">
+<title>土地位置與地號視覺化</title>
+<link rel="stylesheet" href="{leaflet_css_url}" />
+<style>
+body{{font-family:system-ui;margin:24px;background:#f8fafc;color:#172033}}
+.grid{{display:grid;grid-template-columns:2fr 1fr;gap:20px}}section{{background:white;padding:18px;border:1px solid #d8dee9;border-radius:10px}}
+#map{{width:100%;height:480px;border:1px solid #b8c8dc;border-radius:6px}}
+table{{border-collapse:collapse;width:100%}}td,th{{border-bottom:1px solid #ddd;padding:7px;text-align:left}}
+.district-tabs{{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}}
+.district-tab{{border:1px solid #b8c8dc;background:white;color:#172033;border-radius:16px;padding:5px 12px;font-size:13px;cursor:pointer}}
+.district-tab:hover{{background:#eef3fa}}
+.district-tab.active{{background:#2563eb;border-color:#2563eb;color:white}}
+</style>
+<h1>土地位置與地號視覺化</h1>
+<p>產生時間：{datetime.now():%Y-%m-%d %H:%M:%S}　定位資料：{len(rows)} 筆。{"目前使用本機離線地圖（桃園市），不需網路連線。" if offline_available else "尚未下載離線地圖圖磚，目前使用線上底圖，需要網路連線；執行 download_offline_map_tiles.bat 可下載桃園市離線圖磚。"}點擊標記可查看地號資訊；點選下方分頁可切換只看單一地區；地圖右上角可切換底圖樣式。</p>
+<div class="grid">
+<section><h2>座標分布</h2><div class="district-tabs">{district_tab_buttons}</div><div id="map" role="img" aria-label="土地位置地圖"></div></section>
+<section><h2>地區統計</h2><table><tr><th>地區</th><th>筆數</th></tr>{district_html}</table></section>
+</div>
+<section><h2>地段分布</h2><table><tr><th>地區／地段</th><th>筆數</th></tr>{section_html}</table></section>
+<script src="{leaflet_js_url}"></script>
+<script>
+const markers = {markers_json};
+const districtTabs = {district_tabs_json};
+// 離線圖磚（桃園市，本機快取）優先當預設底圖，不需網路連線 -- 見
+// customer_offline_map.py／download_offline_map_tiles.bat。內政部國土
+// 測繪中心「通用電子地圖」跟 CARTO Voyager 兩個線上圖磚服務保留當備
+// 案：查詢範圍外的地主、或這台電腦還沒下載離線圖磚時，可以在地圖右
+// 上角的圖層切換器（L.control.layers）切過去看。
+const offlineLayer = L.tileLayer(
+  "{offline_tile_url}",
+  {{ maxZoom: 19, minZoom: 12, attribution: "國土測繪中心 通用電子地圖（本機離線快取，桃園市）" }}
+);
+const nlscLayer = L.tileLayer(
+  "https://wmts.nlsc.gov.tw/wmts/EMAP/default/GoogleMapsCompatible/{{z}}/{{y}}/{{x}}",
+  {{ maxZoom: 19, attribution: "國土測繪中心 通用電子地圖" }}
+);
+const cartoLayer = L.tileLayer(
+  "https://{{s}}.basemaps.cartocdn.com/rastertiles/voyager/{{z}}/{{x}}/{{y}}{{r}}.png",
+  {{
+    maxZoom: 20,
+    attribution: "&copy; <a href=\\"https://www.openstreetmap.org/copyright\\">OpenStreetMap</a> contributors &copy; <a href=\\"https://carto.com/attributions\\">CARTO</a>"
+  }}
+);
+const map = L.map("map", {{ layers: [{default_layer_js}] }});
+L.control.layers({{ {offline_layer_entry_js}"國土測繪中心地圖（線上）": nlscLayer, "CARTO 彩色地圖（線上）": cartoLayer }}).addTo(map);
+
+const markerLayer = L.layerGroup().addTo(map);
+
+function showDistrict(name) {{
+  markerLayer.clearLayers();
+  const visible = name === "全部" ? markers : markers.filter(function (item) {{
+    return item.district === name;
+  }});
+  const bounds = [];
+  visible.forEach(function (item) {{
+    const popup = "<b>" + [item.district, item.section, item.subsection, item.landNumber].filter(Boolean).join(" ")
+      + "</b><br>" + (item.ownerName || "");
+    L.marker([item.lat, item.lon]).addTo(markerLayer).bindPopup(popup);
+    bounds.push([item.lat, item.lon]);
+  }});
+  if (bounds.length) {{
+    map.fitBounds(bounds, {{ padding: [24, 24], maxZoom: 17 }});
+  }} else {{
+    map.setView([23.7, 121.0], 7);
+  }}
+  document.querySelectorAll(".district-tab").forEach(function (button) {{
+    button.classList.toggle("active", button.dataset.district === name);
+  }});
+}}
+
+document.querySelectorAll(".district-tab").forEach(function (button) {{
+  button.addEventListener("click", function () {{
+    showDistrict(button.dataset.district);
+  }});
+}});
+
+showDistrict(districtTabs[0] || "全部");
+</script>
+</html>"""
+    return document, len(rows)
 
 
 class ProductivityService:
@@ -460,155 +646,13 @@ class ProductivityService:
                 )
         return sorted(results, key=lambda item: (-item["score"], item["left_id"]))
 
-    @staticmethod
-    def build_map_html(locations, output_path):
-        # v1.9.56 changed the map dialog to list every customer, including
-        # ones with no coordinates yet (latitude/longitude come back as
-        # None) -- filter those out here rather than assuming every row
-        # handed in already has real coordinates, otherwise the plain
-        # float(...) conversion below raises TypeError the moment a single
-        # un-located customer is present in the dialog's row list.
-        rows = []
-        for row in locations:
-            row = dict(row)
-            try:
-                row["latitude"] = float(row["latitude"])
-                row["longitude"] = float(row["longitude"])
-            except (TypeError, ValueError):
-                continue
-            rows.append(row)
-        district_counts = defaultdict(int)
-        section_counts = defaultdict(int)
-        for row in rows:
-            district_counts[row.get("district") or "未填地區"] += 1
-            section_counts[
-                f"{row.get('district') or '未填地區'}／{row.get('section') or '未填地段'}"
-            ] += 1
-
-        markers = []
-        for row in rows:
-            label = " ".join(
-                str(row.get(key) or "")
-                for key in (
-                    "district", "section", "subsection", "land_number", "owner_name",
-                )
-            ).strip()
-            markers.append(
-                {
-                    "lat": float(row["latitude"]),
-                    "lon": float(row["longitude"]),
-                    "label": label or "（未命名）",
-                    # "未填地區" here matches district_counts' own fallback
-                    # above -- a marker with no district recorded still
-                    # needs a tab to live under, not to silently vanish
-                    # whenever a district other than "全部" is selected.
-                    "district": str(row.get("district") or "") or "未填地區",
-                    "section": str(row.get("section") or ""),
-                    "subsection": str(row.get("subsection") or ""),
-                    "landNumber": str(row.get("land_number") or ""),
-                    "ownerName": str(row.get("owner_name") or ""),
-                }
-            )
-        markers_json = json.dumps(markers, ensure_ascii=False).replace("</", "<\\/")
-
-        # Tab order follows district_counts' own sort (busiest district
-        # first) -- "全部" always comes first as the default view.
-        district_tabs = ["全部"] + [
-            name for name, _count in sorted(district_counts.items(), key=lambda item: -item[1])
-        ]
-        district_tabs_json = json.dumps(district_tabs, ensure_ascii=False).replace("</", "<\\/")
-        district_tab_buttons = "".join(
-            f'<button class="district-tab" data-district="{html.escape(name)}">'
-            f"{html.escape(name)}</button>"
-            for name in district_tabs
-        )
-
-        district_html = "".join(
-            f"<tr><td>{html.escape(name)}</td><td>{count}</td></tr>"
-            for name, count in sorted(district_counts.items(), key=lambda item: -item[1])
-        )
-        section_html = "".join(
-            f"<tr><td>{html.escape(name)}</td><td>{count}</td></tr>"
-            for name, count in sorted(section_counts.items(), key=lambda item: -item[1])[:50]
-        )
-        document = f"""<!doctype html><html lang="zh-Hant"><meta charset="utf-8">
-<title>土地位置與地號視覺化</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<style>
-body{{font-family:system-ui;margin:24px;background:#f8fafc;color:#172033}}
-.grid{{display:grid;grid-template-columns:2fr 1fr;gap:20px}}section{{background:white;padding:18px;border:1px solid #d8dee9;border-radius:10px}}
-#map{{width:100%;height:480px;border:1px solid #b8c8dc;border-radius:6px}}
-table{{border-collapse:collapse;width:100%}}td,th{{border-bottom:1px solid #ddd;padding:7px;text-align:left}}
-.district-tabs{{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}}
-.district-tab{{border:1px solid #b8c8dc;background:white;color:#172033;border-radius:16px;padding:5px 12px;font-size:13px;cursor:pointer}}
-.district-tab:hover{{background:#eef3fa}}
-.district-tab.active{{background:#2563eb;border-color:#2563eb;color:white}}
-</style>
-<h1>土地位置與地號視覺化</h1>
-<p>產生時間：{datetime.now():%Y-%m-%d %H:%M:%S}　定位資料：{len(rows)} 筆。地圖需要網路連線載入底圖；點擊標記可查看地號資訊；點選下方分頁可切換只看單一地區；地圖右上角可切換底圖樣式。</p>
-<div class="grid">
-<section><h2>座標分布</h2><div class="district-tabs">{district_tab_buttons}</div><div id="map" role="img" aria-label="土地位置地圖"></div></section>
-<section><h2>地區統計</h2><table><tr><th>地區</th><th>筆數</th></tr>{district_html}</table></section>
-</div>
-<section><h2>地段分布</h2><table><tr><th>地區／地段</th><th>筆數</th></tr>{section_html}</table></section>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script>
-const markers = {markers_json};
-const districtTabs = {district_tabs_json};
-// 內政部國土測繪中心「通用電子地圖」-- 免費、不需金鑰、中文地名/路名涵蓋
-// 比 OpenStreetMap 完整，設為預設底圖。CARTO Voyager 作為視覺風格較接近
-// Google 地圖的替代選項，兩者都是可直接使用的圖磚服務，不涉及 Google
-// Maps 官方 API 的授權/計費限制。地圖右上角的圖層切換器（L.control.layers）
-// 讓使用者自己選要看哪一種。
-const nlscLayer = L.tileLayer(
-  "https://wmts.nlsc.gov.tw/wmts/EMAP/default/GoogleMapsCompatible/{{z}}/{{y}}/{{x}}",
-  {{ maxZoom: 19, attribution: "國土測繪中心 通用電子地圖" }}
-);
-const cartoLayer = L.tileLayer(
-  "https://{{s}}.basemaps.cartocdn.com/rastertiles/voyager/{{z}}/{{x}}/{{y}}{{r}}.png",
-  {{
-    maxZoom: 20,
-    attribution: "&copy; <a href=\\"https://www.openstreetmap.org/copyright\\">OpenStreetMap</a> contributors &copy; <a href=\\"https://carto.com/attributions\\">CARTO</a>"
-  }}
-);
-const map = L.map("map", {{ layers: [nlscLayer] }});
-L.control.layers({{ "國土測繪中心地圖": nlscLayer, "CARTO 彩色地圖": cartoLayer }}).addTo(map);
-
-const markerLayer = L.layerGroup().addTo(map);
-
-function showDistrict(name) {{
-  markerLayer.clearLayers();
-  const visible = name === "全部" ? markers : markers.filter(function (item) {{
-    return item.district === name;
-  }});
-  const bounds = [];
-  visible.forEach(function (item) {{
-    const popup = "<b>" + [item.district, item.section, item.subsection, item.landNumber].filter(Boolean).join(" ")
-      + "</b><br>" + (item.ownerName || "");
-    L.marker([item.lat, item.lon]).addTo(markerLayer).bindPopup(popup);
-    bounds.push([item.lat, item.lon]);
-  }});
-  if (bounds.length) {{
-    map.fitBounds(bounds, {{ padding: [24, 24], maxZoom: 17 }});
-  }} else {{
-    map.setView([23.7, 121.0], 7);
-  }}
-  document.querySelectorAll(".district-tab").forEach(function (button) {{
-    button.classList.toggle("active", button.dataset.district === name);
-  }});
-}}
-
-document.querySelectorAll(".district-tab").forEach(function (button) {{
-  button.addEventListener("click", function () {{
-    showDistrict(button.dataset.district);
-  }});
-}});
-
-showDistrict(districtTabs[0] || "全部");
-</script>
-</html>"""
+    def build_map_html(self, locations, output_path):
+        document, row_count = self.build_map_html_document(locations)
         Path(output_path).write_text(document, encoding="utf-8")
-        return len(rows)
+        return row_count
+
+    def build_map_html_document(self, locations):
+        return render_map_html_document(locations, self.app_directory)
 
 
 class OffsiteBackupWorker(QObject):
@@ -1534,9 +1578,17 @@ class MapLocationsDialog(QDialog):
         parent=None,
         settings_repository=None,
         mask_owner_names=False,
+        app_directory=None,
     ):
         super().__init__(parent); self.repository = repository; self.fernet = fernet; self.export_requested = False
         self.mask_owner_names = mask_owner_names
+        # Falls back to this module's own folder (never has an
+        # offline_map_tiles subfolder next to it in that case) rather than
+        # None -- render_map_html_document()/offline_tile_cache_available()
+        # need a real path, and every existing caller/test that doesn't
+        # care about the offline map still needs to keep working
+        # unchanged, just with the live online layers as the default.
+        self.app_directory = Path(app_directory) if app_directory else Path(__file__).resolve().parent
         self.geocode_thread = None
         self.geocode_worker = None
         self.progress_dialog = None
@@ -1553,8 +1605,10 @@ class MapLocationsDialog(QDialog):
         # only ever has one repository to pass -- keep working unchanged.
         self.settings_repository = settings_repository or repository
         self.google_api_key = load_google_geocoding_api_key(self.settings_repository)
-        self.setWindowTitle("地圖與地號視覺化"); self.resize(850, 580)
-        layout = QVBoxLayout(self); layout.addWidget(QLabel("下方已列出系統內所有地主；輸入地址後按「查座標」單筆定位，或用「全部自動查座標」一次處理所有還沒有座標的地主。"))
+        self.setWindowTitle("地圖與地號視覺化"); self.resize(1360, 680)
+        outer_layout = QHBoxLayout(self)
+        controls_widget = QWidget(self)
+        layout = QVBoxLayout(controls_widget); layout.addWidget(QLabel("下方已列出系統內所有地主；輸入地址後按「查座標」單筆定位，或用「全部自動查座標」一次處理所有還沒有座標的地主。"))
         self.provider_hint = QLabel(); layout.addWidget(self.provider_hint)
         self.table = QTableWidget(0, 8); self.table.setHorizontalHeaderLabels(["資料ID", "地區", "地段", "小段", "地號", "姓名", "緯度", "經度"]); self.table.setSelectionBehavior(QAbstractItemView.SelectRows); self.table.setSelectionMode(QAbstractItemView.SingleSelection); self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Stretch); self.table.itemSelectionChanged.connect(self.load_selected); layout.addWidget(self.table)
 
@@ -1584,11 +1638,33 @@ class MapLocationsDialog(QDialog):
         layout.addLayout(address_row)
 
         row = QHBoxLayout(); self.customer_id = QLineEdit(str(selected_customer_id or "")); self.latitude = QLineEdit(); self.longitude = QLineEdit(); row.addWidget(QLabel("資料ID")); row.addWidget(self.customer_id); row.addWidget(QLabel("緯度")); row.addWidget(self.latitude); row.addWidget(QLabel("經度")); row.addWidget(self.longitude); layout.addLayout(row)
-        buttons = QHBoxLayout(); save = QPushButton("儲存座標"); export = QPushButton("產生視覺化 HTML"); close = QPushButton("關閉"); save.clicked.connect(self.save); export.clicked.connect(self.request_export); close.clicked.connect(self.reject); buttons.addWidget(save); buttons.addStretch(1); buttons.addWidget(export); buttons.addWidget(close); layout.addLayout(buttons); self.refresh()
+        buttons = QHBoxLayout(); save = QPushButton("儲存座標"); export = QPushButton("產生視覺化 HTML"); close = QPushButton("關閉"); save.clicked.connect(self.save); export.clicked.connect(self.request_export); close.clicked.connect(self.reject); buttons.addWidget(save); buttons.addStretch(1); buttons.addWidget(export); buttons.addWidget(close); layout.addLayout(buttons)
+
+        outer_layout.addWidget(controls_widget, 1)
+        # Explicit user request: see the map screen directly inside the
+        # client, not just as an exported file opened separately in a
+        # browser. Shares render_map_html_document() with the "產生視覺化
+        # HTML" export button, so both always show exactly the same map.
+        self.map_view = QWebEngineView(self)
+        self.map_view.setMinimumWidth(480)
+        outer_layout.addWidget(self.map_view, 1)
+
+        self.refresh()
         self._update_provider_hint()
 
         if selected_customer_id:
             self._prefill_address_from_customer(selected_customer_id)
+
+    def update_map_view(self):
+        document, _row_count = render_map_html_document(self.rows, self.app_directory)
+        # setHtml() needs a file:// base URL -- not for resolving any
+        # relative path in the document (every asset/tile reference is
+        # already an absolute file:// URL, see render_map_html_document())
+        # but because QWebEngineView otherwise gives the page a
+        # non-file:// origin that Chromium's security model then refuses
+        # to load *any* local file:// resource from at all, Leaflet.js and
+        # every tile included. The directory itself is arbitrary.
+        self.map_view.setHtml(document, QUrl.fromLocalFile(str(self.app_directory) + "/"))
 
     def _update_provider_hint(self):
         if self.google_api_key:
@@ -1676,6 +1752,7 @@ class MapLocationsDialog(QDialog):
                 ],
                 row["customer_id"],
             )
+        self.update_map_view()
 
     def load_selected(self):
         ids = _selected_ids(self.table); row = next((r for r in self.rows if r["customer_id"] in ids), None)

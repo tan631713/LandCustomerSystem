@@ -24,6 +24,16 @@ CLIENT_FILES = (
     "公司筆電遠端使用說明.txt",
 )
 
+# Shipped inside LandCustomerSystem/ itself (next to the EXE), not as
+# top-level siblings like CLIENT_FILES -- see package_remote_client()'s
+# comment on why these can't just be another --add-data entry in
+# build_exe.bat.
+OFFLINE_MAP_FILES = (
+    "download_offline_map_tiles.bat",
+    "download_offline_map_tiles.ps1",
+    "offline_tile_manifest.txt",
+)
+
 
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
@@ -44,6 +54,11 @@ def copy_desktop_client(destination: Path) -> None:
         "logs",
         ".build-preserved-data",
         "company-client-config.json",
+        # Offline map tiles are a separate, one-time local download (see
+        # download_offline_map_tiles.py) -- deliberately never bundled
+        # into a release zip, or every future version bump would drag
+        # along another ~100-180MB of Taoyuan tile PNGs.
+        "offline_map_tiles",
     }
 
     def ignore(_directory, names):
@@ -64,7 +79,7 @@ def audit_client_bundle(bundle: Path) -> None:
         "landcustomerserver.exe",
         "home_server_ip.txt",
     }
-    forbidden_parts = {"backups", "attachments", ".build-preserved-data"}
+    forbidden_parts = {"backups", "attachments", ".build-preserved-data", "offline_map_tiles"}
     violations = []
     for path in bundle.rglob("*"):
         relative = path.relative_to(bundle)
@@ -81,7 +96,7 @@ def audit_client_bundle(bundle: Path) -> None:
 def package_remote_client() -> tuple[Path, Path]:
     if not DESKTOP_DIST.is_dir():
         raise FileNotFoundError("Build the desktop EXE before packaging the remote client")
-    for name in CLIENT_FILES:
+    for name in CLIENT_FILES + OFFLINE_MAP_FILES:
         if not (ROOT / name).is_file():
             raise FileNotFoundError(f"Missing remote client file: {name}")
 
@@ -96,6 +111,18 @@ def package_remote_client() -> tuple[Path, Path]:
         copy_desktop_client(bundle / "LandCustomerSystem")
         for name in CLIENT_FILES:
             shutil.copy2(ROOT / name, bundle / name)
+        # These three need to sit next to LandCustomerSystem.exe itself
+        # (APP_DIR), not inside PyInstaller's own _internal/ resource
+        # folder -- download_offline_map_tiles.ps1 creates its
+        # offline_map_tiles cache as a sibling of wherever it itself
+        # sits, and that has to line up with what customer_offline_map.py
+        # looks under at runtime. copy_desktop_client() only mirrors
+        # dist/LandCustomerSystem/ as PyInstaller built it, so these are
+        # added here explicitly instead of via --add-data in build_exe.bat
+        # (which would land them in _internal/ like every other
+        # --add-data entry in this build).
+        for name in OFFLINE_MAP_FILES:
+            shutil.copy2(ROOT / name, bundle / "LandCustomerSystem" / name)
         (bundle / "LandCustomerSystem" / "company-client-config.json").write_text(
             json.dumps(
                 {
