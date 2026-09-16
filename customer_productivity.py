@@ -254,7 +254,17 @@ const districtTabs = {district_tabs_json};
 // 上角的圖層切換器（L.control.layers）切過去看。
 const offlineLayer = L.tileLayer(
   "{offline_tile_url}",
-  {{ maxZoom: 19, minZoom: 12, attribution: "國土測繪中心 通用電子地圖（本機離線快取，桃園市）" }}
+  {{
+    maxZoom: 19,
+    // minNativeZoom (not minZoom) -- the cache only has z12+ tiles, but
+    // "全部" fits every district's markers at once, which needs a much
+    // lower zoom than any single district does. minZoom would leave the
+    // layer showing nothing at all below 12; minNativeZoom instead makes
+    // Leaflet stretch the z12 tiles to cover those lower zooms, so
+    // "全部" still shows *something* instead of a blank grey box.
+    minNativeZoom: 12,
+    attribution: "國土測繪中心 通用電子地圖（本機離線快取，桃園市）",
+  }}
 );
 const nlscLayer = L.tileLayer(
   "https://wmts.nlsc.gov.tw/wmts/EMAP/default/GoogleMapsCompatible/{{z}}/{{y}}/{{x}}",

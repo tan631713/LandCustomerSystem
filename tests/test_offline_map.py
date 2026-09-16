@@ -87,23 +87,23 @@ class LocalAssetPathTests(unittest.TestCase):
             self.assertTrue(offline_tile_cache_available(tmp))
 
 
+def _location(**overrides):
+    base = {
+        "district": "桃園區", "section": "一段", "subsection": "", "land_number": "100",
+        "owner_name": "王小明", "latitude": 24.9936, "longitude": 121.3010,
+    }
+    base.update(overrides)
+    return base
+
+
 class RenderMapHtmlDocumentTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.application = QApplication.instance() or QApplication([])
 
-    @staticmethod
-    def _location(**overrides):
-        base = {
-            "district": "桃園區", "section": "一段", "subsection": "", "land_number": "100",
-            "owner_name": "王小明", "latitude": 24.9936, "longitude": 121.3010,
-        }
-        base.update(overrides)
-        return base
-
     def test_leaflet_assets_are_referenced_locally_not_from_a_cdn(self):
         with tempfile.TemporaryDirectory() as tmp:
-            document, row_count = render_map_html_document([self._location()], tmp)
+            document, row_count = render_map_html_document([_location()], tmp)
         self.assertEqual(row_count, 1)
         # Leaflet itself must not come from a CDN -- the CARTO *tile*
         # layer staying a live basemaps.cartocdn.com URL is fine and
@@ -115,14 +115,14 @@ class RenderMapHtmlDocumentTests(unittest.TestCase):
 
     def test_offline_layer_is_default_only_once_a_tile_actually_exists(self):
         with tempfile.TemporaryDirectory() as tmp:
-            document_without, _ = render_map_html_document([self._location()], tmp)
+            document_without, _ = render_map_html_document([_location()], tmp)
             self.assertNotIn("本地離線地圖", document_without)
             self.assertIn('layers: [nlscLayer]', document_without)
 
             tile_path = offline_tile_cache_dir(tmp) / "15" / "27425" / "14033.png"
             tile_path.parent.mkdir(parents=True)
             tile_path.write_bytes(b"fixture")
-            document_with, _ = render_map_html_document([self._location()], tmp)
+            document_with, _ = render_map_html_document([_location()], tmp)
         self.assertIn("本地離線地圖", document_with)
         self.assertIn('layers: [offlineLayer]', document_with)
 
@@ -131,14 +131,32 @@ class RenderMapHtmlDocumentTests(unittest.TestCase):
             tile_path = offline_tile_cache_dir(tmp) / "15" / "27425" / "14033.png"
             tile_path.parent.mkdir(parents=True)
             tile_path.write_bytes(b"fixture")
-            document, _ = render_map_html_document([self._location()], tmp)
+            document, _ = render_map_html_document([_location()], tmp)
         self.assertIn("wmts.nlsc.gov.tw", document)
         self.assertIn("basemaps.cartocdn.com", document)
+
+    def test_offline_layer_uses_min_native_zoom_not_min_zoom(self):
+        # Real user report: the map's default "全部" view fits every
+        # district's markers at once, which needs a much lower zoom than
+        # the cache's z12 floor -- minZoom would leave the layer showing
+        # nothing at all below that (a blank grey box, no error), while
+        # minNativeZoom instead stretches the z12 tiles to cover it.
+        with tempfile.TemporaryDirectory() as tmp:
+            tile_path = offline_tile_cache_dir(tmp) / "12" / "3423" / "1753.png"
+            tile_path.parent.mkdir(parents=True)
+            tile_path.write_bytes(b"fixture")
+            document, _ = render_map_html_document([_location()], tmp)
+        offline_layer_js = document[document.index("const offlineLayer"):document.index("const nlscLayer")]
+        self.assertIn("minNativeZoom: 12", offline_layer_js)
+        # "minZoom:" (the property, with its colon) -- not a bare
+        # substring check, which would also match the explanatory
+        # comment's own prose mentioning "minZoom" by name.
+        self.assertNotIn("minZoom:", offline_layer_js)
 
     def test_rows_with_no_coordinates_are_excluded_but_do_not_crash(self):
         with tempfile.TemporaryDirectory() as tmp:
             document, row_count = render_map_html_document(
-                [self._location(), self._location(latitude=None, longitude=None)], tmp
+                [_location(), _location(latitude=None, longitude=None)], tmp
             )
         self.assertEqual(row_count, 1)
         self.assertIn("王小明", document)
@@ -230,6 +248,74 @@ class EmbeddedMapViewTests(unittest.TestCase):
 
         self.assertTrue(result.get("load_finished_ok"))
         self.assertIn('"hasLeaflet":true', result.get("js", ""))
+        self.assertNotIn('"loadedTiles":0', result.get("js", ""))
+
+    def test_the_all_districts_view_still_shows_tiles_with_only_z12_downloaded(self):
+        # Reproduces the actual user report (screenshot: a blank grey map
+        # with the district tabs and zoom/layer controls, but no tiles at
+        # all): with markers spread across the *whole* 桃園市 bounding
+        # box -- not just a couple of nearby districts, which turned out
+        # during debugging to still fit at zoom 17 and not exercise this
+        # at all -- the default "全部" view's fitBounds() genuinely picks
+        # a zoom around 10, well below the offline cache's z12 floor. The
+        # old minZoom: 12 left the layer showing nothing at all below
+        # that; minNativeZoom instead stretches the z12 tiles to cover
+        # it. Only z12 tiles are downloaded here (no other zoom) so this
+        # cannot pass by accident via some other zoom level having tiles.
+        #
+        # view.show() is required, not optional, for this one: an
+        # unshown QWebEngineView (fine for the single-marker test above,
+        # where a degenerate one-point fitBounds always picks maxZoom
+        # regardless of container size) leaves <body> at clientWidth: 0
+        # under the offscreen platform, which collapses the map container
+        # and makes fitBounds pick an unrelated zoom -- an artifact of
+        # this test harness, not something to fix in the app.
+        from PIL import Image
+        from PySide6.QtCore import QEventLoop, QTimer, QUrl
+        from PySide6.QtWebEngineWidgets import QWebEngineView
+
+        with tempfile.TemporaryDirectory() as tmp:
+            for _z, x, y in iter_offline_tiles(zoom_min=12, zoom_max=12):
+                tile_path = offline_tile_cache_dir(tmp) / "12" / str(x) / f"{y}.png"
+                tile_path.parent.mkdir(parents=True, exist_ok=True)
+                Image.new("RGB", (256, 256), color=(200, 220, 240)).save(tile_path)
+
+            locations = [
+                _location(district="觀音區", latitude=24.65, longitude=120.90),
+                _location(district="復興區", latitude=25.04, longitude=121.32),
+            ]
+            document, _row_count = render_map_html_document(locations, tmp)
+
+            view = QWebEngineView()
+            view.resize(800, 600)
+            view.show()
+            loop = QEventLoop()
+            result = {}
+
+            def on_load_finished(ok):
+                result["load_finished_ok"] = ok
+
+                def check():
+                    view.page().runJavaScript(
+                        "JSON.stringify({"
+                        "zoom: map.getZoom(), "
+                        "loadedTiles: document.querySelectorAll('.leaflet-tile-loaded').length"
+                        "})",
+                        lambda value: (result.update(js=value), loop.quit()),
+                    )
+
+                QTimer.singleShot(2000, check)
+
+            view.loadFinished.connect(on_load_finished)
+            view.setHtml(document, QUrl.fromLocalFile(str(tmp) + "/"))
+            QTimer.singleShot(9000, loop.quit)
+            loop.exec()
+
+        self.assertTrue(result.get("load_finished_ok"))
+        # The fitBounds computation itself is Leaflet's own algorithm,
+        # not this app's code -- assert the *symptom* that matters
+        # (tiles rendered) rather than pinning an exact zoom number that
+        # could shift with viewport size or a future Leaflet upgrade.
         self.assertNotIn('"loadedTiles":0', result.get("js", ""))
 
 
