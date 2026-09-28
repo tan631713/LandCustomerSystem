@@ -149,11 +149,13 @@ class PostgreSQLCustomerDataSource(
                 "SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations"
             ).fetchone()
             count_row = conn.execute("SELECT COUNT(*) AS count FROM ownerships").fetchone()
+            account_row = conn.execute("SELECT COUNT(*) AS count FROM users").fetchone()
         return {
             "status": "ok",
             "backend": self.backend_name,
             "schema_version": int(schema_row["version"]),
             "record_count": int(count_row["count"]),
+            "account_count": int(account_row["count"]),
         }
 
     def authenticate(self, username, password):

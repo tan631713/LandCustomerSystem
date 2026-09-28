@@ -1,6 +1,40 @@
 土地資料系統 完整版變更紀錄
 ================================
 
+2026-09-28 家中伺服器新增圖形控制台 LandCustomerServerConsole.exe
+----------------------------------------------------------------
+1. 使用者需求（伺服器控制台 UI 規格）：現況 cmd 介面有六個實際問題——中文在主控台變亂碼、Uvicorn 正常訊息被 PowerShell 包成紅字錯誤、診斷結果要自己開 PowerShell 讀 JSON、admin 密碼恢復要手動放 .request 檔再盲打密碼、空資料庫沒有任何方式建立第一個帳號、關閉 cmd 視窗就會停止伺服器。要求新增一個圖形控制台包在既有啟動流程外面，只負責啟動、監看與操作，不改任何伺服器邏輯、API 或資料。
+2. 盤點（不改程式，先確認再實作）：
+   a. home_server_runtime.ps1 的「7 個步驟」實際上分母不一致（[1/7]~[3/7]，中間條件式的 pre_upgrade_backup 用 [4/8]，之後變成 [5/8]~[7/8]，最後又跳回 [7/7]）；決定改用診斷檔的 `stage` 欄位（7 個固定鍵值）驅動步驟燈號，不解析 [n/M] 文字。
+   b. 遷移包偵測位置＝啟動檔旁、檔名規則＝`*.lcs-migration.zip`；匯入只要求特定業務資料表為空（不要求 users 表為空），但匯入本身需要一個「已存在」的伺服器 admin 帳密才能認證，因此帳號數為 0 時「匯入遷移包」一定會失敗，UI 上會先做 account_count 檢查給出提示，而不是送出註定失敗的請求。
+   c. admin 密碼恢復函式在 `customer_recovery_account.py:294 recover_admin_password()`；失敗訊息目前只有 3 種，其中「驗證密碼錯誤」共用了措辭給另一情境用的訊息（「新帳號密碼不正確」），也沒有「資料庫沒有任何帳號」這個獨立分支——決定不修改這個共用函式本身，只在新增的 CLI 層做 account_count 前置檢查與訊息對應。
+   d. 資料金鑰初始化路徑：全新帳號的資料金鑰就是 `derive_encryption_key(password, encryption_salt)` 本身，`wrapped_data_key` 留空，不會呼叫 `Fernet.generate_key()`（見 `customer_repository.py` 與 `postgres_source.py` 的 authenticate()）；新的 admin-bootstrap 子命令照抄這個模式。
+   e. 備份已有 `backup_postgresql.create_backup()`（強制立即備份）與 `backup_status()`（回傳 backup_directory/backup_count/latest_backup/latest_backup_at）；「立即備份」不需要新的 ps1 參數，直接呼叫既有 CLI 即可。
+3. home_server_runtime.ps1：新增 `-NonInteractive` 參數，只在帶這個參數時才會啟用「PYTHONUTF8/PYTHONIOENCODING 環境變數」「把 exe 輸出轉純文字避免 NativeCommandError」「遇到需要 Read-Host 的情境改成直接 throw 並寫入診斷檔」；未帶這個參數時（既有的「啟動家中伺服器.bat」）行為、輸出與改版前完全相同。診斷檔新增 `account_count`、`backup_directory`、`backup_count`、`latest_backup`、`latest_backup_at` 五個欄位，既有欄位名稱與意義不變。
+4. LandCustomerServer.exe（`start_api_server.py`）新增：
+   - `admin-recover`、`admin-bootstrap` 兩個子命令（`server_console_admin.py`），密碼只經標準輸入 JSON 傳入，回覆一律是單一 JSON `{"status", "message"}`；admin-bootstrap 在交易內用既有的 `pg_advisory_xact_lock` 鎖定、重新確認帳號數為 0 才建立，並寫入稽核紀錄「本機控制台建立首位管理員」。
+   - `--backup-status` 旗標，純轉呼叫既有 `backup_postgresql.backup_status()`。
+   - `customer_api/postgres_source.py` 的 `health()` 新增 `account_count` 欄位（純新增，`/health` 端點與既有欄位不變）。
+5. 新增 `server_console/`（獨立資料夾，與 FastAPI 程式碼分開）：Python + tkinter(ttk) 圖形控制台。狀態列＋工具列＋7 步啟動燈號＋連線資訊（含 QR Code，segno 本機產生，不呼叫線上服務）＋系統狀態；日誌分頁（INFO/WARNING/ERROR 分色、只看錯誤、複製全部、開啟資料夾）；管理分頁（admin 密碼恢復、匯入遷移包、建立第一個管理員，帳號數為 0 時才能用建立第一個管理員，且待匯入遷移包時會停用）。系統匣用 pystray（關閉視窗縮到系統匣，不停止伺服器；右鍵可啟動/停止/複製手機網址/結束）。單一實例用一個僅供本機信號用的 loopback socket（51987）實作，第二次開啟只會把既有視窗帶到前景。設定檔 `console-settings.json` 只存自動重啟與開機啟動兩個選項。
+6. 匯入遷移包在控制台裡改成直接呼叫 `--import-migration-package`（透過 stdin 一次性餵入既有的 4 個互動問答：單機帳密、伺服器 admin 帳密），而不是「複製檔案＋重啟 ps1 -NonInteractive」，因為 -NonInteractive 模式下 ps1 遇到待匯入的遷移包會直接 throw（避免卡在無法回答的 Read-Host），而且匯入本身需要先有 admin 帳號才能認證，兩者衝突；此為規格與現有程式衝突的處理方式，已在盤點報告中說明。
+7. 打包：`build_console_exe.bat`／`build_postgresql_release.py`（新增 `build_console()`，`--onefile --windowed --uac-admin`），輸出 `LandCustomerServerConsole.exe` 放在伺服器封裝根目錄，與「啟動家中伺服器.bat」並列；release-manifest.json 新增 console_executable 與其 SHA-256。
+8. 測試：新增 `tests/test_server_console_admin.py`（9 個，涵蓋 admin-recover/admin-bootstrap 的成功、帳號數為 0、密碼太短、兩次不一致、訊息對應、稽核紀錄、資料金鑰不含 wrapped_data_key 等情境，直接呼叫真實的 `recover_admin_password()` 而非全部 mock）與 `tests/test_server_console_state.py`（9 個，狀態機與 migration JSON 擷取的純邏輯測試）；PowerShell 語法驗證 home_server_runtime.ps1 通過；實際用 PyInstaller `--onefile --windowed --uac-admin` 打包成功（約 33MB）；用未打包的 `python -m server_console.main` 在本機（zh-TW、Big5 系統地區）跑過真實互動：讀到真實遺留的 home-server-diagnostics.json 後狀態機正確顯示「錯誤／伺服器已停止回應」、7 步燈號、連線資訊與複製按鈕、管理分頁依 account_count 正確停用「建立第一個管理員」、密碼欄位遮蔽與顯示切換、兩次密碼不一致時的中文錯誤對話框、關閉視窗縮到系統匣、開兩個執行個體時第二個會把第一個帶到前景後自行結束。
+9. 尚未在真實環境驗證（需要使用者在家中主機上，或另一台乾淨 Windows 上完成）：停用 PostgreSQL 服務／關閉 NetBird／連接埠被占用時控制台的錯誤情境顯示、手動結束 LandCustomerServer.exe 後 5 秒偵測與自動重啟 3 次上限、經 NetBird 從手機實際連線、匯入遷移包與建立第一個管理員的完整真實資料流程、以及在完全沒有安裝 Python 的乾淨機器上執行打包後的 exe。打包驗證時啟動了兩個具系統管理員權限的控制台程序做手動測試，目前的非系統管理員權限視窗無法關閉這兩個程序，需要使用者自行以工作管理員（系統管理員權限）結束，或直接登出/重新開機清除。
+10. 資料庫結構沒有改變，不需要 migration；舊版「啟動家中伺服器.bat」不受影響，仍可單獨使用。
+
+2026-09-23 家中伺服器 v1.9.42 手機外勤路線規劃第一版：同址合併、機車導航、整天多點導航、預估抵達時間、補座標
+----------------------------------------------------------------
+1. 使用者需求（外勤路線規劃功能規格書）：一天拜訪 5～20 位地主，拜訪預設用戶籍地址、同地址的多位地主合併成一站、主要交通工具是機車、不使用 TGOS 等需要申請的定位服務、沒有多位業務共用。盤點後既有外勤模式已具備建立行程、GPS 最近鄰居排序、鎖定順位、打卡狀態、單點導航，本版只補缺口。
+2. 路線排序（伺服器 `field_visit_routing.py`）：`RouteCandidate` 新增 `group_key`，同一位地主（owner_id）的持分在自動排序後一律接在一起；沒有座標的持分也會排在一起；目前拜訪中的地主若還有其他持分，會緊接在後；延後的持分不會被拉到前面；鎖定順位規則不變。候選清單查詢多帶 `item.owner_id`。
+3. 手機畫面：同址（同地主、同地址或同座標且相鄰）合併為一站，站號改用站數計算；卡片顯示「同址 N 位」、同址地主名單、預計抵達時間與座標狀態；清單顯示每站約幾點抵達，同站的後續地主標示「同」。
+4. 導航預設改為機車模式（`travelmode=two-wheeler`，Google 地圖不支援的地區會自動改用開車路線）。
+5. 新增「整天路線導航」：剩下的站點依順序產生 Google 地圖多點導航連結；手機瀏覽器每段最多 3 個途經點，因此每段最多 4 站，自動分段且下一段從上一段終點出發；第一段有 GPS 時從目前位置出發。不需要 API 金鑰。
+6. 預估時間：直線距離 ×1.4 道路係數、機車時速 30 公里、每位地主停留 20 分鐘；沒有 GPS 或沒有座標時會標示為粗估。
+7. 補座標：沒有座標的地主可按「補座標」，貼上 Google 地圖的「緯度, 經度」、長網址（讀取圖釘座標）或度分秒格式；經緯度貼反會自動對調；不在台灣範圍時要再按一次確認；短網址無法解析時會提示改用長按複製。同站沒有座標的持分一起存（沿用既有 `PUT /api/v1/records/{id}/location`）。
+8. 現場座標：開始或完成拜訪的對話框，在這一站沒有座標時會出現「我在地主家，用目前位置當作這個地址的座標」（預設勾選）。API 新增選填欄位 `save_location`（預設 false，舊版手機不受影響）；伺服器只補同一條路線中地址與這位地主相同、且沒有手動或已定位座標的持分，來源記為 `field_gps`，並寫入稽核紀錄。「開始外勤」自動開始第一位時不會存座標（當時人還在出發地）。
+9. 測試：新增路線分組測試 5 個、服務層測試 2 個、PostgreSQL 儲存層測試 2 個、手機輔助函式測試 5 項（Node.js），外勤相關單元測試 63 個全數通過；另用 PostgreSQL 16 實際執行新的 SQL（同址補座標、不覆蓋手動座標、不同地址不補），並用無頭瀏覽器操作手機外勤頁（合併站、分段導航連結、補座標、勾選存座標）。雲端開發環境無法安裝 FastAPI／PySide6，相關的 API 與桌面測試沒有在這次執行，打包前請在本機跑完整測試。
+10. 資料庫結構沒有改變，不需要 migration；回滾時關閉新版、開啟舊版啟動檔即可。公司筆電不用升級。
+
 2026-09-16 公司筆電 v1.9.81 修正：下載離線圖磚後「全部」地區檢視圖磚沒顯示
 ----------------------------------------------------------------
 1. 使用者回報：v1.9.80 下載離線圖磚後（下載過程正常），開啟「地圖與地號視覺化」，預設「全部」地區檢視畫面是空白灰底，完全沒有圖磚。

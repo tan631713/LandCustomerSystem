@@ -1,0 +1,31 @@
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(1, 0, 0, 0),
+    prodvers=(1, 0, 0, 0),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo([
+      StringTable(
+        '040404B0',
+        [
+          StringStruct('CompanyName', '土地資料系統'),
+          StringStruct('FileDescription', '土地資料系統－家中伺服器控制台'),
+          StringStruct('FileVersion', '1.0.0'),
+          StringStruct('InternalName', 'LandCustomerServerConsole'),
+          StringStruct('LegalCopyright', 'Copyright 2026'),
+          StringStruct('OriginalFilename', 'LandCustomerServerConsole.exe'),
+          StringStruct('ProductName', '土地資料系統－家中伺服器控制台'),
+          StringStruct('ProductVersion', '1.0.0'),
+          StringStruct('BuildDate', '2026-09-28')
+        ]
+      )
+    ]),
+    VarFileInfo([VarStruct('Translation', [1028, 1200])])
+  ]
+)

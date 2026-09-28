@@ -103,6 +103,11 @@ def build_parser():
     parser.add_argument("--backup-if-due-hours", type=int, default=0)
     parser.add_argument("--backup-label", default="manual")
     parser.add_argument(
+        "--backup-status",
+        action="store_true",
+        help="只回報備份目錄、數量與最後備份時間後結束，不建立新備份",
+    )
+    parser.add_argument(
         "--import-recovery-account",
         metavar="PATH",
         help="驗證並匯入單機版產生的 .lcs-account 帳號恢復檔後結束",
@@ -241,6 +246,10 @@ def run_maintenance_action(args):
         if args.prefer_vpn:
             certificate_arguments.append("--prefer-vpn")
         return True, install_certificate_main(certificate_arguments)
+    if args.backup_status:
+        from backup_postgresql import main as backup_main
+
+        return True, backup_main(["--status"])
     if args.backup or args.backup_if_due_hours:
         from backup_postgresql import main as backup_main
 
@@ -321,6 +330,13 @@ def show_lan_addresses(args, has_tls):
 
 
 def main(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv and argv[0] in ("admin-recover", "admin-bootstrap"):
+        from server_console_admin import SUBCOMMANDS
+
+        return SUBCOMMANDS[argv[0]](argv[1:])
+
     parser = build_parser()
     args = parser.parse_args(argv)
     select_protected_postgres_configuration(args)

@@ -20,6 +20,8 @@ ROOT = Path(__file__).resolve().parent
 DIST = ROOT / "dist"
 RELEASES = ROOT / "releases"
 SERVER_DIST = DIST / "LandCustomerServer"
+CONSOLE_EXE_NAME = "LandCustomerServerConsole.exe"
+CONSOLE_DIST_EXE = DIST / CONSOLE_EXE_NAME
 
 PRIMARY_LAUNCHER = "啟動家中伺服器.bat"
 SUPPORT_FILES = (
@@ -137,6 +139,34 @@ def build_server(python_executable: str) -> None:
         raise RuntimeError("LandCustomerServer.exe was not created")
 
 
+def build_console(python_executable: str) -> None:
+    """Build the optional GUI console (server_console/) as its own --onefile
+    exe. Kept as a completely separate PyInstaller target from
+    LandCustomerServer.exe: the console only calls the server's existing
+    CLI, it never imports FastAPI/uvicorn code itself."""
+
+    command = [
+        python_executable,
+        "-m",
+        "PyInstaller",
+        "--noconfirm",
+        "--clean",
+        "--onefile",
+        "--windowed",
+        "--uac-admin",
+        "--name",
+        "LandCustomerServerConsole",
+        "--icon",
+        str(ROOT / "assets" / "app_icon.ico"),
+        "--version-file",
+        str(ROOT / "version_info_console.txt"),
+        str(ROOT / "server_console" / "main.py"),
+    ]
+    subprocess.run(command, cwd=ROOT, check=True)
+    if not CONSOLE_DIST_EXE.is_file():
+        raise RuntimeError("LandCustomerServerConsole.exe was not created")
+
+
 def audit_server_bundle(bundle: Path) -> None:
     """Refuse ambiguous launchers, customer data, or server secrets."""
     root_launchers = sorted(path.name for path in bundle.glob("*.bat"))
@@ -151,6 +181,7 @@ def audit_server_bundle(bundle: Path) -> None:
 
     required = [
         bundle / PRIMARY_LAUNCHER,
+        bundle / CONSOLE_EXE_NAME,
         bundle / "LandCustomerServer" / "LandCustomerServer.exe",
         bundle / "LandCustomerServer" / "_internal" / "postgres" / "schema.sql",
         bundle / "postgres" / "migrations" / "009_owner_contacts_rollback.sql",
@@ -208,6 +239,9 @@ def package_release() -> tuple[Path, Path]:
         bundle.mkdir()
         shutil.copytree(SERVER_DIST, bundle / "LandCustomerServer")
         copy_primary_launcher(bundle / PRIMARY_LAUNCHER)
+        if not CONSOLE_DIST_EXE.is_file():
+            raise FileNotFoundError("LandCustomerServerConsole.exe 尚未建立")
+        shutil.copy2(CONSOLE_DIST_EXE, bundle / CONSOLE_EXE_NAME)
         support = bundle / "_server_support"
         support.mkdir()
         for name in SUPPORT_FILES:
@@ -233,6 +267,11 @@ def package_release() -> tuple[Path, Path]:
             "server_executable": "LandCustomerServer/LandCustomerServer.exe",
             "primary_launcher": PRIMARY_LAUNCHER,
             "root_launcher_count": 1,
+            "console_executable": CONSOLE_EXE_NAME,
+            "console_executable_sha256": sha256_file(bundle / CONSOLE_EXE_NAME),
+            "console_is_optional_ui": True,
+            "console_requires_admin": True,
+            "console_settings_file": "%LOCALAPPDATA%/LandCustomerSystem/console-settings.json",
             "prerequisite_check": ["NetBird", "PostgreSQL Server", "pg_dump"],
             "prerequisite_install_requires_confirmation": True,
             "package_source": "winget",
@@ -271,6 +310,7 @@ def package_release() -> tuple[Path, Path]:
 def build_parser():
     parser = argparse.ArgumentParser(description="建立 PostgreSQL 桌面／伺服器正式交付包")
     parser.add_argument("--skip-server-build", action="store_true")
+    parser.add_argument("--skip-console-build", action="store_true")
     return parser
 
 
@@ -280,6 +320,8 @@ def main(argv=None):
     validate_field_visit_journey()
     if not args.skip_server_build:
         build_server(sys.executable)
+    if not args.skip_console_build:
+        build_console(sys.executable)
     directory, zip_path = package_release()
     print(json.dumps({"release_directory": str(directory), "release_zip": str(zip_path)}, ensure_ascii=False, indent=2))
     return 0
