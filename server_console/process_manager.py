@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import queue
 import socket
+import ssl
 import subprocess
 import threading
 import time
@@ -88,9 +89,18 @@ class ProcessManager:
 
     @staticmethod
     def is_port_open(host: str = "127.0.0.1", port: int = SERVER_PORT, timeout: float = 1.0) -> bool:
+        # 8732 是 HTTPS，只開 TCP 又立刻放手會讓 uvicorn 看到「握手中被砍斷」，
+        # 每次輪詢都在伺服器那邊留下一則 SSL 錯誤，一秒一次會讓日誌分頁一直
+        # 滾動、畫面看起來像閃爍。完成一次真正的 TLS 交握再乾淨關閉，伺服器
+        # 端就不會再產生這種噪音；用自簽憑證不驗證身分即可，這裡只是要確認
+        # 連接埠真的活著，不需要驗證憑證內容。
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
         try:
-            with socket.create_connection((host, port), timeout=timeout):
-                return True
+            with socket.create_connection((host, port), timeout=timeout) as raw_socket:
+                with context.wrap_socket(raw_socket):
+                    return True
         except OSError:
             return False
 

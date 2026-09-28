@@ -156,6 +156,11 @@ class ConsoleApp:
                 command=lambda k=key: self._copy_to_clipboard(self.connection_vars[k].get()),
             ).pack(side="left", padx=2)
 
+        qr_frame = tk.Frame(connection_frame)
+        qr_frame.pack(fill="x", padx=6, pady=(2, 6))
+        self.qr_label = tk.Label(qr_frame, text="（伺服器運作中才會顯示手機網址 QR Code）")
+        self.qr_label.pack(side="left")
+
         system_frame = ttk.LabelFrame(right_frame, text="系統狀態")
         system_frame.pack(fill="x")
         self.system_vars = {
@@ -395,7 +400,18 @@ class ConsoleApp:
         if self.tray:
             self.tray.set_status(display.status)
 
+    def _set_var_if_changed(self, var: tk.StringVar, value: str) -> None:
+        # StringVar.set() 每次都會經過 Tcl 的 globalsetvar／trace，即使值沒變
+        # 也可能觸發一次重繪；每秒都對十幾個變數這樣做，畫面會像在閃爍。
+        # 值不變就整個跳過。
+        if var.get() != value:
+            var.set(value)
+
     def _apply_status(self, status: str, reason: str) -> None:
+        signature = (status, reason)
+        if getattr(self, "_applied_status_signature", None) == signature:
+            return
+        self._applied_status_signature = signature
         label = STATUS_LABELS.get(status, status)
         self.status_label.configure(
             text=label,
@@ -409,6 +425,10 @@ class ConsoleApp:
         current_stage = diagnostics.get("stage") or ""
         failed = display.status == "error"
         reached_index = STAGE_ORDER.index(current_stage) if current_stage in STAGE_ORDER else -1
+        signature = (display.status, reached_index, failed)
+        if getattr(self, "_applied_steps_signature", None) == signature:
+            return
+        self._applied_steps_signature = signature
         for index, key in enumerate(STAGE_ORDER):
             dot = self.step_labels[key]
             if display.status == "running":
@@ -424,36 +444,49 @@ class ConsoleApp:
                 dot.configure(text="○", fg="#9e9e9e")
 
     def _update_connection_info(self, diagnostics: dict) -> None:
-        self.connection_vars["api_url"].set(diagnostics.get("api_url") or "—")
-        self.connection_vars["certificate_url"].set(diagnostics.get("certificate_url") or "—")
-        self.connection_vars["certificate_sha256"].set(diagnostics.get("certificate_sha256") or "—")
+        self._set_var_if_changed(self.connection_vars["api_url"], diagnostics.get("api_url") or "—")
+        self._set_var_if_changed(
+            self.connection_vars["certificate_url"], diagnostics.get("certificate_url") or "—"
+        )
+        self._set_var_if_changed(
+            self.connection_vars["certificate_sha256"], diagnostics.get("certificate_sha256") or "—"
+        )
         netbird_ip = diagnostics.get("netbird_ip") or ""
-        self.connection_vars["netbird_ip"].set(
-            netbird_ip or "NetBird 未連線，手機與筆電無法連入"
+        self._set_var_if_changed(
+            self.connection_vars["netbird_ip"],
+            netbird_ip or "NetBird 未連線，手機與筆電無法連入",
         )
         self._update_qr(diagnostics.get("api_url") or "")
 
     def _update_qr(self, url: str) -> None:
-        if not url or url == getattr(self, "_last_qr_url", None):
+        if url == getattr(self, "_last_qr_url", None):
             return
         self._last_qr_url = url
+        if not url:
+            self.qr_image = None
+            self.qr_label.configure(image="", text="（伺服器運作中才會顯示手機網址 QR Code）")
+            return
         try:
             from server_console.qrcode_widget import qr_photo_image
 
-            image = qr_photo_image(url)
-            if not hasattr(self, "qr_label"):
-                self.qr_label = tk.Label(self.root)
-            self.qr_image = image
-            self.qr_label.configure(image=image)
+            self.qr_image = qr_photo_image(url)
+            self.qr_label.configure(image=self.qr_image, text="")
         except Exception:
             pass
 
     def _update_system_status(self, diagnostics: dict) -> None:
         service = diagnostics.get("postgresql_service") or "—"
         status = diagnostics.get("postgresql_status") or ""
-        self.system_vars["postgresql_service"].set(f"{service}（{status}）" if status else service)
-        self.system_vars["database_status"].set(diagnostics.get("database_status") or "—")
-        self.system_vars["schema_version"].set(str(diagnostics.get("schema_version") or "—"))
+        self._set_var_if_changed(
+            self.system_vars["postgresql_service"],
+            f"{service}（{status}）" if status else service,
+        )
+        self._set_var_if_changed(
+            self.system_vars["database_status"], diagnostics.get("database_status") or "—"
+        )
+        self._set_var_if_changed(
+            self.system_vars["schema_version"], str(diagnostics.get("schema_version") or "—")
+        )
         account_count = diagnostics.get("account_count")
         record_count = diagnostics.get("record_count")
         parts = []
@@ -461,15 +494,19 @@ class ConsoleApp:
             parts.append(f"{record_count} 筆地主")
         if account_count is not None:
             parts.append(f"{account_count} 個帳號")
-        self.system_vars["record_count"].set("、".join(parts) if parts else "—")
+        self._set_var_if_changed(self.system_vars["record_count"], "、".join(parts) if parts else "—")
         latest_at = diagnostics.get("latest_backup_at")
         backup_count = diagnostics.get("backup_count")
         if latest_at is not None:
-            self.system_vars["backup_summary"].set(
-                f"{latest_at or '—'}（共 {backup_count if backup_count is not None else '—'} 份）"
+            self._set_var_if_changed(
+                self.system_vars["backup_summary"],
+                f"{latest_at or '—'}（共 {backup_count if backup_count is not None else '—'} 份）",
             )
 
     def _update_buttons(self, status: str) -> None:
+        if getattr(self, "_applied_buttons_status", None) == status:
+            return
+        self._applied_buttons_status = status
         running_like = status in ("starting", "running")
         self.start_button.configure(state="disabled" if running_like else "normal")
         self.stop_button.configure(state="normal" if running_like else "disabled")
