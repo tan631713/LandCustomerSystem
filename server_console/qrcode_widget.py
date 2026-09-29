@@ -3,14 +3,21 @@
 from __future__ import annotations
 
 import io
-import tkinter as tk
 
 import segno
+from PIL import Image
 
 
-def qr_photo_image(text: str, *, scale: int = 6, border: int = 2) -> tk.PhotoImage:
-    qr = segno.make(text, error="m")
+def qr_image(text: str, *, faded: bool = False, scale: int = 8, border: int = 1) -> Image.Image:
+    """PNG of `text` as a Pillow image; `faded` blends it to 20% over white
+    (the spec's look while the server is not running)."""
+
     buffer = io.BytesIO()
-    qr.save(buffer, kind="png", scale=scale, border=border, dark="#1a1a1a", light="#ffffff")
+    segno.make(text, error="m").save(
+        buffer, kind="png", scale=scale, border=border, dark="#1C2024", light="#FFFFFF"
+    )
     buffer.seek(0)
-    return tk.PhotoImage(data=buffer.read())
+    picture = Image.open(buffer).convert("RGB")
+    if faded:
+        picture = Image.blend(Image.new("RGB", picture.size, "#FFFFFF"), picture, 0.2)
+    return picture

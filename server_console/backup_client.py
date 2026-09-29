@@ -9,15 +9,14 @@ from __future__ import annotations
 import json
 import subprocess
 
-from server_console.paths import package_root, server_executable
+from server_console.paths import server_command
 from server_console.process_manager import CREATE_NO_WINDOW
 
 
 def _run(arguments: list[str]) -> dict:
-    exe = server_executable(package_root())
     try:
         result = subprocess.run(
-            [str(exe), *arguments],
+            [*server_command(), *arguments],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -28,7 +27,7 @@ def _run(arguments: list[str]) -> dict:
     except subprocess.TimeoutExpired:
         return {"status": "error", "message": "備份逾時，請檢查伺服器與磁碟空間。"}
     except OSError as exc:
-        return {"status": "error", "message": f"無法執行 LandCustomerServer.exe：{exc}"}
+        return {"status": "error", "message": f"無法執行伺服器程式：{exc}"}
     text = (result.stdout or "").strip() or (result.stderr or "").strip()
     try:
         return json.loads(text)

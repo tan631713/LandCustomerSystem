@@ -332,7 +332,7 @@ def show_lan_addresses(args, has_tls):
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
-    if argv and argv[0] in ("admin-recover", "admin-bootstrap"):
+    if argv and argv[0] in ("admin-list", "admin-recover", "admin-bootstrap", "migration-import"):
         from server_console_admin import SUBCOMMANDS
 
         return SUBCOMMANDS[argv[0]](argv[1:])

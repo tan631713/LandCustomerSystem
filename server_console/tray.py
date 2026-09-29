@@ -14,6 +14,7 @@ STATUS_COLORS = {
     "not_started": "#9e9e9e",
     "starting": "#1e88e5",
     "running": "#43a047",
+    "no_accounts": "#43a047",
     "error": "#e53935",
     "stopping": "#9e9e9e",
 }
@@ -22,6 +23,7 @@ STATUS_LABELS = {
     "not_started": "未啟動",
     "starting": "啟動中",
     "running": "運作中",
+    "no_accounts": "運作中（資料庫尚無帳號）",
     "error": "錯誤",
     "stopping": "停止中",
 }
