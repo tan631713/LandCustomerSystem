@@ -302,6 +302,7 @@ class UiWorkflowTests(unittest.TestCase):
             self.assertIsNotNone(setup_dialog.encryption_key)
 
             login_dialog = app.AuthDialog(setup_mode=False)
+            login_dialog.username_edit.setText("admin")
             login_dialog.password_edit.setText("test-password")
             login_dialog.submit()
             self.assertEqual(login_dialog.result(), QDialog.Accepted)

@@ -82,7 +82,7 @@ class AuthDialog(QDialog):
         self.setModal(True)
         self.setFixedSize(360, 220 if setup_mode else 190)
 
-        self.username_edit = QLineEdit(ADMIN_USERNAME)
+        self.username_edit = QLineEdit(ADMIN_USERNAME if setup_mode else "")
         self.password_edit = QLineEdit()
         self.password_edit.setEchoMode(QLineEdit.Password)
         self.confirm_edit = QLineEdit()
