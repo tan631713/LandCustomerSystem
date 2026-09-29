@@ -153,14 +153,17 @@ class SettingsWorkflowMixin:
             if self.api_mode
             else None
         )
-        rows = (
-            repository.get_watchlist_entries()
-            if repository is not None
-            and hasattr(repository, "get_watchlist_entries")
-            else self._app_component("get_watchlist_entries")()
-            if not self.api_mode
-            else []
-        )
+        if repository is not None and hasattr(repository, "get_watchlist_entries"):
+            # The home-server repository can hand back a recent copy, so a save
+            # does not spend a round trip re-downloading an unchanged list.
+            fetch = getattr(
+                repository, "get_watchlist_entries_cached", repository.get_watchlist_entries
+            )
+            rows = fetch()
+        elif not self.api_mode:
+            rows = self._app_component("get_watchlist_entries")()
+        else:
+            rows = []
         self.watchlist_names = {
             normalize_watch_name(row["name"])
             for row in rows
@@ -189,12 +192,16 @@ class SettingsWorkflowMixin:
                 if hasattr(self, "active_record_repository")
                 else getattr(self, "record_repository", None)
             )
-            match = (
-                repository.find_watchlist_match(owner_name)
+            find = (
+                getattr(
+                    repository,
+                    "find_watchlist_match_cached",
+                    getattr(repository, "find_watchlist_match", None),
+                )
                 if repository is not None
-                and hasattr(repository, "find_watchlist_match")
                 else None
             )
+            match = find(owner_name) if find is not None else None
         else:
             match = self._app_component("find_watchlist_match")(owner_name)
         if match is None:

@@ -1003,7 +1003,14 @@ class RecordWorkflowMixin:
                 preserve_existing_model=True,
             )
         action_type = "新增資料" if is_new_record else "修改資料"
-        self._log_operation(action_type, plain_data.get("owner_name") or "未命名資料", plain_data.get("land_number") or "")
+        # Against the home server these two are network round trips; they run in
+        # the background so the "已儲存" message is not held up by them.
+        self._log_operation_in_background(
+            action_type,
+            plain_data.get("owner_name") or "未命名資料",
+            plain_data.get("land_number") or "",
+        )
+        self._start_saved_record_reconcile()
         self._app_component("QMessageBox").information(self, "完成", "資料已儲存。")
 
     def change_password(self):

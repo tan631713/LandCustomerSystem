@@ -1,8 +1,13 @@
 """Shared dependency seams for desktop workflow mixins."""
 
+import logging
 import sys
+import threading
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QDialog
+
+logger = logging.getLogger(__name__)
 
 
 class DesktopSupportMixin:
@@ -19,6 +24,79 @@ class DesktopSupportMixin:
             else self.repository
         )
         return repository.log_operation(action_type, summary, detail)
+
+    def _start_background_task(self, target):
+        """Run plain Python work (network calls only, never Qt objects) off the GUI thread."""
+
+        thread = threading.Thread(target=target, daemon=True)
+        tasks = [task for task in getattr(self, "_background_tasks", []) if task.is_alive()]
+        tasks.append(thread)
+        self._background_tasks = tasks
+        thread.start()
+        return thread
+
+    def wait_for_background_tasks(self, timeout=10.0):
+        for task in list(getattr(self, "_background_tasks", [])):
+            task.join(timeout)
+
+    def _log_operation_in_background(self, action_type, summary, detail=None):
+        """`_log_operation`, but against the home server the round trip no longer
+        holds up the window (a lost operation-log line must never break the UI)."""
+
+        if not getattr(self, "api_mode", False):
+            return self._log_operation(action_type, summary, detail)
+        repository = self.active_record_repository()
+
+        def write_log():
+            try:
+                repository.log_operation(action_type, summary, detail)
+            except Exception as exc:  # noqa: BLE001 - see docstring
+                logger.warning("背景寫入操作紀錄失敗：%s", exc)
+
+        return self._start_background_task(write_log)
+
+    def _start_saved_record_reconcile(self):
+        """After a save, fetch the saved record(s) whose server-side ids may have
+        changed (moved to another parcel/owner) and refresh the tree only if the
+        server's version differs from what was merged locally."""
+
+        repository = self.active_record_repository()
+        pop_ids = getattr(repository, "pop_reconcile_ids", None)
+        if pop_ids is None:
+            return
+        record_ids = pop_ids()
+        if not record_ids:
+            return
+        outcome = {"changed": False}
+
+        def reconcile():
+            for record_id in record_ids:
+                try:
+                    if repository.reconcile_record(record_id):
+                        outcome["changed"] = True
+                except Exception:  # noqa: BLE001 - fall back to a reload on the next refresh
+                    repository.invalidate_cache()
+                    return
+
+        self._saved_record_reconcile = (self._start_background_task(reconcile), outcome)
+        QTimer.singleShot(150, self._poll_saved_record_reconcile)
+
+    def _poll_saved_record_reconcile(self):
+        pending = getattr(self, "_saved_record_reconcile", None)
+        if pending is None:
+            return
+        thread, outcome = pending
+        try:
+            if thread.is_alive():
+                QTimer.singleShot(150, self._poll_saved_record_reconcile)
+                return
+            self._saved_record_reconcile = None
+            if outcome["changed"]:
+                self.refresh_records(
+                    self.selected_record_id, preserve_existing_model=True
+                )
+        except RuntimeError:  # the window was closed while the fetch was running
+            self._saved_record_reconcile = None
 
     def _show_non_modal_dialog(self, dialog, on_accepted=None, on_finished=None):
         """Open an editing dialog non-modally instead of blocking on .exec().

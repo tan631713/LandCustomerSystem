@@ -8,6 +8,7 @@ import mimetypes
 import os
 import socket
 import ssl
+import threading
 import time
 import uuid
 from base64 import urlsafe_b64encode
@@ -16,6 +17,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
+from customer_domain import normalize_match_text
 from customer_fields import LAND_FIELDS
 from customer_security import ENCRYPTED_FIELDS, decrypt_value
 
@@ -35,6 +37,43 @@ RECORD_FIELD_KEYS = frozenset(key for key, _label in LAND_FIELDS) | {"birth_year
 # that *does* use it still gets the real, informative "伺服器不支援" error
 # instead of silently losing the value.
 OPTIONAL_NEW_RECORD_FIELDS = frozenset({"birth_year"})
+# How long the attention list (注意名單) fetched for a save may be reused.
+WATCHLIST_CACHE_SECONDS = 120
+# These columns live on the shared land row: saving one ownership rewrites
+# them for every ownership of that land, so cached siblings must follow.
+LAND_LEVEL_FIELDS = (
+    "district", "section", "subsection", "land_number", "area", "declared_value",
+)
+# Columns that never make a cached row "different" for the UI.
+_ROW_VOLATILE_KEYS = frozenset({"updated_at", "created_at"})
+
+
+def _land_identity(row):
+    """Mirror of the server's land_key_for(): which parcel the row belongs to."""
+
+    return tuple(
+        normalize_match_text(row.get(key))
+        for key in ("district", "section", "land_number")
+    )
+
+
+def _owner_identity(row):
+    """Mirror of the server's owner_key_for(): which owner row it resolves to."""
+
+    identity = normalize_match_text(row.get("external_id"))
+    if identity:
+        return ("identity", identity)
+    name = normalize_match_text(row.get("owner_name") or row.get("name"))
+    address = normalize_match_text(row.get("address"))
+    if name or address:
+        return ("owner", name, address)
+    return (
+        "unidentified-owner",
+        row.get("district"),
+        row.get("section"),
+        row.get("land_number"),
+        row.get("registration_order"),
+    )
 
 
 class DesktopApiError(RuntimeError):
@@ -1197,6 +1236,13 @@ class DesktopApiRecordRepository:
         self.fernet = fernet
         self.data_revision = 0
         self._rows = None
+        # `_rows` is only ever replaced as a whole list of never-mutated dicts
+        # (copy-on-write), so a background search that already took a snapshot
+        # keeps reading consistent data while a save updates the cache.
+        self._rows_lock = threading.RLock()
+        self._reconcile_ids = set()
+        self._watchlist_cache = None
+        self._clock = time.monotonic
         self.last_inserted_customer_ids = []
         self._contact_log_record_ids = {}
         self._attachment_record_ids = {}
@@ -1210,6 +1256,102 @@ class DesktopApiRecordRepository:
         if self._rows is None:
             self._rows = [dict(row) for row in self.client.list_all_records()]
         return self._rows
+
+    def invalidate_cache(self):
+        """Public form of _invalidate(): the next read downloads everything again."""
+
+        self._invalidate()
+
+    def _update_cached_row(self, record_id, *, values=None, row=None):
+        """Change one cached row without downloading the list again.
+
+        `values` are the plain fields just saved; `row` is a complete row from
+        the server. Returns (old_row_or_None, new_row), or None when nothing is
+        cached (or `values` were given for a row that is not cached), in which
+        case the caller must fall back to `_invalidate()`.
+        """
+
+        record_id = int(record_id)
+        with self._rows_lock:
+            rows = self._rows
+            if rows is None:
+                return None
+            index = next(
+                (i for i, item in enumerate(rows) if int(item["id"]) == record_id),
+                None,
+            )
+            old = rows[index] if index is not None else None
+            if row is not None:
+                new = dict(row)
+            elif old is not None and values is not None:
+                new = dict(old)
+                for key in RECORD_FIELD_KEYS:
+                    if key in values:
+                        new[key] = values[key]
+                    elif key in OPTIONAL_NEW_RECORD_FIELDS:
+                        new[key] = None  # a blank optional field is cleared on the server
+                new["name"] = new.get("owner_name")
+            else:
+                return None
+            rows = list(rows)
+            if index is None:
+                position = next(
+                    (i for i, item in enumerate(rows) if int(item["id"]) < record_id),
+                    len(rows),
+                )
+                rows.insert(position, new)
+            else:
+                rows[index] = new
+            land_id = new.get("land_id")
+            if land_id not in (None, ""):
+                for i, sibling in enumerate(rows):
+                    if sibling is new or sibling.get("land_id") != land_id:
+                        continue
+                    if any(sibling.get(key) != new.get(key) for key in LAND_LEVEL_FIELDS):
+                        updated = dict(sibling)
+                        for key in LAND_LEVEL_FIELDS:
+                            updated[key] = new.get(key)
+                        rows[i] = updated
+            self._rows = rows
+            self.data_revision += 1
+            return old, new
+
+    @staticmethod
+    def _row_differs(old, new):
+        if old is None:
+            return True
+        keys = (set(old) | set(new)) - _ROW_VOLATILE_KEYS
+        return any(old.get(key) != new.get(key) for key in keys)
+
+    def _record_saved(self, record_id, plain):
+        """Keep the cached list in step with a save that already succeeded."""
+
+        result = self._update_cached_row(record_id, values=plain)
+        if result is None:
+            self._invalidate()
+            return
+        old, new = result
+        if old is None or _land_identity(old) != _land_identity(new) or (
+            _owner_identity(old) != _owner_identity(new)
+        ):
+            # The server may have moved the record to another parcel or owner
+            # row; only it knows the new land_id / owner_id.
+            self._reconcile_ids.add(int(record_id))
+
+    def pop_reconcile_ids(self):
+        with self._rows_lock:
+            ids = sorted(self._reconcile_ids)
+            self._reconcile_ids.clear()
+        return ids
+
+    def reconcile_record(self, record_id):
+        """Fetch one record and store the server's version; True if it changed."""
+
+        row = dict(self.client.get_record(int(record_id)))
+        result = self._update_cached_row(record_id, row=row)
+        if result is None:
+            return False
+        return self._row_differs(*result)
 
     def count_customers(self):
         return len(self._all_rows())
@@ -1273,13 +1415,26 @@ class DesktopApiRecordRepository:
 
     def save_customer(self, values, record_id=None):
         plain = self._plain_values(values)
-        saved_id = (
-            self.client.create_record(plain)
-            if record_id is None
-            else self.client.replace_record(int(record_id), plain)
-        )
-        self._invalidate()
-        return int(saved_id)
+        if record_id is None:
+            saved_id = int(self.client.create_record(plain))
+            self._record_created(saved_id)
+            return saved_id
+        saved_id = int(self.client.replace_record(int(record_id), plain))
+        self._record_saved(saved_id, plain)
+        return saved_id
+
+    def _record_created(self, record_id):
+        """Add a new record to the cached list by fetching just that record."""
+
+        if self._rows is None:
+            self._invalidate()
+            return
+        try:
+            row = dict(self.client.get_record(int(record_id)))
+            if self._update_cached_row(record_id, row=row) is None:
+                raise LookupError(record_id)
+        except Exception:  # noqa: BLE001 - any failure: reload everything next time
+            self._invalidate()
 
     @staticmethod
     def _record_change_log_items(logs):
@@ -1302,13 +1457,12 @@ class DesktopApiRecordRepository:
     def save_customer_with_change_logs(self, values, record_id, logs):
         record_id = int(record_id)
         items = self._record_change_log_items(logs)
-        saved_id = self.client.replace_record_with_history(
-            record_id,
-            self._plain_values(values),
-            items,
+        plain = self._plain_values(values)
+        saved_id = int(
+            self.client.replace_record_with_history(record_id, plain, items)
         )
-        self._invalidate()
-        return int(saved_id)
+        self._record_saved(saved_id, plain)
+        return saved_id
 
     def update_customers(self, records):
         records = list(records)
@@ -1788,20 +1942,40 @@ class DesktopApiRecordRepository:
         return int(bool(self.client.delete_text_template(template_id)))
 
     def get_watchlist_entries(self):
-        return [dict(row) for row in self.client.list_watchlist()]
+        entries = [dict(row) for row in self.client.list_watchlist()]
+        self._watchlist_cache = (self._clock(), entries)
+        return [dict(row) for row in entries]
+
+    def get_watchlist_entries_cached(self, max_age_seconds=WATCHLIST_CACHE_SECONDS):
+        """Like get_watchlist_entries(), but reuses a recent copy (saves a request)."""
+
+        cache = self._watchlist_cache
+        if cache is not None and self._clock() - cache[0] <= max_age_seconds:
+            return [dict(row) for row in cache[1]]
+        return self.get_watchlist_entries()
 
     def replace_watchlist_entries(self, entries):
+        self._watchlist_cache = None
         return int(self.client.replace_watchlist(entries))
 
-    def find_watchlist_match(self, name):
+    @staticmethod
+    def _match_watchlist(entries, name):
         target = "".join(str(name or "").split()).casefold()
         if not target:
             return None
-        for row in self.get_watchlist_entries():
+        for row in entries:
             normalized = "".join(str(row.get("name") or "").split()).casefold()
             if normalized == target:
                 return row
         return None
+
+    def find_watchlist_match(self, name):
+        return self._match_watchlist(self.get_watchlist_entries(), name)
+
+    def find_watchlist_match_cached(self, name, max_age_seconds=WATCHLIST_CACHE_SECONDS):
+        return self._match_watchlist(
+            self.get_watchlist_entries_cached(max_age_seconds), name
+        )
 
     def get_operation_logs(self, limit=300):
         return [dict(row) for row in self.client.list_operation_logs(limit)]
