@@ -339,7 +339,11 @@ class ImportControllerMixin:
             encrypted_records = [
                 encrypt_record(
                     self.fernet,
-                    {key: record.get(key) for key, _label in LAND_FIELDS},
+                    {
+                        **{key: record.get(key) for key, _label in LAND_FIELDS},
+                        "name": record.get("name") or record.get("owner_name") or "",
+                        "birth_year": record.get("birth_year"),
+                    },
                 )
                 for record in records_to_insert
             ]

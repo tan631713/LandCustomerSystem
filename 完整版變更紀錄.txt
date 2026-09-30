@@ -43,6 +43,14 @@
 4. 更新 `tests/test_ui_workflow.py` 裡原本隱性依賴「帳號欄位預設是 admin」的登入流程測試，改成明確輸入帳號；本機測試 524 個，除了 1 個跟本次改動無關、外勤模式既有的失敗外全數通過。
 5. 純桌面用戶端調整，家中伺服器與診斷檔格式不受影響，不需要升級伺服器。
 
+2026-09-28 公司筆電 v1.9.82 修正單機版匯入 Excel 清冊時 NOT NULL constraint failed: customers.name
+----------------------------------------------------------------
+1. 回報：家中伺服器資料庫重灌後，用 Excel 清冊回復地主資料，在單機版匯入時失敗，訊息是 `NOT NULL constraint failed: customers.name`。
+2. 原因：`customer_import_controller.py` 的批次新增路徑，在加密寫入前用 `LAND_FIELDS` 的欄位重建每一筆資料；`name` 欄位（`customer_repository.customer_data_columns` 刻意不放進 LAND_FIELDS）因此被丟掉，即使 Excel 解析結果（`customer_excel.py`）已經帶了 `name`，本機資料表的必填欄位 `name` 仍然沒有值。只影響單機版（本機 SQLite）的「新增」路徑；更新既有資料與連家中伺服器（走 API 批次匯入）不受影響。
+3. 修正：重建時補回 `name`（沒有時用地主姓名）與 `birth_year`。
+4. 測試：新增 `test_excel_import_keeps_the_name_column_when_inserting_new_records`（含帶 `name` 與完全沒有 `name` 兩種資料）；已確認還原這個修正後該測試會以同樣的錯誤失敗、套用後通過。
+5. 出貨紀錄：v1.9.82 當時只在本機打包交給使用者，沒有進版本序列；這個修正已包含在之後打包的 v1.9.83、v1.9.84 公司筆電客戶端中，這次補上 git 紀錄與測試。
+
 2026-09-28 家中伺服器新增圖形控制台 LandCustomerServerConsole.exe
 ----------------------------------------------------------------
 1. 使用者需求（伺服器控制台 UI 規格）：現況 cmd 介面有六個實際問題——中文在主控台變亂碼、Uvicorn 正常訊息被 PowerShell 包成紅字錯誤、診斷結果要自己開 PowerShell 讀 JSON、admin 密碼恢復要手動放 .request 檔再盲打密碼、空資料庫沒有任何方式建立第一個帳號、關閉 cmd 視窗就會停止伺服器。要求新增一個圖形控制台包在既有啟動流程外面，只負責啟動、監看與操作，不改任何伺服器邏輯、API 或資料。

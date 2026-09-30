@@ -1165,6 +1165,114 @@ class UiWorkflowTests(unittest.TestCase):
         finally:
             window.close()
 
+    def test_excel_import_keeps_the_name_column_when_inserting_new_records(self):
+        """The bulk-insert path used to rebuild every record from LAND_FIELDS only,
+        dropping `name` (kept out of LAND_FIELDS on purpose) even though the Excel
+        parser supplies it, and crashed with
+        `NOT NULL constraint failed: customers.name`. A record without a `name`
+        key at all must fall back to the owner's name."""
+        app.REPOSITORY.create_admin_user("test-password")
+        encryption_key = app.REPOSITORY.authenticate_user("admin", "test-password")
+        window = app.LandApp(encryption_key)
+        try:
+
+            class FakePreviewDialog:
+                import_mode = "import_all"
+
+                def __init__(self, records, columns, duplicates, parent):
+                    del records, columns, duplicates, parent
+
+                def exec(self):
+                    return QDialog.Accepted
+
+                finished = _AutoFinishedSignal()
+
+                def show(self):
+                    pass
+
+                def raise_(self):
+                    pass
+
+                def activateWindow(self):
+                    pass
+
+                def result(self):
+                    return QDialog.Accepted
+
+            captured = {}
+
+            class FakeImportResultDialog:
+                def __init__(self, summary_lines, detail_lines=None, error_rows=None, parent=None):
+                    captured["summary_lines"] = summary_lines
+                    del detail_lines, error_rows, parent
+
+                def exec(self):
+                    return QDialog.Accepted
+
+                finished = _AutoFinishedSignal()
+
+                def show(self):
+                    pass
+
+                def raise_(self):
+                    pass
+
+                def activateWindow(self):
+                    pass
+
+                def result(self):
+                    return QDialog.Accepted
+
+            result = {
+                "source_file_name": "地主清冊.xlsx",
+                "column_map": {
+                    1: "district",
+                    2: "section",
+                    3: "land_number",
+                    4: "owner_name",
+                },
+                "records": [
+                    {   # what the Excel parser produces: `name` is already filled in
+                        "district": "桃園區",
+                        "section": "一段",
+                        "subsection": "",
+                        "land_number": "100",
+                        "owner_name": "王小明",
+                        "name": "王小明",
+                    },
+                    {   # no `name` key at all
+                        "district": "桃園區",
+                        "section": "一段",
+                        "subsection": "",
+                        "land_number": "101",
+                        "owner_name": "李小華",
+                    },
+                ],
+                "error_rows": [],
+            }
+            with (
+                patch.object(import_controller, "ImportPreviewDialog", FakePreviewDialog),
+                patch.object(import_controller, "ImportResultDialog", FakeImportResultDialog),
+                patch.object(app.QMessageBox, "critical", return_value=QMessageBox.Ok) as critical,
+            ):
+                window.handle_excel_import_ready(result)
+
+            critical.assert_not_called()
+            self.assertIn("成功新增：2", captured["summary_lines"])
+            with app.connect() as conn:
+                rows = conn.execute(
+                    "SELECT name, owner_name FROM customers ORDER BY id"
+                ).fetchall()
+            self.assertEqual(
+                [
+                    (decrypt_value(window.fernet, row["name"]), decrypt_value(window.fernet, row["owner_name"]))
+                    for row in rows
+                ],
+                [("王小明", "王小明"), ("李小華", "李小華")],
+            )
+        finally:
+            window.close()
+
     def test_postgresql_preview_excel_import_uses_api_batch_without_sqlite_backup(self):
         app.REPOSITORY.create_admin_user("test-password")
         encryption_key = app.REPOSITORY.authenticate_user("admin", "test-password")
