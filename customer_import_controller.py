@@ -148,6 +148,7 @@ class ImportControllerMixin:
         detail_lines,
         error_rows,
         updated_count=0,
+        plan_summary=None,
     ):
         summary_lines = [
             f"總讀取筆數：{total_count}",
@@ -158,7 +159,12 @@ class ImportControllerMixin:
             f"錯誤列數：{error_count}",
             f"對應欄位：{imported_labels}",
         ]
-        dialog = ImportResultDialog(summary_lines, detail_lines, error_rows, self)
+        if plan_summary:
+            dialog = ImportResultDialog(
+                summary_lines, detail_lines, error_rows, self, plan_summary=plan_summary
+            )
+        else:
+            dialog = ImportResultDialog(summary_lines, detail_lines, error_rows, self)
         self._show_non_modal_dialog(dialog)
 
     def start_excel_worker(self, worker, finished_handler, status_message):
@@ -224,9 +230,19 @@ class ImportControllerMixin:
             original_records = [dict(record) for record in records]
             duplicate_indexes, watchlist_indexes = self.annotate_import_duplicates(records)
             preview_columns = self.build_import_preview_columns(column_map)
-            preview_dialog = ImportPreviewDialog(
-                records, preview_columns, duplicate_indexes, self
-            )
+            if self.urban_plans_available():
+                preview_dialog = ImportPreviewDialog(
+                    records,
+                    preview_columns,
+                    duplicate_indexes,
+                    self,
+                    plans=self.urban_plans,
+                    default_plan_id=self.urban_plan_input_id,
+                )
+            else:
+                preview_dialog = ImportPreviewDialog(
+                    records, preview_columns, duplicate_indexes, self
+                )
 
             def proceed():
                 self._continue_excel_import(
@@ -361,14 +377,21 @@ class ImportControllerMixin:
                                 "匯入更新",
                             )
                         )
+            plan_summary = None
             if is_api_import:
+                plan_id = int(getattr(preview_dialog, "plan_id", lambda: 0)() or 0)
+                # Only passed when a plan was chosen: against a server (or a
+                # test double) without plans the call stays exactly as before.
+                plan_kwargs = {"urban_plan_id": plan_id} if plan_id else {}
                 import_result = repository.import_records(
                     encrypted_records,
                     update_records,
                     result.get("source_file_name") or "import.xlsx",
+                    **plan_kwargs,
                 )
                 imported_count = int(import_result.get("inserted_count") or 0)
                 updated_count = int(import_result.get("updated_count") or 0)
+                plan_summary = import_result.get("urban_plan")
             else:
                 imported_count = self.insert_imported_records(encrypted_records)
                 if update_records:
@@ -398,6 +421,7 @@ class ImportControllerMixin:
                 detail_lines,
                 error_rows,
                 updated_count,
+                plan_summary=plan_summary,
             )
         except Exception as exc:
             QMessageBox.critical(self, "匯入失敗", f"處理匯入結果時發生錯誤：{exc}")
@@ -541,7 +565,23 @@ class ImportControllerMixin:
             if not is_api_import:
                 self.create_safety_backup("batch-add")
             encrypted_records = [encrypt_record(self.fernet, record) for record in filtered_records]
-            inserted_count = repository.insert_customers(encrypted_records)
+            plan_note = ""
+            plan_id = int(base_data.get("urban_plan_id") or 0) if is_api_import else 0
+            if plan_id:
+                # Same rule as an Excel import: a parcel that already belongs to
+                # another plan keeps it, and the user is told.
+                batch_result = repository.import_records(
+                    encrypted_records,
+                    source_file_name="desktop-batch.xlsx",
+                    urban_plan_id=plan_id,
+                )
+                inserted_count = int(batch_result.get("inserted_count") or 0)
+                kept = batch_result.get("urban_plan") or {}
+                if kept.get("kept_land_count"):
+                    holder = (kept.get("kept_lands") or [{}])[0].get("urban_plan_name") or "其他都市計畫"
+                    plan_note = f"\n這塊土地原本已屬於「{holder}」，沒有變更歸屬。"
+            else:
+                inserted_count = repository.insert_customers(encrypted_records)
             if not is_api_import:
                 repository.record_insert_undo(
                     "同地號批量新增",
@@ -565,7 +605,7 @@ class ImportControllerMixin:
             QMessageBox.information(
                 self,
                 "批量新增完成",
-                f"已新增 {inserted_count} 筆資料；略過重複 {skipped_count} 筆。",
+                f"已新增 {inserted_count} 筆資料；略過重複 {skipped_count} 筆。{plan_note}",
             )
 
         self._show_non_modal_dialog(preview, on_accepted=on_preview_accepted)

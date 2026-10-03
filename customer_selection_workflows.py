@@ -22,6 +22,11 @@ class SelectionWorkflowMixin:
         return sorted(ids)
 
     def selected_table_record_ids(self):
+        if self.plan_view_active():
+            record_ids = set(self.urban_plan_view.selected_record_ids())
+            if not record_ids and self.selected_record_id is not None:
+                record_ids.add(self.selected_record_id)
+            return sorted(record_ids)
         if self.table_view is None or self.table_view.selectionModel() is None:
             return []
         record_ids = set()
@@ -63,6 +68,7 @@ class SelectionWorkflowMixin:
             self.table_model.update_checked_state(record_id, record_id in self.checked_record_ids)
         if changed:
             self.schedule_selection_state_save()
+        self.urban_plan_checks_changed()
         if self.show_checked_only:
             QTimer.singleShot(0, self.refresh_records)
         self.update_selection_status(f"{action_label}：{changed} 筆，已勾選 {len(self.checked_record_ids)} 筆")
@@ -103,6 +109,7 @@ class SelectionWorkflowMixin:
             self.table_model.update_checked_state(record_id, record_id in self.checked_record_ids)
         if changed:
             self.schedule_selection_state_save()
+        self.urban_plan_checks_changed()
         if self.show_checked_only:
             QTimer.singleShot(0, self.refresh_records)
         self.update_selection_status(f"已反轉目前搜尋結果 {changed} 筆，已勾選 {len(self.checked_record_ids)} 筆")
@@ -117,6 +124,7 @@ class SelectionWorkflowMixin:
         for record_id in ids:
             self.table_model.update_checked_state(record_id, False)
         self.schedule_selection_state_save()
+        self.urban_plan_checks_changed()
         if self.show_checked_only:
             QTimer.singleShot(0, self.refresh_records)
         self.update_selection_status(f"已取消全部勾選：{count} 筆")
@@ -129,17 +137,24 @@ class SelectionWorkflowMixin:
             return
         selected_land_ids = set()
         selected_ownership_ids = set()
-        for proxy_index in self.table_view.selectionModel().selectedIndexes():
-            if not proxy_index.isValid() or proxy_index.column() != 0:
-                continue
-            source_index = self.source_table_index(proxy_index)
-            node = self.table_model.node_for_index(source_index)
-            if node is None:
-                continue
-            if node.kind == "land":
-                selected_land_ids.add(node.group.state_id)
-            else:
-                selected_ownership_ids.add(int(node.record["id"]))
+        if self.plan_view_active():
+            for node in self.urban_plan_view.selected_nodes():
+                if node.kind == "land":
+                    selected_land_ids.add(node.key)
+                elif node.kind == "owner":
+                    selected_ownership_ids.add(int(node.record["id"]))
+        else:
+            for proxy_index in self.table_view.selectionModel().selectedIndexes():
+                if not proxy_index.isValid() or proxy_index.column() != 0:
+                    continue
+                source_index = self.source_table_index(proxy_index)
+                node = self.table_model.node_for_index(source_index)
+                if node is None:
+                    continue
+                if node.kind == "land":
+                    selected_land_ids.add(node.group.state_id)
+                else:
+                    selected_ownership_ids.add(int(node.record["id"]))
         checked_count = len(self.checked_record_ids)
         if selected_land_ids or selected_ownership_ids or checked_count:
             self.statusBar().showMessage(
@@ -176,6 +191,7 @@ class SelectionWorkflowMixin:
     def on_checked_state_changed(self, record_id, checked):
         self.set_checked_record_id(record_id, checked)
         self.schedule_selection_state_save()
+        self.urban_plan_checks_changed()
         self.update_selection_status()
         # A native checkbox click must remain an in-place model update.  A
         # whole-query refresh here destroys the mouse interaction lifecycle

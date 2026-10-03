@@ -283,10 +283,14 @@ class RecordWrite(BaseModel):
     note: str | None = Field(default=None, max_length=5000)
     visit_log: str | None = Field(default=None, max_length=10000)
     birth_year: str | None = Field(default=None, max_length=4)
+    # None keeps the land's urban plan, 0 clears it, an id moves the land there.
+    urban_plan_id: int | None = Field(default=None, ge=0)
 
     @field_validator("*", mode="before")
     @classmethod
     def normalize_text_values(cls, value, info: ValidationInfo):
+        if info.field_name == "urban_plan_id":
+            return None if value in (None, "") else value
         if value is None:
             if info.field_name == "owner_name":
                 return ""
@@ -360,6 +364,23 @@ class RecordImportBatch(BaseModel):
 
     source_file_name: str = Field(default="import.xlsx", min_length=1, max_length=260)
     items: list[ImportRecordItem] = Field(min_length=1, max_length=5000)
+    urban_plan_id: int | None = Field(default=None, ge=1)
+
+
+class UrbanPlanWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=100)
+
+
+class UrbanPlanAssignment(BaseModel):
+    """Put lands into a plan (urban_plan_id null/0 releases them to 未分類)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    land_ids: list[int] = Field(min_length=1, max_length=5000)
+    urban_plan_id: int | None = Field(default=None, ge=0)
+    only_unassigned: bool = True
 
 
 class RecordChangeLogItem(BaseModel):

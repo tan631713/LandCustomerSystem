@@ -117,6 +117,7 @@ class SettingsWorkflowMixin:
         point_size = self._app_component("get_font_size_option")(self.current_font_size_key)[2]
         row_height = max(28, point_size + 18)
         self.table_view.verticalHeader().setDefaultSectionSize(row_height)
+        self.update_urban_plan_view_metrics(row_height)
 
     def change_font_size(self):
         dialog = self._app_component("FontSizeDialog")(self.current_font_size_key, self)

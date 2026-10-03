@@ -117,8 +117,11 @@ def register_record_routes(app, *, settings, source, current_session, editor_use
             }
             for item in payload.items
         ]
+        options = (
+            {} if payload.urban_plan_id is None else {"urban_plan_id": payload.urban_plan_id}
+        )
         try:
-            return source.import_records(user, items, payload.source_file_name)
+            return source.import_records(user, items, payload.source_file_name, **options)
         except KeyError as exc:
             raise HTTPException(
                 status_code=404, detail="匯入要更新的資料不存在。"

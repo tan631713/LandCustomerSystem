@@ -12,6 +12,10 @@ from customer_api.postgres_schema import (
     IDENTITY_PRIMARY_KEY_CONSTRAINTS,
     repair_postgres_identity_sequences,
 )
+from customer_api.postgres_urban_plans import (
+    apply_record_urban_plan,
+    assign_imported_lands,
+)
 from customer_postgres_keys import land_key_for, owner_key_for
 from customer_security import decrypt_value, make_fernet
 
@@ -242,6 +246,7 @@ class PostgreSQLRecordMixin:
         owner_id, land_id, encrypted = self._save_owner_and_land(
             conn, user, values
         )
+        apply_record_urban_plan(conn, land_id, values.get("urban_plan_id"))
         if record_id is None:
             row = conn.execute(
                 """
@@ -335,8 +340,11 @@ class PostgreSQLRecordMixin:
 
         return self._record_write_with_identity_repair(save_with_history)
 
-    def import_records(self, user, items, source_file_name="import.xlsx"):
+    def import_records(
+        self, user, items, source_file_name="import.xlsx", urban_plan_id=None
+    ):
         items = [dict(item) for item in items]
+        urban_plan_summary = None
         safe_name = Path(str(source_file_name or "import.xlsx")).name or "import.xlsx"
         inserted_ids = []
         updated_ids = []
@@ -441,13 +449,20 @@ class PostgreSQLRecordMixin:
                     ),
                 ),
             )
-        return {
+            if urban_plan_id is not None:
+                urban_plan_summary = assign_imported_lands(
+                    conn, user, inserted_ids + updated_ids, urban_plan_id
+                )
+        result = {
             "batch_id": batch_id,
             "inserted_count": len(inserted_ids),
             "updated_count": len(updated_ids),
             "inserted_ids": inserted_ids,
             "updated_ids": updated_ids,
         }
+        if urban_plan_summary is not None:
+            result["urban_plan"] = urban_plan_summary
+        return result
 
     def delete_record(self, user, record_id):
         record_id = int(record_id)

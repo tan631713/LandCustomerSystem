@@ -397,6 +397,7 @@ class SearchControllerMixin:
             with self._programmatic_land_expansion(restoring=True):
                 self.table_model.set_rows(rows)
         self.apply_table_preferences()
+        self.refresh_urban_plan_view(rows)
         self.update_land_page_status()
         selection_restored = self.restore_land_tree_view_state(
             tree_state,

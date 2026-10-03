@@ -464,6 +464,8 @@ class RecordWorkflowMixin:
             self.detail_tabs.setCurrentIndex(0)
 
     def selected_land_group(self):
+        if self.plan_view_active():
+            return self.plan_selected_land_group()
         if self.table_view is None or self.table_view.currentIndex().isValid() is False:
             return None
         source = self.source_table_index(self.table_view.currentIndex())
@@ -557,6 +559,9 @@ class RecordWorkflowMixin:
                 self.table_view.setExpanded(proxy, should_expand)
 
     def expand_all_land_groups(self):
+        if self.plan_view_active():
+            self.urban_plan_view.expand_everything()
+            return
         self.user_expanded_land_ids.update(
             land_id
             for group in self.table_model.groups
@@ -572,6 +577,9 @@ class RecordWorkflowMixin:
                     )
 
     def collapse_all_land_groups(self):
+        if self.plan_view_active():
+            self.urban_plan_view.collapse_everything()
+            return
         self.user_expanded_land_ids.clear()
         self.search_expanded_land_ids.clear()
         self._land_search_auto_expand = False
@@ -585,6 +593,10 @@ class RecordWorkflowMixin:
     def update_land_page_status(self):
         model = self.table_model
         if self.land_count_label is None:
+            return
+        if self.plan_view_active():
+            # The 都市計畫 view is not paged: its footer is its own summary.
+            self.update_urban_plan_summary()
             return
         self.land_count_label.setText(
             f"土地 {model.total_count} 筆｜地主／所有權資料 "
@@ -661,6 +673,9 @@ class RecordWorkflowMixin:
         self.update_total_declared_value()
         self.update_age_field()
         self.update_management_summary(row)
+        self.load_urban_plan_into_form(row)
+        if self.plan_view_active():
+            self.urban_plan_view.select_record(record_id)
         if getattr(self, "owner_contacts_widget", None) is not None:
             owner_name = (
                 decrypt_value(self.fernet, row["owner_name"])
@@ -707,6 +722,8 @@ class RecordWorkflowMixin:
         self.apply_external_id_visibility()
         self.apply_owner_name_visibility()
         self.update_management_summary()
+        # A new record starts in whatever plan 輸入到 says.
+        self.set_urban_plan_form_value(self.urban_plan_input_id)
         if getattr(self, "owner_contacts_widget", None) is not None:
             self.owner_contacts_widget.clear_owner()
 
@@ -738,6 +755,10 @@ class RecordWorkflowMixin:
             self.current_owner_name_plain = data.get("owner_name") or ""
         data["ping"] = format_ping_text(data.get("ping") or "")
         data["name"] = data.get("owner_name") or ""
+        if self.urban_plans_available():
+            # 0 = 未分類. The repository only sends it when it would change
+            # something (see DesktopApiRecordRepository._record_save_values).
+            data["urban_plan_id"] = self.urban_plan_form_value()
         return data
 
     def get_plain_record_data(self, row):

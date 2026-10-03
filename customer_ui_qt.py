@@ -133,6 +133,7 @@ from customer_productivity import (
 from customer_preferences import decode_table_preferences, encode_table_preferences, sanitize_saved_searches
 from customer_search_controller import SearchControllerMixin, configure_search_controller
 from customer_selection_workflows import SelectionWorkflowMixin
+from customer_urban_plan_workflows import UrbanPlanWorkflowMixin
 from customer_search_presets import SearchPresetMixin, configure_search_presets
 from customer_table_ui import build_customer_table_ui
 from customer_ui_state import UiStateMixin, configure_ui_state
@@ -1041,6 +1042,7 @@ def configure_api_authentication(api_client):
 
 
 class LandApp(
+    UrbanPlanWorkflowMixin,
     DesktopSupportMixin,
     DesktopStateMixin,
     DesktopWindowMixin,
@@ -1188,7 +1190,9 @@ class LandApp(
         )
         self.gc_collect_timer.start()
 
+        self.init_urban_plan_state()
         self.create_layout()
+        self.init_urban_plans()
         self.apply_owner_contacts_tab_visibility()
         self.apply_external_id_button_availability()
         if self.api_mode:

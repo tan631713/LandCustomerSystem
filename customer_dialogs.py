@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 from customer_responsive_dialog import ResponsiveDialog as QDialog
 
 from customer_domain import parse_shared_land_rows
+from customer_urban_plan_dialogs import ImportPlanChoice, ImportPlanResultSection
 from customer_quality import (
     QUALITY_RULE_OPTIONS,
     QUALITY_RULE_PRESETS,
@@ -1697,12 +1698,24 @@ class AdvancedSearchDialog(QDialog):
 
 
 class ImportPreviewDialog(QDialog):
-    def __init__(self, records, column_map, duplicate_indexes, parent=None):
+    def __init__(
+        self,
+        records,
+        column_map,
+        duplicate_indexes,
+        parent=None,
+        *,
+        plans=None,
+        default_plan_id=0,
+    ):
         super().__init__(parent)
         self.records = records
         self.column_map = column_map
         self.duplicate_indexes = set(duplicate_indexes)
         self.import_mode = "all"
+        # `plans` is None unless the home server has 都市計畫; then the user
+        # says which plan this batch belongs to.
+        self.plan_choice = None
 
         self.setWindowTitle("匯入預覽")
         self.setModal(True)
@@ -1722,6 +1735,9 @@ class ImportPreviewDialog(QDialog):
         else:
             summary_lines.append("未偵測到重複資料")
         layout.addWidget(QLabel("\n".join(summary_lines)))
+        if plans is not None:
+            self.plan_choice = ImportPlanChoice(plans, default_plan_id, self)
+            layout.addWidget(self.plan_choice)
 
         self.table = QTableWidget(0, len(self.column_map) + 1)
         headers = ["狀態", *[label for _key, label in self.column_map]]
@@ -1777,6 +1793,11 @@ class ImportPreviewDialog(QDialog):
                     item.setForeground(ROW_TEXT_COLOR)
                 self.table.setItem(row_index, column_offset, item)
 
+    def plan_id(self):
+        """The chosen 都市計畫 id, 0 for none (or when plans are not offered)."""
+
+        return 0 if self.plan_choice is None else self.plan_choice.plan_id()
+
     def import_all(self):
         self.import_mode = "all"
         self.accept()
@@ -1791,12 +1812,21 @@ class ImportPreviewDialog(QDialog):
 
 
 class ImportResultDialog(QDialog):
-    def __init__(self, summary_lines, detail_lines=None, error_rows=None, parent=None):
+    def __init__(
+        self,
+        summary_lines,
+        detail_lines=None,
+        error_rows=None,
+        parent=None,
+        *,
+        plan_summary=None,
+    ):
         super().__init__(parent)
         self.setWindowTitle("匯入結果報表")
         self.setModal(True)
         self.resize(520, 460)
         self.error_rows = error_rows or []
+        self.plan_section = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 18, 18, 18)
@@ -1805,6 +1835,10 @@ class ImportResultDialog(QDialog):
         summary = QLabel("\n".join(summary_lines))
         summary.setTextInteractionFlags(Qt.TextSelectableByMouse)
         layout.addWidget(summary)
+        if plan_summary:
+            self.plan_section = ImportPlanResultSection(plan_summary, self)
+            layout.addWidget(self.plan_section)
+            self.resize(640, 640)
 
         details = QPlainTextEdit()
         details.setReadOnly(True)

@@ -11,6 +11,7 @@ from customer_api.postgres_records import PostgreSQLRecordMixin
 from customer_api.postgres_remote_operations import PostgreSQLRemoteOperationMixin
 from customer_api.postgres_schema import ensure_postgres_schema
 from customer_api.postgres_tags import PostgreSQLTagMixin
+from customer_api.postgres_urban_plans import PostgreSQLUrbanPlanMixin
 from customer_api.types import AuthenticatedUser
 from customer_security import derive_encryption_key, make_fernet, verify_password
 
@@ -20,6 +21,7 @@ class PostgreSQLCustomerDataSource(
     PostgreSQLCollaborationMixin,
     PostgreSQLProjectMixin,
     PostgreSQLTagMixin,
+    PostgreSQLUrbanPlanMixin,
     PostgreSQLAttachmentMixin,
     PostgreSQLDesktopFeatureMixin,
     PostgreSQLFieldVisitMixin,
@@ -35,6 +37,7 @@ class PostgreSQLCustomerDataSource(
                land.id AS land_id,
                owner.id AS owner_id,
                land.district, land.section, land.subsection,
+               land.urban_plan_id, urban_plan.name AS urban_plan_name,
                ownership.registration_order,
                land.land_number, land.area, land.declared_value,
                ownership.numerator, ownership.denominator, ownership.ping,
@@ -119,6 +122,7 @@ class PostgreSQLCustomerDataSource(
         FROM ownerships ownership
         JOIN owners owner ON owner.id = ownership.owner_id
         JOIN lands land ON land.id = ownership.land_id
+        LEFT JOIN urban_plans urban_plan ON urban_plan.id = land.urban_plan_id
         LEFT JOIN follow_up_reminders reminder ON reminder.ownership_id = ownership.id
     """
 

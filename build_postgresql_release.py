@@ -45,6 +45,7 @@ DOCUMENTS = (
     "postgres/migrations/009_owner_contacts_rollback.sql",
     "postgres/migrations/010_owner_contacts_enhancement_rollback.sql",
     "postgres/migrations/011_owner_contact_identity_rollback.sql",
+    "postgres/migrations/014_urban_plans_rollback.sql",
 )
 
 
@@ -260,7 +261,7 @@ def package_release() -> tuple[Path, Path]:
             "packaged_at": datetime.now().astimezone().isoformat(),
             "channel": "formal",
             "official_data_source": "postgresql",
-            "postgresql_schema_version": 13,
+            "postgresql_schema_version": 14,
             "mobile_asset_version": MOBILE_ASSET_VERSION,
             "field_visit_phase_one": True,
             "owner_contacts_phase_one": True,

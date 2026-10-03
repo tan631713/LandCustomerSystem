@@ -244,6 +244,10 @@ class CustomerRecordProcessor:
             "last_contact": self.row_value(row, "last_contact") or "",
             "next_follow_up": next_follow_up,
             "follow_up_status": follow_up_status,
+            # 都市計畫 is a land attribute; rows from a home server without
+            # plans (or the local database) simply have neither key.
+            "urban_plan_id": self.row_value(row, "urban_plan_id", None) or None,
+            "urban_plan_name": self.row_value(row, "urban_plan_name") or "",
         }
         custom_values = self.custom_value_map(raw["custom_values"])
         raw["full_land_number"] = " ".join(

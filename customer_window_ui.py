@@ -33,6 +33,7 @@ LAND_SECTION_HEADERS = {
 }
 FORM_COLUMN_COUNT = 6
 LAND_FORM_ROWS = (
+    (("urban_plan", 0, 6),),
     (("district", 0, 3), ("section", 3, 3)),
     (("subsection", 0, 3), ("land_number", 3, 3)),
     (
@@ -55,7 +56,14 @@ OWNER_FORM_ROWS = (
 # this one form, not in Excel export/import, report templates, the table
 # column picker, or migration tooling.  This label map exists purely so
 # build_field_container() can find a label for them.
-EXTRA_OWNER_FORM_FIELD_LABELS = {"birth_year": "出生西元年", "age": "年齡"}
+EXTRA_OWNER_FORM_FIELD_LABELS = {
+    "birth_year": "出生西元年",
+    "age": "年齡",
+    # 都市計畫 is a land attribute chosen from the server's plan list (a combo
+    # box, never part of self.fields); the container hides itself when the
+    # server has no plans -- see UrbanPlanWorkflowMixin.
+    "urban_plan": "都市計畫",
+}
 
 
 class DesktopWindowMixin:
@@ -383,7 +391,14 @@ class DesktopWindowMixin:
                     self.auto_calculation_badge = auto_badge
             cell_layout.addLayout(label_row)
 
-            if key == "note":
+            if key == "urban_plan":
+                widget = QComboBox()
+                widget.setObjectName("urbanPlanFormCombo")
+                widget.setMinimumWidth(0)
+                widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                widget.setToolTip("這塊土地屬於哪個都市計畫；同一塊土地的所有地主資料會一起更動。")
+                self.urban_plan_form_combo = widget
+            elif key == "note":
                 widget = QPlainTextEdit()
                 widget.setPlaceholderText("尚未填寫")
                 widget.setMinimumWidth(0)

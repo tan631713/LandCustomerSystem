@@ -186,9 +186,14 @@ class UiWorkflowTests(unittest.TestCase):
                 # birth_year/age deliberately sit outside LAND_FIELDS (see
                 # customer_window_ui.py's EXTRA_OWNER_FORM_FIELD_LABELS
                 # comment) but still get their own form_field_containers
-                # entries so build_field_container() can render them.
-                {key for key, _label in app.LAND_FIELDS} | {"birth_year", "age"},
+                # entries so build_field_container() can render them. So does
+                # urban_plan (都市計畫), a combo box that only shows with a
+                # home server that has plans.
+                {key for key, _label in app.LAND_FIELDS} | {"birth_year", "age", "urban_plan"},
             )
+            self.assertFalse(window.form_field_containers["urban_plan"].isVisibleTo(window))
+            self.assertEqual(positions["urban_plan"][1:], (0, 1, 6))
+            self.assertLess(positions["urban_plan"][0], positions["district"][0])
             self.assertEqual(positions["district"][0], positions["section"][0])
             self.assertEqual(positions["district"][1:], (0, 1, 3))
             self.assertEqual(positions["section"][1:], (3, 1, 3))
@@ -237,6 +242,8 @@ class UiWorkflowTests(unittest.TestCase):
                 0,
             )
             for key, container in window.form_field_containers.items():
+                if key == "urban_plan":
+                    continue  # hidden unless the home server has plans
                 # "age" is a read-only live display of birth_year, not a
                 # real input -- it lives in age_display_widget, not
                 # self.fields (see customer_window_ui.py's

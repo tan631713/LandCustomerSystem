@@ -239,14 +239,11 @@ def _build_record_table(self, parent_layout, TABLE_COLUMNS, TABLE_WIDTHS):
     self.table_view.expanded.connect(self.on_land_group_expanded)
     self.table_view.collapsed.connect(self.on_land_group_collapsed)
 
-    parent_layout.addWidget(self.table_view)
+    # Row 2 (檢視 / 輸入到 / 全部展開 / 全部收合) sits above the list; the list
+    # itself is a stack of the land tree and the 都市計畫 tree.
+    self.build_urban_plan_row(parent_layout)
+    self.build_urban_plan_stack(parent_layout)
     paging = QHBoxLayout()
-    self.expand_all_button = QPushButton("全部展開")
-    self.expand_all_button.clicked.connect(self.expand_all_land_groups)
-    paging.addWidget(self.expand_all_button)
-    self.collapse_all_button = QPushButton("全部收合")
-    self.collapse_all_button.clicked.connect(self.collapse_all_land_groups)
-    paging.addWidget(self.collapse_all_button)
     paging.addStretch(1)
     self.land_count_label = QLabel("土地 0 筆｜地主／所有權資料 0 筆")
     paging.addWidget(self.land_count_label)
@@ -260,6 +257,22 @@ def _build_record_table(self, parent_layout, TABLE_COLUMNS, TABLE_WIDTHS):
     paging.addWidget(self.next_land_page_button)
     parent_layout.addLayout(paging)
 
+
+
+def _limit_to_server(self, action):
+    """都市計畫 lives on the home server: the standalone database has none."""
+
+    api_mode = bool(getattr(self, "api_mode", False))
+    action.setEnabled(api_mode)
+    if not api_mode:
+        action.setStatusTip("都市計畫需要連線到家中伺服器")
+    return action
+
+
+def _urban_plan_action(self, text):
+    action = QAction(text, self)
+    action.triggered.connect(self.set_urban_plan_for_selection)
+    return _limit_to_server(self, action)
 
 
 def _build_record_menu(self):
@@ -297,6 +310,8 @@ def _build_record_menu(self):
     context_batch_tags_action = QAction("批量設定標籤", self)
     context_batch_tags_action.triggered.connect(self.batch_edit_customer_tags)
     self.record_menu.addAction(context_batch_tags_action)
+    context_urban_plan_action = _urban_plan_action(self, "設定都市計畫…")
+    self.record_menu.addAction(context_urban_plan_action)
     context_contact_action = QAction("聯絡紀錄", self)
     context_contact_action.triggered.connect(self.manage_contact_logs)
     self.record_menu.addAction(context_contact_action)
@@ -329,6 +344,8 @@ def _build_record_menu(self):
     uncheck_land_action = QAction("取消勾選此土地全部地主／持分", self)
     uncheck_land_action.triggered.connect(self.uncheck_selected_rows)
     self.land_menu.addAction(uncheck_land_action)
+    self.land_menu.addSeparator()
+    self.land_menu.addAction(_urban_plan_action(self, "設定都市計畫…"))
 
     self.api_preview_context_actions = (
         context_case_manage_action,
@@ -493,6 +510,8 @@ def _build_batch_menu(self):
     batch_tags_action = QAction("批量設定標籤", self)
     batch_tags_action.triggered.connect(self.batch_edit_customer_tags)
     batch_menu.addAction(batch_tags_action)
+    batch_urban_plan_action = _urban_plan_action(self, "批量設定都市計畫")
+    batch_menu.addAction(batch_urban_plan_action)
     batch_custom_values_action = QAction("批量設定自訂欄位", self)
     batch_custom_values_action.triggered.connect(self.batch_edit_custom_values)
     batch_menu.addAction(batch_custom_values_action)
@@ -510,6 +529,10 @@ def _build_management_menu(self):
     tag_manage_action = QAction("標籤管理", self)
     tag_manage_action.triggered.connect(self.manage_tags)
     management_menu.addAction(tag_manage_action)
+    urban_plan_manage_action = QAction("都市計畫管理", self)
+    urban_plan_manage_action.triggered.connect(self.manage_urban_plans)
+    _limit_to_server(self, urban_plan_manage_action)
+    management_menu.addAction(urban_plan_manage_action)
     custom_field_manage_action = QAction("自訂欄位管理", self)
     custom_field_manage_action.triggered.connect(self.manage_custom_fields)
     management_menu.addAction(custom_field_manage_action)

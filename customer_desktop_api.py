@@ -43,6 +43,7 @@ WATCHLIST_CACHE_SECONDS = 120
 # them for every ownership of that land, so cached siblings must follow.
 LAND_LEVEL_FIELDS = (
     "district", "section", "subsection", "land_number", "area", "declared_value",
+    "urban_plan_id", "urban_plan_name",
 )
 # Columns that never make a cached row "different" for the UI.
 _ROW_VOLATILE_KEYS = frozenset({"updated_at", "created_at"})
@@ -462,15 +463,16 @@ class DesktopApiClient:
         )
         return dict(result or {})
 
-    def import_records(self, items, source_file_name="import.xlsx"):
-        return self._request(
-            "POST",
-            "/api/v1/imports/records",
-            payload={
-                "source_file_name": str(source_file_name or "import.xlsx"),
-                "items": list(items),
-            },
-        )
+    def import_records(self, items, source_file_name="import.xlsx", urban_plan_id=None):
+        payload = {
+            "source_file_name": str(source_file_name or "import.xlsx"),
+            "items": list(items),
+        }
+        if urban_plan_id:
+            # Only sent when a plan was chosen, so importing keeps working
+            # against a home server that has not been upgraded for plans yet.
+            payload["urban_plan_id"] = int(urban_plan_id)
+        return self._request("POST", "/api/v1/imports/records", payload=payload)
 
     def list_contact_logs(self, record_id):
         result = self._request(
@@ -749,6 +751,39 @@ class DesktopApiClient:
     def delete_tag(self, tag_id):
         self._request("DELETE", f"/api/v1/tags/{int(tag_id)}")
         return True
+
+    def list_urban_plans(self):
+        result = self._request("GET", "/api/v1/urban-plans")
+        return {
+            "items": [dict(item) for item in result.get("items") or []],
+            "unassigned": dict(result.get("unassigned") or {}),
+        }
+
+    def save_urban_plan(self, name, plan_id=None):
+        payload = {"name": str(name or "").strip()}
+        if plan_id is None:
+            result = self._request("POST", "/api/v1/urban-plans", payload=payload)
+        else:
+            result = self._request(
+                "PUT", f"/api/v1/urban-plans/{int(plan_id)}", payload=payload
+            )
+        return int(result["id"])
+
+    def delete_urban_plan(self, plan_id):
+        result = self._request("DELETE", f"/api/v1/urban-plans/{int(plan_id)}")
+        return dict(result or {})
+
+    def set_lands_urban_plan(self, land_ids, plan_id, only_unassigned=True):
+        result = self._request(
+            "PUT",
+            "/api/v1/urban-plans/assignments",
+            payload={
+                "land_ids": sorted({int(land_id) for land_id in land_ids}),
+                "urban_plan_id": int(plan_id) if plan_id else None,
+                "only_unassigned": bool(only_unassigned),
+            },
+        )
+        return dict(result or {})
 
     def get_record_tag_ids(self, record_id):
         result = self._request("GET", f"/api/v1/records/{int(record_id)}/tags")
@@ -1247,6 +1282,7 @@ class DesktopApiRecordRepository:
         self._contact_log_record_ids = {}
         self._attachment_record_ids = {}
         self._attachments_by_id = {}
+        self._urban_plans = None
 
     def _invalidate(self):
         self._rows = None
@@ -1291,6 +1327,13 @@ class DesktopApiRecordRepository:
                     elif key in OPTIONAL_NEW_RECORD_FIELDS:
                         new[key] = None  # a blank optional field is cleared on the server
                 new["name"] = new.get("owner_name")
+                if "urban_plan_id" in values:
+                    plan_id = int(values["urban_plan_id"] or 0)
+                    plan_name = self._cached_urban_plan_names().get(plan_id)
+                    if plan_id and plan_name is None:
+                        return None  # a plan this client never listed: reload instead
+                    new["urban_plan_id"] = plan_id or None
+                    new["urban_plan_name"] = plan_name
             else:
                 return None
             rows = list(rows)
@@ -1413,8 +1456,64 @@ class DesktopApiRecordRepository:
             )
         return plain
 
-    def save_customer(self, values, record_id=None):
+    def _cached_urban_plan_names(self):
+        """Plan id -> name from the last listing; never goes to the network."""
+
+        plans = self._urban_plans or {}
+        return {
+            int(item["plan_id"]): str(item["name"])
+            for item in plans.get("items") or []
+        }
+
+    def _record_save_values(self, values, record_id=None):
+        """Plain fields of one form save, plus the plan only when it matters.
+
+        The plan is a land attribute the form can change (0 = 未分類). It is
+        sent only when it would actually change something, so saving keeps
+        working against a home server that has no plans yet, and a new owner
+        typed onto a parcel that is already classified never moves that parcel.
+        """
+
+        values = dict(values)
         plain = self._plain_values(values)
+        try:
+            wanted = values.get("urban_plan_id")
+            wanted = None if wanted in (None, "") else max(0, int(wanted))
+        except (TypeError, ValueError):
+            wanted = None
+        if wanted is None:
+            return plain
+        with self._rows_lock:
+            rows = self._rows
+        if record_id is None:
+            if wanted == 0:
+                return plain
+            identity = _land_identity(plain)
+            if rows is None:
+                rows = self._all_rows()
+            if any(
+                row.get("urban_plan_id") and _land_identity(row) == identity
+                for row in rows
+            ):
+                return plain
+            plain["urban_plan_id"] = wanted
+            return plain
+        current = None
+        if rows is not None:
+            row = next(
+                (item for item in rows if int(item["id"]) == int(record_id)), None
+            )
+            if row is not None:
+                current = int(row.get("urban_plan_id") or 0)
+        if current is None:
+            if wanted:
+                plain["urban_plan_id"] = wanted
+        elif wanted != current:
+            plain["urban_plan_id"] = wanted
+        return plain
+
+    def save_customer(self, values, record_id=None):
+        plain = self._record_save_values(values, record_id)
         if record_id is None:
             saved_id = int(self.client.create_record(plain))
             self._record_created(saved_id)
@@ -1457,7 +1556,7 @@ class DesktopApiRecordRepository:
     def save_customer_with_change_logs(self, values, record_id, logs):
         record_id = int(record_id)
         items = self._record_change_log_items(logs)
-        plain = self._plain_values(values)
+        plain = self._record_save_values(values, record_id)
         saved_id = int(
             self.client.replace_record_with_history(record_id, plain, items)
         )
@@ -1535,6 +1634,7 @@ class DesktopApiRecordRepository:
         inserted_records,
         updated_records=(),
         source_file_name="import.xlsx",
+        urban_plan_id=None,
     ):
         items = [
             {"record_id": None, "values": self._plain_values(record)}
@@ -1556,7 +1656,14 @@ class DesktopApiRecordRepository:
                 "inserted_ids": [],
                 "updated_ids": [],
             }
-        result = dict(self.client.import_records(items, source_file_name))
+        if urban_plan_id:
+            result = dict(
+                self.client.import_records(
+                    items, source_file_name, urban_plan_id=int(urban_plan_id)
+                )
+            )
+        else:
+            result = dict(self.client.import_records(items, source_file_name))
         self.last_inserted_customer_ids = [
             int(record_id) for record_id in result.get("inserted_ids") or []
         ]
@@ -1777,6 +1884,43 @@ class DesktopApiRecordRepository:
         deleted = self.client.delete_tag(int(tag_id))
         self._invalidate()
         return int(bool(deleted))
+
+    def list_urban_plans(self, refresh=False):
+        """The named 都市計畫 with server-side counts; cached until a change."""
+
+        if refresh or self._urban_plans is None:
+            result = self.client.list_urban_plans()
+            if not isinstance(result, dict):
+                result = {}
+            self._urban_plans = {
+                "items": [dict(item) for item in result.get("items") or []],
+                "unassigned": dict(result.get("unassigned") or {}),
+            }
+        return {
+            "items": [dict(item) for item in self._urban_plans["items"]],
+            "unassigned": dict(self._urban_plans["unassigned"]),
+        }
+
+    def save_urban_plan(self, name, plan_id=None):
+        saved_id = self.client.save_urban_plan(name, plan_id)
+        self._urban_plans = None
+        if plan_id is not None:
+            self._invalidate()  # cached rows still carry the old plan name
+        return int(saved_id)
+
+    def delete_urban_plan(self, plan_id):
+        result = dict(self.client.delete_urban_plan(int(plan_id)) or {})
+        self._urban_plans = None
+        self._invalidate()
+        return result
+
+    def set_lands_urban_plan(self, land_ids, plan_id, only_unassigned=True):
+        result = dict(
+            self.client.set_lands_urban_plan(land_ids, plan_id, only_unassigned) or {}
+        )
+        self._urban_plans = None
+        self._invalidate()
+        return result
 
     def get_customer_tag_ids(self, customer_id):
         return set(self.client.get_record_tag_ids(int(customer_id)))

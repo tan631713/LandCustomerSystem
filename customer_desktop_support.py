@@ -17,6 +17,36 @@ class DesktopSupportMixin:
         module = sys.modules[self.__class__.__module__]
         return getattr(module, name)
 
+    # 都市計畫 hooks called by the record/selection/search workflows. The real
+    # implementations live in UrbanPlanWorkflowMixin, which is listed *before*
+    # this class in LandApp's bases; windows (and test harnesses) without it
+    # simply never have a plan view.
+    def plan_view_active(self):
+        return False
+
+    def refresh_urban_plan_view(self, rows=None, *, force=False):
+        return None
+
+    def urban_plan_checks_changed(self):
+        return None
+
+    urban_plan_input_id = 0
+
+    def urban_plans_available(self):
+        return False
+
+    def load_urban_plan_into_form(self, row):
+        return None
+
+    def set_urban_plan_form_value(self, plan_id, plan_name=None):
+        return None
+
+    def urban_plan_form_value(self):
+        return 0
+
+    def update_urban_plan_view_metrics(self, row_height):
+        return None
+
     def _log_operation(self, action_type, summary, detail=None):
         repository = (
             self.active_record_repository()
