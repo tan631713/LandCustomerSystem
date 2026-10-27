@@ -1,13 +1,15 @@
-const CACHE_NAME = "land-customer-mobile-v31";
+importScripts("./asset-version.js");
+
+const CACHE_NAME = `land-customer-mobile-v${self.LAND_MOBILE_ASSET_VERSION}`;
 const APP_SHELL = [
   "/mobile/",
   "/mobile/index.html",
   "/mobile/styles.css",
-  "/mobile/field-visit.js?v=3",
-  "/mobile/app.js?v=31",
+  "/mobile/asset-version.js",
+  "/mobile/field-visit.js",
+  "/mobile/app.js",
   "/mobile/manifest.webmanifest",
-  "/mobile/app-icon.png",
-  "/mobile/og.png"
+  "/mobile/icon-192.png"
 ];
 
 self.addEventListener("install", event => {

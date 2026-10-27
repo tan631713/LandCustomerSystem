@@ -49,7 +49,7 @@ const state = {
 const MAX_ATTACHMENT_SIZE = 50 * 1024 * 1024;
 const PHOTO_COMPRESSION_THRESHOLD = 1.5 * 1024 * 1024;
 const PHOTO_MAX_DIMENSION = 2048;
-const MOBILE_ASSET_VERSION = 33;
+const MOBILE_ASSET_VERSION = Number(self.LAND_MOBILE_ASSET_VERSION);
 const MOBILE_UPDATE_RESUME_KEY = "lcs_mobile_update_resume";
 const MOBILE_UPDATE_RESUME_MAX_AGE_MS = 15 * 60 * 1000;
 
@@ -256,6 +256,7 @@ function showMobileUpdate(detail = "更新後即可使用最新功能與修正�
 
 function checkMobileAssetVersion(serverVersion) {
   const version = Number(serverVersion);
+  if (!Number.isInteger(MOBILE_ASSET_VERSION)) return false;
   if (!Number.isInteger(version) || version <= MOBILE_ASSET_VERSION) return false;
   showMobileUpdate(`伺服器已有新版手機畫面（v${version}），更新後即可套用。`);
   return true;
@@ -405,7 +406,7 @@ async function registerMobileServiceWorker() {
   try {
     const registration = await navigator.serviceWorker.register(
       "./service-worker.js",
-      { scope: "/mobile/" }
+      { scope: "/mobile/", updateViaCache: "none" }
     );
     registration.addEventListener("updatefound", () => {
       const worker = registration.installing;
