@@ -11,6 +11,7 @@ from customer_api.field_visit_permissions import (
     field_visit_capabilities,
 )
 from customer_api.field_visit_service import (
+    build_optimized_field_visit_plan,
     FieldVisitItemInput,
     FieldVisitPlanConflict,
     FieldVisitService,
@@ -320,6 +321,26 @@ class FieldVisitServiceTests(unittest.TestCase):
         self.assertEqual(transition_call[4]["latitude"], 25.02)
         self.assertEqual(transition_call[4]["postponed_until"], postponed_until)
 
+    def test_save_location_requires_gps_and_an_on_site_status(self):
+        source = _Source()
+        service = FieldVisitService(source)
+        editor = _user("editor")
+        service.transition_item(
+            editor, 9, "completed", latitude=24.8, longitude=121.0, save_location=True
+        )
+        with_location = source.calls[-1][4]
+        self.assertTrue(with_location["save_location"])
+        service.transition_item(editor, 9, "completed", latitude=24.8, longitude=121.0)
+        without_location = source.calls[-1][4]
+        self.assertFalse(without_location["save_location"])
+        self.assertNotEqual(with_location["request_hash"], without_location["request_hash"])
+        service.transition_item(editor, 9, "completed", save_location=True)
+        self.assertFalse(source.calls[-1][4]["save_location"])
+        service.transition_item(
+            editor, 9, "cancelled", latitude=24.8, longitude=121.0, save_location=True
+        )
+        self.assertFalse(source.calls[-1][4]["save_location"])
+
     def test_partial_gps_is_rejected_before_repository_call(self):
         source = _Source()
         service = FieldVisitService(source)
@@ -398,6 +419,28 @@ class FieldVisitServiceTests(unittest.TestCase):
         )
         self.assertEqual(len(preview["plan_token"]), 64)
         self.assertIsNone(preview["items"][-1]["estimated_distance_km"])
+
+    def test_optimization_keeps_same_owner_shares_as_one_stop(self):
+        def item(item_id, owner_id, latitude):
+            return {
+                "id": item_id,
+                "owner_id": owner_id,
+                "status": "planned",
+                "priority": 0,
+                "route_order": item_id,
+                "is_order_locked": False,
+                "latitude": latitude,
+                "longitude": 121.5,
+            }
+
+        preview, _snapshot = build_optimized_field_visit_plan(
+            1,
+            [item(1, 50, 25.01), item(2, 60, 25.02), item(3, 50, 25.03)],
+            25.0,
+            121.5,
+        )
+        self.assertEqual([row["item_id"] for row in preview["items"]], [1, 3, 2])
+        self.assertEqual([row["route_order"] for row in preview["items"]], [1, 2, 3])
 
     def test_reoptimization_keeps_current_item_and_excludes_finished_items(self):
         source = _Source()

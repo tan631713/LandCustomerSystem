@@ -243,6 +243,7 @@ def register_field_visit_routes(
                 note=payload.note,
                 postponed_until=payload.postponed_until,
                 contact_date=payload.contact_date,
+                save_location=payload.save_location,
                 allowed_old_statuses=allowed_old_statuses,
                 idempotency_key=idempotency_key,
             )

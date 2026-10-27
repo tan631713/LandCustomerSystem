@@ -49,7 +49,7 @@ const state = {
 const MAX_ATTACHMENT_SIZE = 50 * 1024 * 1024;
 const PHOTO_COMPRESSION_THRESHOLD = 1.5 * 1024 * 1024;
 const PHOTO_MAX_DIMENSION = 2048;
-const MOBILE_ASSET_VERSION = 32;
+const MOBILE_ASSET_VERSION = 33;
 const MOBILE_UPDATE_RESUME_KEY = "lcs_mobile_update_resume";
 const MOBILE_UPDATE_RESUME_MAX_AGE_MS = 15 * 60 * 1000;
 
@@ -562,6 +562,7 @@ async function requestFieldLocation() {
     detail.textContent = `${position.latitude.toFixed(6)}, ${position.longitude.toFixed(6)}・${formatLocationAccuracy(position.accuracy_m)}`;
     $("#field-location-panel").classList.add("location-ready");
     toast("已取得目前位置");
+    if (state.fieldVisitRoute) renderFieldVisit();
   } catch (error) {
     state.currentPosition = null;
     status.textContent = error.message;
@@ -588,6 +589,7 @@ function canEdit() {
 function showLogin(message = "") {
   closeFieldPlan();
   closeFieldAction();
+  closeFieldCoordinate();
   closePhotoViewer();
   closeAttachmentEdit();
   releaseThumbnailUrls();
@@ -610,7 +612,7 @@ function showApp(user) {
   $("#login-view").classList.add("hidden");
   $("#app-shell").classList.remove("hidden");
   $("#user-name").textContent = user.display_name || user.username;
-  $("#user-role").textContent = `${roleLabel(user.role)}・點此登出`;
+  $("#user-role").textContent = roleLabel(user.role);
   $("#user-avatar").textContent = userInitial(user.display_name || user.username);
   const hour = new Date().getHours();
   const greeting = hour < 11 ? "早安" : hour < 18 ? "午安" : "晚安";
@@ -726,6 +728,103 @@ function fieldDistance(value) {
   return Number.isFinite(distance) ? `${distance.toFixed(distance < 10 ? 1 : 0)} km` : "尚未估算";
 }
 
+function formatClock(value) {
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "—";
+  return new Intl.DateTimeFormat("zh-TW", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).format(parsed);
+}
+
+// One physical stop can hold several land shares (same owner, address or
+// coordinate).  Stops, rough arrival times and whole-day navigation links
+// are derived from the route every time it is rendered.
+function refreshFieldVisitPlanView() {
+  const helpers = window.LCSFieldVisit;
+  const items = (state.fieldVisitRoute && state.fieldVisitRoute.items) || [];
+  const stops = helpers.groupFieldVisitStops(items);
+  const remainingStops = stops.filter(stop => stop.items.some(fieldVisitRemaining));
+  const origin = state.currentPosition
+    && helpers.validCoordinates(state.currentPosition.latitude, state.currentPosition.longitude)
+    ? state.currentPosition
+    : null;
+  const schedule = helpers.estimateStopSchedule(remainingStops, { origin });
+  state.fieldVisitStops = stops;
+  state.fieldVisitSchedule = new Map(schedule.items.map(entry => [entry.stop.number, entry]));
+  state.fieldVisitScheduleSummary = {
+    remainingStops: remainingStops.length,
+    remainingOwners: remainingStops.reduce(
+      (total, stop) => total + stop.items.filter(fieldVisitRemaining).length,
+      0
+    ),
+    totalKm: schedule.totalKm,
+    finishAt: schedule.finishAt,
+    hasOrigin: Boolean(origin),
+    missingCoordinates: remainingStops.filter(
+      stop => !helpers.validCoordinates(stop.latitude, stop.longitude)
+    ).length
+  };
+  state.fieldVisitSegments = helpers.buildGoogleMapsRouteSegments(remainingStops, { origin });
+}
+
+function fieldStopForIndex(index) {
+  return window.LCSFieldVisit.stopForIndex(state.fieldVisitStops || [], index);
+}
+
+function renderFieldScheduleSummary() {
+  const summary = state.fieldVisitScheduleSummary;
+  const line = $("#field-schedule-summary");
+  const routeButton = $("#field-route-open");
+  const segmentsNode = $("#field-route-segments");
+  if (!summary || !summary.remainingStops) {
+    line.textContent = "今天沒有待拜訪的站點。";
+    routeButton.disabled = true;
+    segmentsNode.classList.add("hidden");
+    setChildren(segmentsNode, []);
+    return;
+  }
+  const parts = [
+    `剩 ${formatNumber(summary.remainingStops)} 站（${formatNumber(summary.remainingOwners)} 位地主）`
+  ];
+  if (summary.totalKm > 0) parts.push(`路程粗估 ${summary.totalKm.toFixed(summary.totalKm < 10 ? 1 : 0)} km`);
+  parts.push(`預計 ${formatClock(summary.finishAt)} 結束`);
+  line.textContent = parts.join("・");
+  const notes = [];
+  if (!summary.hasOrigin) notes.push("尚未取得目前位置，第一站時間從現在起算");
+  if (summary.missingCoordinates) notes.push(`${formatNumber(summary.missingCoordinates)} 站沒有座標，時間只含停留`);
+  $("#field-schedule-note").textContent = notes.length
+    ? `粗估：${notes.join("；")}。`
+    : "粗估：直線距離 ×1.4、時速 30 公里、每位地主停留 20 分鐘。";
+  const segments = state.fieldVisitSegments || [];
+  routeButton.disabled = !segments.length;
+  routeButton.textContent = segments.length > 1
+    ? `整天路線導航（分 ${segments.length} 段）`
+    : "整天路線導航";
+  const links = segments.map(segment => {
+    const link = element("a", "field-route-segment");
+    link.href = segment.url;
+    link.target = "_blank";
+    link.rel = "noopener";
+    const first = segment.firstStop && segment.firstStop.number;
+    const last = segment.lastStop && segment.lastStop.number;
+    link.append(
+      element("strong", "", segments.length > 1 ? `第 ${segment.number} 段` : "開啟導航"),
+      element("span", "", first === last ? `第 ${first} 站` : `第 ${first}～${last} 站`)
+    );
+    return link;
+  });
+  setChildren(segmentsNode, links);
+}
+
+function toggleFieldRouteSegments() {
+  const node = $("#field-route-segments");
+  const opening = node.classList.contains("hidden");
+  node.classList.toggle("hidden", !opening);
+  $("#field-route-open").setAttribute("aria-expanded", String(opening));
+}
+
 function formatFieldVisitTime(value) {
   if (!value) return "—";
   const parsed = new Date(value);
@@ -810,31 +909,61 @@ function renderFieldVisitCurrent() {
   }
   state.fieldVisitIndex = Math.min(Math.max(0, state.fieldVisitIndex), items.length - 1);
   const item = items[state.fieldVisitIndex];
+  const stop = fieldStopForIndex(state.fieldVisitIndex);
+  const companions = stop ? stop.items.filter(value => Number(value.id) !== Number(item.id)) : [];
   const heading = element("div", "field-current-heading");
-  const order = element("span", "field-order-badge", `第 ${item.route_order || state.fieldVisitIndex + 1} 站`);
+  const order = element(
+    "span",
+    "field-order-badge",
+    `第 ${stop ? stop.number : item.route_order || state.fieldVisitIndex + 1} 站`
+  );
+  const sameStop = companions.length
+    ? element("span", "field-same-stop-badge", `同址 ${stop.items.length} 位`)
+    : null;
   const status = element("span", `visit-status status-${item.status || "unknown"}`, fieldVisitStatusLabel(item.status));
   const priority = Number(item.priority) > 0
     ? element("span", "field-priority-badge", "優先拜訪")
     : null;
-  heading.append(order, priority, status);
+  heading.append(...[order, sameStop, priority, status].filter(Boolean));
 
   const owner = element("h3", "field-owner-name", text(item.owner_name, "未填姓名"));
-  const land = element(
+  // 地號是這一頁最重要的識別，放大；地區與地段放在它上面
+  const where = element(
     "p",
-    "field-land-label",
-    `${text(item.district, "未填地區")}・${text(item.section, "未填地段")}・${text(item.land_number, "未填地號")}`
+    "field-where",
+    `${text(item.district, "未填地區")}　${text(item.section, "未填地段")}`
   );
+  const parcel = element("p", "field-parcel num", text(item.land_number, "未填地號"));
   const info = element("div", "field-info-grid");
+  const scheduleEntry = stop && fieldVisitRemaining(item) && state.fieldVisitSchedule
+    ? state.fieldVisitSchedule.get(stop.number)
+    : null;
+  const hasCoordinate = window.LCSFieldVisit.validCoordinates(item.latitude, item.longitude);
   info.append(
     fieldInfoRow("登記次序", item.registration_order),
     fieldInfoRow("地主地址", item.address),
     fieldInfoRow("電話", item.phone),
-    fieldInfoRow("路線距離", fieldDistance(item.estimated_distance_km))
+    fieldInfoRow("路線距離", fieldDistance(item.estimated_distance_km)),
+    fieldInfoRow(
+      "預計抵達",
+      scheduleEntry
+        ? `${formatClock(scheduleEntry.arrivalAt)}${scheduleEntry.approximate ? "（粗估）" : ""}`
+        : "—"
+    ),
+    fieldInfoRow("座標", hasCoordinate ? "已定位" : "尚未定位，導航會改用地址")
   );
 
   const notes = element("div", "field-visit-notes");
   if (String(item.note || "").trim()) notes.append(fieldInfoRow("重要備註", item.note));
   if (String(item.last_contact || "").trim()) notes.append(fieldInfoRow("最近紀錄", item.last_contact));
+  if (companions.length) {
+    notes.append(fieldInfoRow(
+      "同址地主",
+      companions
+        .map(value => `${text(value.owner_name, "未填姓名")}（${text(value.land_number, "未填地號")}）`)
+        .join("、")
+    ));
+  }
 
   const actions = element("div", "field-primary-actions");
   const navigation = element("button", "primary-button", "開啟導航");
@@ -843,6 +972,12 @@ function renderFieldVisitCurrent() {
   navigation.disabled = !String(item.address || "").trim()
     && !window.LCSFieldVisit.validCoordinates(item.latitude, item.longitude);
   actions.append(navigation);
+  if (!hasCoordinate && canEdit()) {
+    const coordinate = element("button", "secondary-button field-coordinate-button", "補座標");
+    coordinate.type = "button";
+    coordinate.dataset.fieldCoordinate = String(item.id);
+    actions.append(coordinate);
+  }
   const phoneUrl = safePhoneUrl(item.phone);
   if (phoneUrl) {
     const call = element("a", "field-call-button", "撥打電話");
@@ -897,16 +1032,22 @@ function renderFieldVisitCurrent() {
     addStatusAction("postpone", "延後", "field-postpone-button");
   }
 
+  // 順序照現場使用：先導航過去，再看備註與細節，最後記錄結果
   setChildren(container, [
     heading,
+    where,
+    parcel,
     owner,
-    land,
-    info,
-    notes,
     actions,
+    notes,
+    info,
     recordActions,
     statusActions.children.length ? statusActions : null
   ]);
+  $$("#field-progress-chain .tick").forEach((tick, tickIndex) => {
+    if (tickIndex === state.fieldVisitIndex) tick.setAttribute("aria-current", "step");
+    else tick.removeAttribute("aria-current");
+  });
   $("#field-visit-position").textContent = `${state.fieldVisitIndex + 1} / ${items.length}`;
   $("#field-visit-previous").disabled = state.fieldVisitIndex <= 0;
   $("#field-visit-next").disabled = state.fieldVisitIndex >= items.length - 1;
@@ -920,14 +1061,32 @@ function selectFieldVisitItem(index) {
 
 function renderFieldVisitList(items) {
   const nodes = items.map((item, index) => {
-    const button = element("button", `field-list-item status-${item.status || "unknown"}`);
+    const stop = fieldStopForIndex(index);
+    const continuesStop = Boolean(stop && stop.indexes[0] !== index);
+    const button = element(
+      "button",
+      `field-list-item status-${item.status || "unknown"}${continuesStop ? " field-list-item-same-stop" : ""}`
+    );
     button.type = "button";
     button.dataset.fieldItemIndex = String(index);
-    const order = element("span", "field-list-order", String(item.route_order || index + 1));
+    const order = element(
+      "span",
+      "field-list-order",
+      continuesStop ? "同" : String(stop ? stop.number : item.route_order || index + 1)
+    );
+    if (continuesStop) order.setAttribute("aria-label", `同第 ${stop.number} 站`);
     const copy = element("span", "field-list-copy");
+    const scheduleEntry = !continuesStop && stop && state.fieldVisitSchedule
+      ? state.fieldVisitSchedule.get(stop.number)
+      : null;
+    const detail = `${text(item.section, "未填地段")}・${text(item.land_number, "未填地號")}`;
     copy.append(
       element("strong", "", text(item.owner_name, "未填姓名")),
-      element("small", "", `${text(item.section, "未填地段")}・${text(item.land_number, "未填地號")}`)
+      element(
+        "small",
+        "",
+        scheduleEntry ? `${detail}・約 ${formatClock(scheduleEntry.arrivalAt)} 抵達` : detail
+      )
     );
     if (Number(item.priority) > 0) {
       copy.append(element("span", "field-priority-badge", "優先拜訪"));
@@ -962,12 +1121,17 @@ function renderFieldVisit() {
   const skipped = items.filter(item => item.status === "skipped").length;
   const cancelled = items.filter(item => item.status === "cancelled").length;
   const remaining = items.filter(fieldVisitRemaining).length;
-  const progress = items.length ? Math.round((completed / items.length) * 100) : 0;
   $("#field-visit-date").textContent = formatDate(route.visit_date);
   $("#field-visit-title").textContent = text(route.title, "今日拜訪行程");
   $("#field-visit-route-status").textContent = fieldVisitStatusLabel(route.status);
   $("#field-visit-route-status").className = `visit-status status-${route.status || "unknown"}`;
-  $("#field-progress-bar").style.width = `${progress}%`;
+  // 進度：一位地主一格；目前這位的格子比較高、帶紅框（由 renderFieldVisitCurrent 標示）
+  setChildren($("#field-progress-chain"), items.map(item => {
+    const tick = element("li", "tick");
+    tick.dataset.s = item.status || "planned";
+    tick.title = `${text(item.owner_name, "未填姓名")}：${fieldVisitStatusLabel(item.status)}`;
+    return tick;
+  }));
   $("#field-stat-total").textContent = formatNumber(items.length);
   $("#field-stat-completed").textContent = formatNumber(completed);
   $("#field-stat-remaining").textContent = formatNumber(remaining);
@@ -1001,6 +1165,8 @@ function renderFieldVisit() {
     skipped,
     cancelled
   });
+  refreshFieldVisitPlanView();
+  renderFieldScheduleSummary();
   renderFieldVisitCurrent();
   renderFieldVisitList(items);
   applyRole();
@@ -1658,6 +1824,108 @@ async function openFieldNavigation(itemId) {
   }
 }
 
+let fieldCoordinateLastFocusedElement = null;
+
+function openFieldCoordinate(itemId, trigger = null) {
+  const items = (state.fieldVisitRoute && state.fieldVisitRoute.items) || [];
+  const index = items.findIndex(value => Number(value.id) === Number(itemId));
+  if (index < 0 || !canEdit()) return;
+  const item = items[index];
+  const stop = fieldStopForIndex(index);
+  const targets = (stop ? stop.items : [item]).filter(
+    value => !window.LCSFieldVisit.validCoordinates(value.latitude, value.longitude)
+  );
+  fieldCoordinateLastFocusedElement = trigger || document.activeElement;
+  state.fieldCoordinateTargets = targets.map(value => Number(value.ownership_id));
+  state.fieldCoordinateConfirmOutside = false;
+  $("#field-coordinate-owner").textContent = `${text(item.owner_name, "未填姓名")}・${text(item.address, "未填地址")}`;
+  $("#field-coordinate-scope").textContent = targets.length > 1
+    ? `會一起套用到同址的 ${formatNumber(targets.length)} 筆持分。`
+    : "";
+  $("#field-coordinate-input").value = "";
+  $("#field-coordinate-result").textContent = "";
+  $("#field-coordinate-maps").href = String(item.address || "").trim()
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(String(item.address).trim())}`
+    : "https://www.google.com/maps";
+  $("#field-coordinate-save").textContent = "儲存座標";
+  $("#field-coordinate-dialog").classList.remove("hidden");
+  document.body.style.overflow = "hidden";
+  $("#field-coordinate-input").focus();
+}
+
+function closeFieldCoordinate() {
+  const dialog = $("#field-coordinate-dialog");
+  if (!dialog || dialog.classList.contains("hidden")) return;
+  dialog.classList.add("hidden");
+  if ($("#record-sheet").classList.contains("hidden")) document.body.style.overflow = "";
+  if (fieldCoordinateLastFocusedElement && document.contains(fieldCoordinateLastFocusedElement)) {
+    fieldCoordinateLastFocusedElement.focus();
+  }
+  fieldCoordinateLastFocusedElement = null;
+}
+
+function previewFieldCoordinate() {
+  const result = $("#field-coordinate-result");
+  state.fieldCoordinateConfirmOutside = false;
+  $("#field-coordinate-save").textContent = "儲存座標";
+  const value = $("#field-coordinate-input").value;
+  if (!value.trim()) {
+    result.textContent = "";
+    return null;
+  }
+  try {
+    const parsed = window.LCSFieldVisit.parseCoordinateInput(value);
+    result.textContent = parsed.outsideTaiwan
+      ? `讀到 ${parsed.latitude}, ${parsed.longitude}，位置不在台灣，請再確認。`
+      : `讀到 ${parsed.latitude}, ${parsed.longitude}`;
+    return parsed;
+  } catch (error) {
+    result.textContent = error.message;
+    return null;
+  }
+}
+
+async function submitFieldCoordinate(event) {
+  event.preventDefault();
+  const parsed = previewFieldCoordinate();
+  if (!parsed) return;
+  const button = $("#field-coordinate-save");
+  if (parsed.outsideTaiwan && !state.fieldCoordinateConfirmOutside) {
+    state.fieldCoordinateConfirmOutside = true;
+    button.textContent = "仍要儲存";
+    return;
+  }
+  const targets = [...new Set(state.fieldCoordinateTargets || [])].filter(Number.isFinite);
+  if (!targets.length) {
+    closeFieldCoordinate();
+    return;
+  }
+  setButtonBusy(button, true, "正在儲存…");
+  let saved = 0;
+  try {
+    for (const ownershipId of targets) {
+      await request(`/api/v1/records/${ownershipId}/location`, {
+        method: "PUT",
+        body: JSON.stringify({
+          latitude: parsed.latitude,
+          longitude: parsed.longitude,
+          source: "manual"
+        })
+      });
+      saved += 1;
+    }
+    closeFieldCoordinate();
+    toast(saved > 1 ? `已儲存 ${saved} 筆同址座標` : "已儲存座標");
+    await loadFieldVisit({ quiet: true });
+  } catch (error) {
+    $("#field-coordinate-result").textContent = saved
+      ? `已儲存 ${saved} 筆，其餘未完成：${error.message}`
+      : error.message;
+  } finally {
+    setButtonBusy(button, false);
+  }
+}
+
 const fieldActionLabels = Object.freeze({
   start: { title: "開始拜訪", submit: "確認開始" },
   complete: { title: "完成拜訪", submit: "儲存並前往下一位" },
@@ -1680,6 +1948,7 @@ function saveFieldActionDraft() {
   writeSessionDraft(fieldActionDraftKey(itemId, action), {
     note: $("#field-action-note").value,
     postponed_until: $("#field-action-postponed-until").value,
+    save_location: $("#field-action-save-location").checked,
     idempotency_key: state.fieldActionIdempotencyKey,
     submitted_signature: state.fieldActionSubmittedSignature,
     submitted_payload: state.fieldActionSubmittedPayload
@@ -1725,6 +1994,17 @@ function openFieldAction(action, itemId, trigger = null) {
       : defaultPostponedLocalValue())
     : "";
   $("#field-action-location-note").textContent = "送出時會嘗試附上目前 GPS；定位失敗仍可正常儲存。";
+  // When this stop has no coordinate yet, offer to remember the on-site GPS
+  // so the next route can be planned by distance.
+  const itemIndex = (state.fieldVisitRoute.items || []).indexOf(item);
+  const stop = fieldStopForIndex(itemIndex);
+  const missingCoordinate = (stop ? stop.items : [item]).some(
+    value => !window.LCSFieldVisit.validCoordinates(value.latitude, value.longitude)
+  );
+  const offerSaveLocation = missingCoordinate && ["start", "complete"].includes(action);
+  $("#field-action-save-location-row").classList.toggle("hidden", !offerSaveLocation);
+  $("#field-action-save-location").checked = offerSaveLocation
+    && !(draft && draft.save_location === false);
   $("#field-action-dialog").classList.remove("hidden");
   document.body.style.overflow = "hidden";
   if (action === "postpone") postponeInput.focus();
@@ -1773,16 +2053,24 @@ async function submitFieldAction(event) {
       if (Number.isNaN(parsed.getTime())) throw new Error("延後日期格式不正確。");
       postponedUntil = parsed.toISOString();
     }
+    const saveLocationRow = $("#field-action-save-location-row");
+    const saveLocation = Boolean(
+      position
+      && !saveLocationRow.classList.contains("hidden")
+      && $("#field-action-save-location").checked
+    );
     const semanticSignature = JSON.stringify({
       note: $("#field-action-note").value.trim(),
-      postponed_until: postponedUntil
+      postponed_until: postponedUntil,
+      save_location: saveLocation
     });
     let payload = {
       latitude: position ? position.latitude : null,
       longitude: position ? position.longitude : null,
       note: $("#field-action-note").value.trim(),
       postponed_until: postponedUntil,
-      contact_date: localDateISO()
+      contact_date: localDateISO(),
+      save_location: saveLocation
     };
     if (
       state.fieldActionIdempotencyKey
@@ -1823,6 +2111,118 @@ async function submitFieldAction(event) {
   }
 }
 
+// 追蹤提醒的待處理筆數：側邊選單與手機底部分頁各有一個數字
+function setFollowupBadge(count) {
+  ["#nav-followup-count", "#mobile-followup-count"].forEach(selector => {
+    const node = $(selector);
+    if (!node) return;
+    node.textContent = formatNumber(count);
+    node.classList.toggle("hidden", count === 0);
+  });
+}
+
+// 離今天幾天：負數是逾期。日期只比到「天」，不受時區影響。
+function daysFromToday(value) {
+  const due = new Date(`${String(value || "").slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(due.getTime())) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((due.getTime() - today.getTime()) / 86400000);
+}
+
+function followupDue(item) {
+  const days = daysFromToday(item.due_date || item.next_follow_up);
+  const done = (item.status || item.follow_up_status || "") === "完成";
+  if (days === null) return { days: null, label: "未設定日期", className: "due", group: "later" };
+  if (!done && days < 0) return { days, label: `逾期 ${-days} 天`, className: "due due-over", group: "overdue" };
+  if (days === 0) return { days, label: "今天", className: "due due-today", group: "today" };
+  return { days, label: `${days} 天後`, className: "due", group: "later" };
+}
+
+function sortedFollowups(items) {
+  return [...items].sort((a, b) => {
+    if (isOverdue(a) !== isOverdue(b)) return isOverdue(a) ? -1 : 1;
+    return String(a.due_date || a.next_follow_up || "9999").localeCompare(String(b.due_date || b.next_follow_up || "9999"));
+  });
+}
+
+function buildFollowupCard(item) {
+  const due = followupDue(item);
+  const card = element("article", `result-card${isOverdue(item) ? " overdue" : ""}`);
+  const top = element("div", "card-top");
+  top.append(element("h3", "", text(item.owner_name || item.name, "未填姓名")), element("span", due.className, due.label));
+  const place = element("div", "card-meta", `${text(item.district, "未填地區")}・${text(item.section, "未填地段")}・${text(item.land_number, "未填地號")}`);
+  const metrics = element("div", "metric-row");
+  metrics.append(metric("日期", formatDate(item.due_date || item.next_follow_up)), metric("狀態", item.status || item.follow_up_status));
+  const button = element("button", "record-link", "查看與更新");
+  button.type = "button";
+  button.dataset.recordId = item.id;
+  card.append(top, place, metrics, button);
+  return card;
+}
+
+function renderHomeFollowups(items) {
+  const pending = sortedFollowups(items).filter(item => (item.status || item.follow_up_status || "") !== "完成");
+  const overdue = pending.filter(item => followupDue(item).group === "overdue").length;
+  const today = pending.filter(item => followupDue(item).group === "today").length;
+  const summary = $("#home-followup-summary");
+  summary.replaceChildren();
+  if (overdue) summary.append(element("span", "due-over", `逾期 ${formatNumber(overdue)}`), document.createTextNode("　"));
+  summary.append(document.createTextNode(`今天到期 ${formatNumber(today)}`));
+  const container = $("#home-followups");
+  setChildren(container, pending.length
+    ? pending.slice(0, 3).map(buildFollowupCard)
+    : [emptyState("目前沒有待處理的追蹤提醒。")]);
+}
+
+// 首頁的「今日外勤」：只顯示下一站，詳細操作都在外勤頁
+async function loadHomeField() {
+  const container = $("#home-field");
+  try {
+    const result = await request(`/api/v1/field-visits/today?visit_date=${localDateISO()}`);
+    const route = result.item || null;
+    const items = route && route.items || [];
+    const open = items.filter(fieldVisitRemaining);
+    const goButton = label => {
+      const button = element("button", "primary-button", label);
+      button.type = "button";
+      button.dataset.go = "field";
+      button.addEventListener("click", () => navigate("field"));
+      return button;
+    };
+    if (!route || !items.length) {
+      setChildren(container, [
+        element("p", "muted small", canEdit() ? "今天尚未建立拜訪行程，可以直接從手機安排。" : "今天尚未建立拜訪行程。"),
+        goButton("前往今日外勤")
+      ]);
+      return;
+    }
+    if (!open.length) {
+      setChildren(container, [element("p", "muted small", "今天的行程已全部處理完成。"), goButton("查看今日成果")]);
+      return;
+    }
+    const index = routeItemIndex(route);
+    const item = items[index];
+    const stops = window.LCSFieldVisit.groupFieldVisitStops(items);
+    const stop = window.LCSFieldVisit.stopForIndex(stops, index);
+    const block = element("div", "stop-block");
+    const flags = element("p", "stop-flags");
+    flags.append(
+      element("span", "now", `下一站・第 ${stop ? stop.number : index + 1} 站`),
+      element("span", "muted", `還有 ${formatNumber(open.length)} 位`)
+    );
+    block.append(
+      flags,
+      element("p", "where", `${text(item.district, "未填地區")}　${text(item.section, "未填地段")}`),
+      element("p", "parcel num", text(item.land_number, "未填地號")),
+      element("p", "home-owner", text(item.owner_name, "未填姓名"))
+    );
+    setChildren(container, [block, goButton("前往今日外勤")]);
+  } catch (_error) {
+    setChildren(container, [element("p", "muted small", "暫時讀不到今日行程。")]);
+  }
+}
+
 async function loadDashboard() {
   const button = $("#refresh-dashboard");
   setButtonBusy(button, true, "更新中…");
@@ -1841,10 +2241,10 @@ async function loadDashboard() {
       return status !== "完成";
     }).length;
     $("#stat-followups").textContent = formatNumber(pendingCount);
-    const navCount = $("#nav-followup-count");
-    navCount.textContent = formatNumber(pendingCount);
-    navCount.classList.toggle("hidden", pendingCount === 0);
-    $("#last-sync-time").textContent = `最後同步：${new Intl.DateTimeFormat("zh-TW", { hour: "2-digit", minute: "2-digit" }).format(new Date())}`;
+    setFollowupBadge(pendingCount);
+    renderHomeFollowups(followups.items || []);
+    $("#last-sync-time").textContent = `最後同步 ${new Intl.DateTimeFormat("zh-TW", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date())}`;
+    loadHomeField();
   } catch (error) {
     toast(error.message);
   } finally {
@@ -1860,9 +2260,19 @@ function emptyState(message) {
   return element("div", "empty-state", message);
 }
 
+// 「數字 + 單位」：數字用窄版字體，單位維持一般字體
+function countLabel(value, unit) {
+  const node = element("span", "");
+  node.append(element("span", "num", formatNumber(value)), document.createTextNode(` ${unit}`));
+  return node;
+}
+
 function buildOwnerCard(owner) {
   const card = element("article", "result-card");
-  const heading = element("h3", "", text(owner.name, "未填姓名"));
+  const top = element("div", "card-top");
+  const counts = element("span", "card-counts");
+  counts.append(countLabel(owner.land_count, "土地"), document.createTextNode("　"), countLabel(owner.record_count, "持分"));
+  top.append(element("h3", "", text(owner.name, "未填姓名")), counts);
   const meta = element("div", "card-meta");
   meta.append(
     element("span", "", `身分證：${maskIdentity(owner.external_id)}`),
@@ -1870,8 +2280,6 @@ function buildOwnerCard(owner) {
   );
   const metrics = element("div", "metric-row");
   metrics.append(
-    metric("土地", formatNumber(owner.land_count)),
-    metric("持分", formatNumber(owner.record_count)),
     metric("坪數", formatNumber(owner.total_ping)),
     metric("現值", formatNumber(owner.total_declared_value))
   );
@@ -1883,24 +2291,63 @@ function buildOwnerCard(owner) {
     buttons.append(button);
   });
   if ((owner.record_ids || []).length > 6) buttons.append(element("span", "muted", `另有 ${owner.record_ids.length - 6} 筆`));
-  card.append(heading, meta, metrics, buttons);
+  card.append(top, meta, metrics, buttons);
   return card;
 }
 
+// 持分條：一塊土地分成幾份，每位地主一段；分母不明或加起來不到 1 的部分留成斜線
+function buildShareBar(owners) {
+  const shares = (owners || []).map(owner => {
+    const numerator = Number(owner.numerator);
+    const denominator = Number(owner.denominator);
+    return denominator > 0 && Number.isFinite(numerator) ? Math.max(0, numerator / denominator) : null;
+  });
+  if (!shares.length || shares.some(share => share === null)) return null;
+  const total = shares.reduce((sum, share) => sum + share, 0);
+  if (total <= 0) return null;
+  const bar = element("div", "share");
+  bar.setAttribute("role", "img");
+  bar.setAttribute("aria-label", "持分分配");
+  shares.forEach(share => {
+    const segment = element("span", "share-seg");
+    segment.style.flex = String(share);
+    bar.append(segment);
+  });
+  if (total < 0.999) {
+    const rest = element("span", "");
+    rest.style.flex = String(1 - total);
+    bar.append(rest);
+  }
+  return bar;
+}
+
 function buildLandCard(land) {
-  const card = element("article", "result-card");
-  card.append(element("h3", "", `${text(land.district, "未填地區")}・${text(land.section, "未填地段")}・${text(land.land_number, "未填地號")}`));
-  const metrics = element("div", "metric-row");
-  metrics.append(metric("面積㎡", formatNumber(land.area)), metric("公告現值", formatNumber(land.declared_value)), metric("地主", formatNumber((land.owners || []).length)));
-  card.append(metrics);
+  const card = element("article", "result-card land-card");
+  const line = element("p", "card-line");
+  line.append(
+    document.createTextNode("面積 "), element("span", "num", formatNumber(land.area)), document.createTextNode(" ㎡　公告現值 "),
+    element("span", "num", formatNumber(land.declared_value)), document.createTextNode(" 元")
+  );
+  const holders = element("div", "holders");
   (land.owners || []).forEach(owner => {
-    const row = element("div", "owner-buttons");
-    const button = element("button", "record-link", `${text(owner.name, "未填姓名")}・${text(owner.numerator, "?")}/${text(owner.denominator, "?")}`);
+    const button = element("button", "holder");
     button.type = "button";
     button.dataset.recordId = owner.record_id;
-    row.append(button, element("span", "muted", `${formatNumber(owner.ping || 0)} 坪`));
-    card.append(row);
+    const nums = element("span", "holder-nums");
+    nums.append(
+      element("span", "num", `${text(owner.numerator, "?")}/${text(owner.denominator, "?")}`),
+      countLabel(owner.ping || 0, "坪")
+    );
+    button.append(element("span", "holder-name", text(owner.name, "未填姓名")), nums);
+    holders.append(button);
   });
+  card.append(...[
+    element("p", "where muted", `${text(land.district, "未填地區")}　${text(land.section, "未填地段")}`),
+    element("p", "parcel parcel--list", text(land.land_number, "未填地號")),
+    line,
+    buildShareBar(land.owners),
+    holders
+  ].filter(Boolean));
   return card;
 }
 
@@ -2018,30 +2465,26 @@ async function loadFollowups() {
   setChildren(container, [emptyState("正在載入追蹤提醒…")]);
   try {
     const result = await request("/api/v1/follow-ups?limit=500");
-    const items = [...(result.items || [])].sort((a, b) => {
-      if (isOverdue(a) !== isOverdue(b)) return isOverdue(a) ? -1 : 1;
-      return String(a.due_date || a.next_follow_up || "9999").localeCompare(String(b.due_date || b.next_follow_up || "9999"));
+    const items = sortedFollowups(result.items || []);
+    // 分成「逾期」「今天」「之後」三組，逾期的排在最前面
+    const groups = [
+      ["overdue", "逾期", "group-title is-over"],
+      ["today", "今天", "group-title"],
+      ["later", "之後", "group-title"]
+    ];
+    const sections = [];
+    groups.forEach(([key, title, className]) => {
+      const members = items.filter(item => followupDue(item).group === key);
+      if (!members.length) return;
+      const heading = element("h3", className, title);
+      heading.append(element("small", "", `${formatNumber(members.length)} 筆`));
+      const list = element("div", "group-list");
+      list.append(...members.map(buildFollowupCard));
+      sections.push(heading, list);
     });
-    const cards = items.map(item => {
-      const card = element("article", `result-card${isOverdue(item) ? " overdue" : ""}`);
-      card.append(
-        element("h3", "", text(item.owner_name || item.name, "未填姓名")),
-        element("div", "card-meta", `${text(item.district, "未填地區")}・${text(item.section, "未填地段")}・${text(item.land_number, "未填地號")}`)
-      );
-      const metrics = element("div", "metric-row");
-      metrics.append(metric("日期", formatDate(item.due_date || item.next_follow_up)), metric("狀態", item.status || item.follow_up_status));
-      card.append(metrics);
-      const button = element("button", "record-link", "查看與更新");
-      button.type = "button";
-      button.dataset.recordId = item.id;
-      card.append(button);
-      return card;
-    });
-    setChildren(container, cards.length ? cards : [emptyState("目前沒有追蹤提醒。")]);
+    setChildren(container, sections.length ? sections : [emptyState("目前沒有追蹤提醒。")]);
     const pendingCount = items.filter(item => (item.status || item.follow_up_status || "") !== "完成").length;
-    const navCount = $("#nav-followup-count");
-    navCount.textContent = formatNumber(pendingCount);
-    navCount.classList.toggle("hidden", pendingCount === 0);
+    setFollowupBadge(pendingCount);
   } catch (error) {
     setChildren(container, [emptyState(error.message)]);
   } finally {
@@ -2922,6 +3365,10 @@ function bindEvents() {
   $("#field-action-form").addEventListener("input", saveFieldActionDraft);
   $("#field-action-form").addEventListener("change", saveFieldActionDraft);
   $$('[data-close-field-action]').forEach(node => node.addEventListener("click", closeFieldAction));
+  $("#field-coordinate-form").addEventListener("submit", submitFieldCoordinate);
+  $("#field-coordinate-input").addEventListener("input", previewFieldCoordinate);
+  $$('[data-close-field-coordinate]').forEach(node => node.addEventListener("click", closeFieldCoordinate));
+  $("#field-route-open").addEventListener("click", toggleFieldRouteSegments);
   $("#field-plan-search-form").addEventListener("submit", searchFieldPlanRecords);
   $("#field-plan-submit").addEventListener("click", submitFieldPlan);
   $("#field-plan-order-save").addEventListener("click", saveFieldPlanOrder);
@@ -2968,6 +3415,8 @@ function bindEvents() {
     if (fieldItem) selectFieldVisitItem(fieldItem.dataset.fieldItemIndex);
     const navigationButton = event.target.closest("[data-field-navigate]");
     if (navigationButton) openFieldNavigation(navigationButton.dataset.fieldNavigate);
+    const coordinateButton = event.target.closest("[data-field-coordinate]");
+    if (coordinateButton) openFieldCoordinate(coordinateButton.dataset.fieldCoordinate, coordinateButton);
     const fieldActionButton = event.target.closest("[data-field-action]");
     if (fieldActionButton) {
       openFieldAction(
@@ -3029,6 +3478,7 @@ function bindEvents() {
     if (event.key === "Escape" && !$("#photo-viewer").classList.contains("hidden")) closePhotoViewer();
     else if (event.key === "Escape" && !$("#attachment-edit-dialog").classList.contains("hidden")) closeAttachmentEdit();
     else if (event.key === "Escape" && !$("#field-action-dialog").classList.contains("hidden")) closeFieldAction();
+    else if (event.key === "Escape" && !$("#field-coordinate-dialog").classList.contains("hidden")) closeFieldCoordinate();
     else if (event.key === "Escape" && !$("#field-plan-dialog").classList.contains("hidden")) closeFieldPlan();
     else if (event.key === "Escape") closeRecord();
     if (event.key === "ArrowLeft" && !$("#photo-viewer").classList.contains("hidden")) movePhotoViewer(-1);

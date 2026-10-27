@@ -540,6 +540,9 @@ class FieldVisitStatusUpdate(BaseModel):
     note: str = Field(default="", max_length=5000)
     postponed_until: datetime | None = None
     contact_date: date | None = None
+    # The field worker confirmed that the GPS was taken at this landowner's
+    # address; it is stored only for land shares that have no location yet.
+    save_location: bool = False
 
     @model_validator(mode="after")
     def validate_coordinate_pair(self):

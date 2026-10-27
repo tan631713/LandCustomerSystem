@@ -6,15 +6,20 @@ import json
 
 from customer_api.data_source_base import _decrypt_record, _row_dict
 from customer_api.field_visit_service import (
+    ARRIVAL_LOCATION_STATUSES,
     FieldVisitIdempotencyConflict,
     FieldVisitPlanConflict,
     FieldVisitTransitionError,
+    location_address_fingerprint,
+    normalize_location_address,
     validate_status_transition,
 )
+from customer_security import DECRYPTION_ERROR_TEXT, decrypt_value, make_fernet
 
 
 class PostgreSQLFieldVisitMixin:
     IDEMPOTENCY_TTL_HOURS = 24
+    ARRIVAL_LOCATION_SOURCE = "field_gps"
 
     @staticmethod
     def _lock_idempotency_key(conn, user_id, idempotency_key):
@@ -321,9 +326,9 @@ class PostgreSQLFieldVisitMixin:
         lock_sql = " FOR UPDATE OF item" if for_update else ""
         return conn.execute(
             """
-            SELECT item.id, item.status, item.priority, item.route_order,
-                   item.is_order_locked, item.estimated_distance_km,
-                   item.updated_at,
+            SELECT item.id, item.owner_id, item.status, item.priority,
+                   item.route_order, item.is_order_locked,
+                   item.estimated_distance_km, item.updated_at,
                    CASE WHEN location.geocode_status IN ('manual', 'success')
                         THEN location.latitude END AS latitude,
                    CASE WHEN location.geocode_status IN ('manual', 'success')
@@ -609,6 +614,105 @@ class PostgreSQLFieldVisitMixin:
         "completed": "完成拜訪",
     }
 
+    def _fill_missing_locations_from_arrival(
+        self, conn, user, route_id, item_id, latitude, longitude
+    ):
+        """Save the arrival GPS for shares at this stop that have no location.
+
+        Only shares in the same route whose address matches the arrived item
+        (the same household) are filled, and a manual or already geocoded
+        location is never replaced.  Returns the ownership ids that received
+        the GPS.
+        """
+
+        rows = conn.execute(
+            """
+            SELECT item.id, item.ownership_id,
+                   COALESCE(ownership.address_override, owner.address) AS address,
+                   (location.ownership_id IS NOT NULL
+                    AND location.geocode_status IN ('manual', 'success'))
+                       AS has_location
+            FROM field_visit_route_items item
+            JOIN ownerships ownership ON ownership.id = item.ownership_id
+            JOIN owners owner ON owner.id = item.owner_id
+            LEFT JOIN ownership_locations location
+              ON location.ownership_id = item.ownership_id
+            WHERE item.route_id = %s
+              AND (item.id = %s OR item.status <> 'cancelled')
+            ORDER BY item.id
+            """,
+            (int(route_id), int(item_id)),
+        ).fetchall()
+        fernet = make_fernet(user.data_key)
+        entries = []
+        arrival_address = None
+        for row in rows:
+            values = _row_dict(row)
+            address = decrypt_value(fernet, values.get("address"))
+            if address == DECRYPTION_ERROR_TEXT:
+                # Never treat unreadable addresses as "the same address".
+                address = ""
+            entries.append((values, address))
+            if int(values["id"]) == int(item_id):
+                arrival_address = address
+        if arrival_address is None:
+            return []
+        arrival_fingerprint = location_address_fingerprint(arrival_address)
+        has_arrival_address = bool(normalize_location_address(arrival_address))
+        targets = []
+        for values, address in entries:
+            if values.get("has_location"):
+                continue
+            is_arrival = int(values["id"]) == int(item_id)
+            same_address = (
+                has_arrival_address
+                and location_address_fingerprint(address) == arrival_fingerprint
+            )
+            if is_arrival or same_address:
+                targets.append((int(values["ownership_id"]), address))
+        filled = []
+        for ownership_id, address in targets:
+            conn.execute(
+                """
+                INSERT INTO ownership_locations (
+                    ownership_id, latitude, longitude, source,
+                    geocode_status, geocode_source, geocoded_at,
+                    geocode_error, address_fingerprint
+                ) VALUES (%s, %s, %s, %s, 'success', %s, CURRENT_TIMESTAMP, NULL, %s)
+                ON CONFLICT (ownership_id) DO UPDATE SET
+                    latitude = EXCLUDED.latitude,
+                    longitude = EXCLUDED.longitude,
+                    source = EXCLUDED.source,
+                    geocode_status = EXCLUDED.geocode_status,
+                    geocode_source = EXCLUDED.geocode_source,
+                    geocoded_at = CURRENT_TIMESTAMP,
+                    geocode_error = NULL,
+                    address_fingerprint = EXCLUDED.address_fingerprint,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE ownership_locations.geocode_status NOT IN ('manual', 'success')
+                """,
+                (
+                    ownership_id,
+                    float(latitude),
+                    float(longitude),
+                    self.ARRIVAL_LOCATION_SOURCE,
+                    self.ARRIVAL_LOCATION_SOURCE,
+                    location_address_fingerprint(address),
+                ),
+            )
+            filled.append(ownership_id)
+        if filled:
+            self._audit(
+                conn,
+                user,
+                "api_field_visit_arrival_location",
+                "field_visit_route_item",
+                int(item_id),
+                f"Saved arrival GPS for {len(filled)} land share(s) without a location",
+                {"route_id": int(route_id), "ownership_ids": filled},
+            )
+        return filled
+
     def transition_field_visit_item(
         self,
         user,
@@ -623,6 +727,7 @@ class PostgreSQLFieldVisitMixin:
         allowed_old_statuses=None,
         idempotency_key=None,
         request_hash="",
+        save_location=False,
     ):
         item_id = int(item_id)
         with self._connect() as conn:
@@ -721,6 +826,21 @@ class PostgreSQLFieldVisitMixin:
                     str(note or "") or None,
                 ),
             ).fetchone()
+            location_filled_ids = []
+            if (
+                save_location
+                and new_status in ARRIVAL_LOCATION_STATUSES
+                and latitude is not None
+                and longitude is not None
+            ):
+                location_filled_ids = self._fill_missing_locations_from_arrival(
+                    conn,
+                    user,
+                    int(updated["route_id"]),
+                    item_id,
+                    latitude,
+                    longitude,
+                )
             contact_log_id = None
             if new_status in self.AUTO_CONTACT_LOG_STATUSES:
                 next_follow_up = (
@@ -819,6 +939,7 @@ class PostgreSQLFieldVisitMixin:
                 "changed": True,
                 "history_id": int(history["id"]),
                 "contact_log_id": contact_log_id,
+                "location_filled_ownership_ids": location_filled_ids,
             }
             self._save_idempotency_result(
                 conn,

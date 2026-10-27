@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#153f3a">
+  <meta name="theme-color" content="#F2F4F5">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="地主助手">
   <meta name="description" content="地主開發、土地查詢與追蹤管理的內部工作台">
   <meta property="og:type" content="website">
@@ -29,38 +29,22 @@
   </div>
 
   <main id="login-view" class="login-shell">
-    <section class="login-brand" aria-label="系統介紹">
-      <div class="login-brand-content">
-        <div class="brand-mark brand-mark-large">
-          <img src="./app-icon.png" alt="">
-        </div>
-        <p class="eyebrow light">土地資料系統</p>
-        <h1>把每一筆土地機會，<br>變成清楚的下一步。</h1>
-        <p>集中掌握地主資料、土地持分與追蹤進度，讓開發工作不再散落。</p>
-        <div class="feature-list" aria-label="主要功能">
-          <span>地主與土地快速搜尋</span>
-          <span>聯絡紀錄集中管理</span>
-          <span>待辦追蹤即時同步</span>
-        </div>
-      </div>
-      <p class="login-brand-foot">內部專用 · 資料直接連線 PostgreSQL</p>
-    </section>
-
     <section class="login-panel">
       <div class="login-card" aria-labelledby="login-title">
         <div class="mobile-login-brand">
-          <img class="app-logo" src="./app-icon.png" alt="土地資料系統">
-          <span>地主開發助手｜管理台</span>
+          <svg class="app-logo" width="30" height="30" viewBox="0 0 30 30" aria-hidden="true" focusable="false">
+            <path d="M4 6 L22 3 L27 22 L8 27 Z" fill="none" stroke="#14212B" stroke-width="2" stroke-linejoin="round"/>
+            <path d="M22 3 L27 22" stroke="#C8102E" stroke-width="3.5" stroke-linecap="round"/>
+          </svg>
+          <span>地主開發助手</span>
         </div>
-        <p class="eyebrow">歡迎回來</p>
-        <h2 id="login-title">登入工作台</h2>
-        <p class="muted">使用桌面系統的帳號繼續。</p>
+        <h2 id="login-title">登入</h2>
         <form id="login-form" class="stack-form">
           <label for="login-username">帳號</label>
-          <input id="login-username" name="username" autocomplete="username" value="admin" required maxlength="80">
+          <input id="login-username" name="username" autocomplete="username" autocapitalize="none" value="admin" required maxlength="80">
           <label for="login-password">密碼</label>
           <input id="login-password" name="password" type="password" autocomplete="current-password" required maxlength="256">
-          <button id="login-button" class="primary-button" type="submit">登入管理台</button>
+          <button id="login-button" class="primary-button" type="submit">登入</button>
         </form>
         <p id="login-error" class="form-error" role="alert"></p>
         <section id="login-connection-check" class="login-connection-check" data-state="checking" aria-live="polite">
@@ -84,16 +68,19 @@
   <div id="app-shell" class="app-shell hidden">
     <aside class="sidebar">
       <div class="sidebar-brand">
-        <img src="./app-icon.png" alt="">
-        <div><strong>地主開發</strong><span>管理工作台</span></div>
+        <svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true" focusable="false">
+          <path d="M4 6 L22 3 L27 22 L8 27 Z" fill="none" stroke="#14212B" stroke-width="2" stroke-linejoin="round"/>
+          <path d="M22 3 L27 22" stroke="#C8102E" stroke-width="3.5" stroke-linecap="round"/>
+        </svg>
+        <div><strong>地主開發助手</strong><span>土地資料系統</span></div>
       </div>
       <nav class="app-nav" aria-label="主要功能">
-        <button class="active" type="button" data-page="home" aria-current="page"><span class="nav-icon" aria-hidden="true">⌂</span><span>總覽</span></button>
-        <button type="button" data-page="field"><span class="nav-icon" aria-hidden="true">外</span><span>今日外勤</span></button>
-        <button type="button" data-page="owners"><span class="nav-icon" aria-hidden="true">人</span><span>地主搜尋</span></button>
-        <button type="button" data-page="lands"><span class="nav-icon" aria-hidden="true">田</span><span>土地搜尋</span></button>
-        <button type="button" data-page="followups"><span class="nav-icon" aria-hidden="true">✓</span><span>追蹤提醒</span><span id="nav-followup-count" class="nav-count hidden">0</span></button>
-        <button type="button" data-page="map"><span class="nav-icon" aria-hidden="true">圖</span><span>地圖</span></button>
+        <button class="active" type="button" data-page="home" aria-current="page"><span>總覽</span></button>
+        <button type="button" data-page="field"><span>今日外勤</span></button>
+        <button type="button" data-page="owners"><span>地主搜尋</span></button>
+        <button type="button" data-page="lands"><span>土地搜尋</span></button>
+        <button type="button" data-page="followups"><span>追蹤提醒</span><span id="nav-followup-count" class="nav-count hidden">0</span></button>
+        <button type="button" data-page="map"><span>地圖</span></button>
       </nav>
       <div class="sidebar-foot">
         <span class="status-dot" aria-hidden="true"></span>
@@ -104,15 +91,15 @@
     <div class="workspace">
       <header class="topbar">
         <div>
-          <p class="breadcrumb">土地資料系統 <span aria-hidden="true">/</span> <strong id="breadcrumb-page">總覽</strong></p>
+          <p class="breadcrumb"><strong id="breadcrumb-page">總覽</strong></p>
           <h1 id="page-title">總覽</h1>
         </div>
         <div class="topbar-actions">
-          <div class="connection-pill" aria-hidden="true"><span class="status-dot"></span><span>系統連線</span></div>
+          <div class="connection-pill" aria-hidden="true"><span class="status-dot"></span><span>已連線</span></div>
           <button id="user-button" class="user-button" type="button" aria-label="登出">
             <span id="user-avatar" class="user-avatar" aria-hidden="true">管</span>
             <span class="user-copy"><strong id="user-name">使用者</strong><small id="user-role"></small></span>
-            <span aria-hidden="true">⌄</span>
+            <span class="user-logout" aria-hidden="true">登出</span>
           </button>
         </div>
       </header>
@@ -121,41 +108,38 @@
         <section id="page-home" class="page active" aria-labelledby="home-heading">
           <div class="welcome-row">
             <div>
-              <p id="today-label" class="eyebrow">今日工作台</p>
-              <h2 id="home-heading">早安，開始今天的開發工作</h2>
-              <p class="page-lead">快速掌握資料總量與待追蹤案件。</p>
+              <h2 id="home-heading">早安</h2>
+              <p id="today-label" class="page-lead"></p>
             </div>
-            <button id="refresh-dashboard" class="secondary-button" type="button">重新整理資料</button>
+            <button id="refresh-dashboard" class="link-button" type="button">重新整理</button>
           </div>
 
-          <div id="stats-grid" class="stats-grid">
-            <article class="stat-card"><span class="stat-kicker">土地持分</span><strong id="stat-records">—</strong><small>目前資料總筆數</small></article>
-            <article class="stat-card"><span class="stat-kicker">地主</span><strong id="stat-owners">—</strong><small>已建檔地主人數</small></article>
-            <article class="stat-card"><span class="stat-kicker">土地</span><strong id="stat-lands">—</strong><small>不重複土地筆數</small></article>
-            <article class="stat-card accent"><span class="stat-kicker">待追蹤</span><strong id="stat-followups">—</strong><small>需要持續處理</small></article>
-          </div>
+          <section class="block" aria-labelledby="home-field-title">
+            <h3 id="home-field-title" class="block-title">今日外勤</h3>
+            <div id="home-field" class="home-field"><p class="muted small">正在讀取今日行程…</p></div>
+          </section>
 
-          <div class="dashboard-grid">
-            <section class="panel quick-panel">
-              <div class="panel-heading"><div><p class="eyebrow">快捷入口</p><h3>接下來要做什麼？</h3></div></div>
-              <div class="quick-grid">
-                <button type="button" data-go="owners"><span class="quick-icon">人</span><span><strong>搜尋地主</strong><small>姓名、身分證、地址</small></span><b aria-hidden="true">→</b></button>
-                <button type="button" data-go="lands"><span class="quick-icon">田</span><span><strong>搜尋土地</strong><small>地號、地區、地段</small></span><b aria-hidden="true">→</b></button>
-                <button type="button" data-go="followups"><span class="quick-icon">✓</span><span><strong>處理追蹤</strong><small>查看即將到期項目</small></span><b aria-hidden="true">→</b></button>
-                <button type="button" data-go="field"><span class="quick-icon">外</span><span><strong>開始今日外勤</strong><small>查看行程與開啟導航</small></span><b aria-hidden="true">→</b></button>
-              </div>
-            </section>
-            <section class="panel sync-panel">
-              <div class="sync-visual"><span class="status-dot"></span><span class="sync-ring"></span></div>
-              <p class="eyebrow">同步狀態</p>
-              <h3>所有資料保持一致</h3>
-              <p>每次操作都直接透過安全連線讀寫自架 PostgreSQL，不在此裝置另外保存土地資料。</p>
-              <small id="last-sync-time">等待首次同步</small>
-            </section>
-          </div>
-          <section id="field-location-panel" class="panel field-location-panel" aria-labelledby="field-location-heading">
+          <section class="block" aria-labelledby="home-followups-title">
+            <div class="block-head">
+              <h3 id="home-followups-title" class="block-title">追蹤提醒</h3>
+              <span id="home-followup-summary" class="small muted"></span>
+            </div>
+            <div id="home-followups" class="rows"></div>
+            <button type="button" class="link-button" data-go="followups">查看全部追蹤提醒</button>
+          </section>
+
+          <section class="block" aria-labelledby="home-stats-title">
+            <h3 id="home-stats-title" class="block-title">資料總量</h3>
+            <dl id="stats-grid" class="facts">
+              <div class="facts-row"><dt>土地持分</dt><dd id="stat-records">—</dd></div>
+              <div class="facts-row"><dt>地主</dt><dd id="stat-owners">—</dd></div>
+              <div class="facts-row"><dt>土地</dt><dd id="stat-lands">—</dd></div>
+              <div class="facts-row"><dt>待追蹤</dt><dd id="stat-followups">—</dd></div>
+            </dl>
+          </section>
+          <p class="sync-line"><span class="status-dot" aria-hidden="true"></span><span id="last-sync-time">等待首次同步</span></p>
+          <section id="field-location-panel" class="field-location-panel" aria-labelledby="field-location-heading">
             <div class="field-location-copy">
-              <p class="eyebrow">外勤準備</p>
               <h3 id="field-location-heading">確認手機定位</h3>
               <p id="field-location-status" role="status" aria-live="polite">開始外勤前可先確認 GPS；定位失敗不會影響原始拜訪順序。</p>
               <small id="field-location-detail">位置只會在本次開啟頁面期間使用，不會儲存在手機裡。</small>
@@ -167,9 +151,7 @@
         <section id="page-field" class="page" aria-labelledby="field-heading">
           <div class="page-heading section-heading">
             <div>
-              <p class="eyebrow">手機外勤模式</p>
               <h2 id="field-heading">今日拜訪行程</h2>
-              <p class="page-lead">一次專注一位地主，完成後再前往下一站。</p>
             </div>
             <div class="page-heading-actions">
               <button id="field-visit-manage" class="primary-button editor-only" type="button">安排今日行程</button>
@@ -187,18 +169,26 @@
             <section class="field-visit-summary" aria-label="今日行程進度">
               <div class="field-visit-summary-heading">
                 <div>
-                  <p id="field-visit-date" class="eyebrow">今日</p>
+                  <p id="field-visit-date" class="field-visit-date">今日</p>
                   <h3 id="field-visit-title">今日拜訪</h3>
                 </div>
                 <span id="field-visit-route-status" class="visit-status">尚未開始</span>
               </div>
-              <div class="field-progress-track" aria-hidden="true"><span id="field-progress-bar"></span></div>
+              <ol id="field-progress-chain" class="chain" aria-label="今日行程進度，每一格是一位地主"></ol>
               <div class="field-progress-stats">
                 <span><strong id="field-stat-total">0</strong><small>總數</small></span>
                 <span><strong id="field-stat-completed">0</strong><small>完成</small></span>
                 <span><strong id="field-stat-remaining">0</strong><small>未完成</small></span>
                 <span><strong id="field-stat-skipped">0</strong><small>略過</small></span>
                 <span><strong id="field-stat-distance">—</strong><small>預估公里</small></span>
+              </div>
+              <div class="field-schedule">
+                <div class="field-schedule-copy">
+                  <strong id="field-schedule-summary">—</strong>
+                  <small id="field-schedule-note"></small>
+                </div>
+                <button id="field-route-open" class="secondary-button" type="button" aria-expanded="false" aria-controls="field-route-segments">整天路線導航</button>
+                <div id="field-route-segments" class="field-route-segments hidden"></div>
               </div>
               <div class="field-start-row editor-only">
                 <div>
@@ -215,7 +205,6 @@
             <section id="field-completion-summary" class="field-completion-summary hidden" aria-live="polite">
               <div class="field-completion-heading">
                 <div>
-                  <p class="eyebrow">今日成果</p>
                   <h3>今日外勤已完成</h3>
                 </div>
                 <span class="field-completion-check" aria-hidden="true">✓</span>
@@ -253,10 +242,10 @@
 
         <section id="page-owners" class="page" aria-labelledby="owners-heading">
           <div class="page-heading">
-            <div><p class="eyebrow">客戶資料</p><h2 id="owners-heading">地主搜尋</h2><p class="page-lead">從姓名、身分證或地址快速找到地主與持分資料。</p></div>
+            <div><h2 id="owners-heading">地主搜尋</h2></div>
           </div>
-          <form id="owner-search-form" class="search-panel search-row">
-            <label class="search-field" for="owner-query"><span>搜尋地主</span><input id="owner-query" type="search" placeholder="輸入姓名、身分證或地址" maxlength="200" enterkeyhint="search"></label>
+          <form id="owner-search-form" class="search-panel search-row" role="search">
+            <label class="search-field" for="owner-query"><span class="sr-only">搜尋地主</span><input id="owner-query" type="search" placeholder="姓名、身分證或地址" maxlength="200" enterkeyhint="search"></label>
             <button type="submit">搜尋</button>
           </form>
           <div class="result-summary"><p id="owner-count" class="result-count" aria-live="polite"></p></div>
@@ -265,10 +254,10 @@
 
         <section id="page-lands" class="page" aria-labelledby="lands-heading">
           <div class="page-heading">
-            <div><p class="eyebrow">資產資料</p><h2 id="lands-heading">土地搜尋</h2><p class="page-lead">依地號、地主、地區與地段交叉查詢土地。</p></div>
+            <div><h2 id="lands-heading">土地搜尋</h2></div>
           </div>
-          <form id="land-search-form" class="search-panel stack-form compact-form">
-            <label for="land-query">關鍵字<input id="land-query" type="search" placeholder="地號或地主姓名" maxlength="200"></label>
+          <form id="land-search-form" class="search-panel stack-form compact-form" role="search">
+            <label for="land-query">地號或地主姓名<input id="land-query" type="search" placeholder="例如：221-0000 或 王大明" maxlength="200"></label>
             <div class="field-pair">
               <label for="land-district">地區<input id="land-district" placeholder="例如：北屯區" maxlength="100"></label>
               <label for="land-section">地段<input id="land-section" placeholder="例如：仁美段" maxlength="100"></label>
@@ -281,16 +270,16 @@
 
         <section id="page-followups" class="page" aria-labelledby="followups-heading">
           <div class="page-heading section-heading">
-            <div><p class="eyebrow">工作排程</p><h2 id="followups-heading">追蹤提醒</h2><p class="page-lead">優先顯示逾期與即將到期的地主案件。</p></div>
-            <button id="refresh-followups" class="secondary-button" type="button">重新整理</button>
+            <div><h2 id="followups-heading">追蹤提醒</h2></div>
+            <button id="refresh-followups" class="link-button" type="button">重新整理</button>
           </div>
           <div id="followup-results" class="result-list"></div>
         </section>
 
         <section id="page-map" class="page" aria-labelledby="map-heading">
           <div class="page-heading section-heading">
-            <div><p class="eyebrow">資產分布</p><h2 id="map-heading">地圖</h2><p class="page-lead">已定位的地主分布，可依地區切換只看單一地區。</p></div>
-            <button id="refresh-map" class="secondary-button" type="button">重新整理</button>
+            <div><h2 id="map-heading">地圖</h2></div>
+            <button id="refresh-map" class="link-button" type="button">重新整理</button>
           </div>
           <p id="map-count" class="result-count" aria-live="polite"></p>
           <div id="map-district-tabs" class="district-tabs"></div>
@@ -301,12 +290,12 @@
     </div>
 
     <nav class="mobile-nav" aria-label="手機版主要功能">
-      <button class="active" type="button" data-page="home" aria-current="page"><span aria-hidden="true">⌂</span><small>總覽</small></button>
-      <button type="button" data-page="field"><span aria-hidden="true">外</span><small>外勤</small></button>
-      <button type="button" data-page="owners"><span aria-hidden="true">人</span><small>地主</small></button>
-      <button type="button" data-page="lands"><span aria-hidden="true">田</span><small>土地</small></button>
-      <button type="button" data-page="followups"><span aria-hidden="true">✓</span><small>追蹤</small></button>
-      <button type="button" data-page="map"><span aria-hidden="true">圖</span><small>地圖</small></button>
+      <button class="active" type="button" data-page="home" aria-current="page">總覽</button>
+      <button type="button" data-page="field">外勤</button>
+      <button type="button" data-page="owners">地主</button>
+      <button type="button" data-page="lands">土地</button>
+      <button type="button" data-page="followups">追蹤<span id="mobile-followup-count" class="nav-count hidden">0</span></button>
+      <button type="button" data-page="map">地圖</button>
     </nav>
   </div>
 
@@ -314,13 +303,13 @@
     <div class="sheet-backdrop" data-close-sheet></div>
     <div class="sheet-card">
       <header class="sheet-header">
-        <div><p class="eyebrow">土地持分明細</p><h2 id="record-title">資料</h2></div>
+        <div><h2 id="record-title">資料</h2></div>
         <button type="button" class="icon-button" data-close-sheet aria-label="關閉">×</button>
       </header>
       <div id="record-detail" class="detail-grid"></div>
       <section id="attachment-section" class="sheet-section">
         <div class="panel-heading attachment-heading">
-          <div><p class="eyebrow">現場資料</p><h3>照片與附件</h3></div>
+          <div><h3>照片與附件</h3></div>
           <span id="attachment-count" class="attachment-count" aria-live="polite">0 個附件</span>
         </div>
         <div class="attachment-toolbar" aria-label="附件篩選與排序">
@@ -377,7 +366,7 @@
         </form>
       </section>
       <section id="contact-section" class="sheet-section">
-        <div class="panel-heading"><div><p class="eyebrow">互動歷程</p><h3>聯絡／拜訪紀錄</h3></div></div>
+        <div class="panel-heading"><div><h3>聯絡／拜訪紀錄</h3></div></div>
         <div id="contact-results" class="timeline"></div>
         <form id="contact-form" class="stack-form compact-form editor-only">
           <div class="field-pair">
@@ -391,7 +380,7 @@
         </form>
       </section>
       <section class="sheet-section editor-only">
-        <div class="panel-heading"><div><p class="eyebrow">下一步</p><h3>設定追蹤</h3></div></div>
+        <div class="panel-heading"><div><h3>設定追蹤</h3></div></div>
         <form id="followup-form" class="stack-form compact-form">
           <div class="field-pair">
             <label for="followup-date">追蹤日期<input id="followup-date" type="date"></label>
@@ -406,7 +395,7 @@
 
   <section id="photo-viewer" class="photo-viewer hidden" role="dialog" aria-modal="true" aria-labelledby="photo-viewer-title">
     <header class="photo-viewer-header">
-      <div><p class="eyebrow">照片預覽</p><h2 id="photo-viewer-title">照片</h2></div>
+      <div><h2 id="photo-viewer-title">照片</h2></div>
       <button id="photo-viewer-close" type="button" class="icon-button" aria-label="關閉照片">×</button>
     </header>
     <div class="photo-viewer-stage">
@@ -426,7 +415,7 @@
     <div class="modal-backdrop" data-close-attachment-edit></div>
     <form id="attachment-edit-form" class="modal-card stack-form">
       <header class="modal-header">
-        <div><p class="eyebrow">整理附件</p><h2 id="attachment-edit-title">修改分類與說明</h2></div>
+        <div><h2 id="attachment-edit-title">修改分類與說明</h2></div>
         <button type="button" class="icon-button" data-close-attachment-edit aria-label="關閉">×</button>
       </header>
       <input id="attachment-edit-id" type="hidden">
@@ -451,7 +440,7 @@
     <div class="modal-backdrop" data-close-field-action></div>
     <form id="field-action-form" class="modal-card stack-form">
       <header class="modal-header">
-        <div><p class="eyebrow">外勤紀錄</p><h2 id="field-action-title">更新拜訪狀態</h2></div>
+        <div><h2 id="field-action-title">更新拜訪狀態</h2></div>
         <button type="button" class="icon-button" data-close-field-action aria-label="關閉">×</button>
       </header>
       <p id="field-action-owner" class="field-action-owner"></p>
@@ -464,7 +453,29 @@
         <textarea id="field-action-note" maxlength="5000" rows="4" placeholder="選填，例如：地主臨時不在、已約下次時間"></textarea>
       </label>
       <p id="field-action-location-note" class="field-action-location-note">送出時會嘗試附上目前 GPS；定位失敗仍可正常儲存。</p>
+      <label id="field-action-save-location-row" class="field-action-save-location hidden" for="field-action-save-location">
+        <input id="field-action-save-location" type="checkbox">
+        <span>我在地主家，用目前位置當作這個地址的座標（已有座標的不會被覆蓋）</span>
+      </label>
       <button id="field-action-submit" type="submit">儲存狀態</button>
+    </form>
+  </section>
+
+  <section id="field-coordinate-dialog" class="modal-layer hidden" role="dialog" aria-modal="true" aria-labelledby="field-coordinate-title">
+    <div class="modal-backdrop" data-close-field-coordinate></div>
+    <form id="field-coordinate-form" class="modal-card stack-form" novalidate>
+      <header class="modal-header">
+        <div><h2 id="field-coordinate-title">補上座標</h2></div>
+        <button type="button" class="icon-button" data-close-field-coordinate aria-label="關閉">×</button>
+      </header>
+      <p id="field-coordinate-owner" class="field-action-owner"></p>
+      <p class="field-coordinate-help">在 Google 地圖長按地主家的位置，複製上方的「緯度, 經度」貼到下面；也可以貼 Google 地圖網址。<a id="field-coordinate-maps" href="https://www.google.com/maps" target="_blank" rel="noopener">在 Google 地圖找這個地址</a></p>
+      <label for="field-coordinate-input">座標或 Google 地圖網址
+        <input id="field-coordinate-input" autocomplete="off" inputmode="text" placeholder="25.0330, 121.5654">
+      </label>
+      <p id="field-coordinate-result" class="field-coordinate-result" role="status" aria-live="polite"></p>
+      <p id="field-coordinate-scope" class="muted"></p>
+      <button id="field-coordinate-save" type="submit">儲存座標</button>
     </form>
   </section>
 
@@ -472,7 +483,7 @@
     <div class="modal-backdrop" data-close-field-plan></div>
     <div class="modal-card field-plan-card">
       <header class="modal-header">
-        <div><p class="eyebrow">今日外勤</p><h2 id="field-plan-heading">安排今日行程</h2></div>
+        <div><h2 id="field-plan-heading">安排今日行程</h2></div>
         <button type="button" class="icon-button" data-close-field-plan aria-label="關閉">×</button>
       </header>
       <label id="field-plan-title-row" for="field-plan-title">行程名稱
@@ -480,7 +491,7 @@
       </label>
       <section id="field-plan-current-section" class="field-plan-current-section hidden">
         <div class="field-plan-section-heading">
-          <div><p class="eyebrow">目前名單</p><h3>尚未完成的拜訪順序</h3></div>
+          <div><h3>尚未完成的拜訪順序</h3></div>
           <div class="field-plan-section-actions">
             <button id="field-plan-unlock-order" class="secondary-button" type="button" disabled>目前為自動排序</button>
             <button id="field-plan-order-save" class="secondary-button" type="button">儲存順序</button>
@@ -491,7 +502,7 @@
       </section>
       <section id="field-plan-add-section" class="field-plan-add-section">
         <div class="field-plan-section-heading">
-          <div><p class="eyebrow">新增地主</p><h3>搜尋並批次加入</h3></div>
+          <div><h3>搜尋並批次加入</h3></div>
         </div>
         <form id="field-plan-search-form" class="field-plan-search">
           <label for="field-plan-query">搜尋地主或土地
@@ -523,7 +534,7 @@
   </section>
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
-  <script src="./field-visit.js?v=2" defer></script>
-  <script src="./app.js?v=30" defer></script>
+  <script src="./field-visit.js?v=3" defer></script>
+  <script src="./app.js?v=31" defer></script>
 </body>
 </html>

@@ -290,6 +290,105 @@ class PostgreSQLFieldVisitTests(unittest.TestCase):
         self.assertIn("INSERT INTO field_visit_idempotency_keys", statements)
         self.assertEqual(connection.responses, [])
 
+    def _arrival_connection(self, fill_rows, insert_count):
+        return _Connection(
+            [
+                None,  # advisory transaction lock
+                None,  # expired idempotency cleanup
+                None,  # no cached response
+                {"id": 9, "route_id": 4, "status": "in_progress", "user_id": 2, "ownership_id": 42},
+                {
+                    "id": 9,
+                    "route_id": 4,
+                    "status": "completed",
+                    "arrived_at": None,
+                    "completed_at": None,
+                    "postponed_until": None,
+                    "updated_at": "done",
+                },
+                {"id": 15},  # status history
+                fill_rows,
+                *([None] * insert_count),  # location upserts
+                *([None] if insert_count else []),  # arrival-location audit
+                {"id": 20},  # auto contact log
+                None,  # route status
+                {"remaining": 1},
+                None,  # audit
+                None,  # idempotency response
+            ]
+        )
+
+    def test_arrival_gps_fills_only_same_address_shares_without_location(self):
+        user = AuthenticatedUser(
+            id=2,
+            username="editor",
+            display_name="Editor",
+            role="editor",
+            data_key=urlsafe_b64encode(b"k" * 32),
+        )
+        connection = self._arrival_connection(
+            [
+                {"id": 9, "ownership_id": 42, "address": "竹北市光明六路1號", "has_location": False},
+                {"id": 10, "ownership_id": 43, "address": " 竹北市光明六路1號 ", "has_location": False},
+                {"id": 11, "ownership_id": 44, "address": "新豐鄉新興路8號", "has_location": False},
+                {"id": 12, "ownership_id": 45, "address": "竹北市光明六路1號", "has_location": True},
+            ],
+            2,
+        )
+
+        result = _Source(connection).transition_field_visit_item(
+            user,
+            9,
+            "completed",
+            latitude=24.839,
+            longitude=121.001,
+            idempotency_key="complete-9",
+            request_hash="complete-hash",
+            save_location=True,
+        )
+
+        self.assertEqual(result["location_filled_ownership_ids"], [42, 43])
+        upserts = [
+            (query, params)
+            for query, params in connection.calls
+            if query.startswith("INSERT INTO ownership_locations")
+        ]
+        self.assertEqual([params[0] for _query, params in upserts], [42, 43])
+        self.assertEqual(upserts[0][1][1:5], (24.839, 121.001, "field_gps", "field_gps"))
+        self.assertIn(
+            "WHERE ownership_locations.geocode_status NOT IN ('manual', 'success')",
+            upserts[0][0],
+        )
+        self.assertEqual(connection.responses, [])
+
+    def test_arrival_gps_without_address_only_fills_the_arrived_share(self):
+        user = AuthenticatedUser(
+            id=2,
+            username="editor",
+            display_name="Editor",
+            role="editor",
+            data_key=urlsafe_b64encode(b"k" * 32),
+        )
+        connection = self._arrival_connection(
+            [
+                {"id": 9, "ownership_id": 42, "address": "", "has_location": False},
+                {"id": 10, "ownership_id": 43, "address": "", "has_location": False},
+            ],
+            1,
+        )
+        result = _Source(connection).transition_field_visit_item(
+            user,
+            9,
+            "completed",
+            latitude=24.839,
+            longitude=121.001,
+            idempotency_key="complete-9",
+            request_hash="complete-hash",
+            save_location=True,
+        )
+        self.assertEqual(result["location_filled_ownership_ids"], [42])
+        self.assertEqual(connection.responses, [])
+
     def test_non_owner_cannot_transition_another_users_item(self):
         connection = _Connection(
             [
