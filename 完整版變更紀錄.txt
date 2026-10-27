@@ -1,6 +1,16 @@
 土地資料系統 完整版變更紀錄
 ================================
 
+2026-10-27 家中伺服器 v1.9.44：手機網頁 App 圖示修正、手機版號只改一個地方
+----------------------------------------------------------------
+1. 版本：伺服器 v1.9.44、手機資源版號 34；資料庫結構沒變（v14）；公司筆電客戶端不用更新。commit `3458381`（內容）與本版的版號與紀錄。
+2. 圖示：原本的 `customer_mobile_web/app-icon.png` 是沒有透明通道的 RGB 圖，圓角外面是烤進去的純黑，所以舊 manifest 與 apple-touch-icon 的四角都是黑的；而且 1.8 MB 被 Service Worker 預先快取。現在把四角（由四個角落填色）做成透明遮罩後產生：`icon-192.png`、`icon-512.png`（`any`，圓角透明）、`icon-maskable-512.png`（`maskable`，圖放在中間 72% 的安全區，外框用邊框顏色向外延伸；對角線有淡淡放射紋，只影響 Android 遮罩顯示）、`apple-touch-icon.png`（180×180，不透明，沒有黑角）。每張都小於 55 KB。`app-icon.png` 與 `og.png` 留在資料夾但不再列入 Service Worker 預先快取（預先快取只剩 8 個小檔）。
+3. 顏色：manifest 的 `theme_color`、`background_color` 都改成 `#F2F4F5`，與 `index.html` 的 `theme-color` 和 `styles.css` 的 `--paper` 一致。
+4. 版號：新增 `customer_mobile_web/asset-version.js`（`self.LAND_MOBILE_ASSET_VERSION`）作為手機網頁版本的唯一來源。`service-worker.js` 以 `importScripts` 讀它並組成快取名稱 `land-customer-mobile-v{版號}`；`index.html` 先載入它再載入 `field-visit.js`、`app.js`（這兩個的 `?v=` 拿掉了，伺服器本來就對它們回 `no-store`）；`app.js` 的 `MOBILE_ASSET_VERSION` 讀同一個值；註冊 Service Worker 加了 `updateViaCache: "none"`，被匯入的檔案不會讀到舊快取。`customer_version.MOBILE_ASSET_VERSION`（`/health` 回報）仍是第二份號碼，`tests/test_customer_api.py` 改成讀 `asset-version.js` 而不寫死數字，兩邊不一致測試就失敗。
+5. 測試：新增檢查 manifest 的圖示都存在且尺寸與宣告一致、Service Worker 預先快取的每個檔案都回 200 且小於 256 KB、`index.html` 與 Service Worker 沒有手寫的 `?v=`、manifest 與網頁顏色一致。完整測試 664 項通過（1 項因沒有 node 略過）。瀏覽器驗證：舊的 v31 Service Worker 被新的取代，快取名 `land-customer-mobile-v33`（打包前），主控台沒有錯誤。
+6. 沒有做的：加入主畫面的實機效果沒有在手機上看過；maskable 圖示的外框是延伸出來的，不是重新設計。
+7. 版本：手機資源版號 33 → 34，讓已經開著手機網頁的人看到「立即更新」。
+
 2026-10-22 家中伺服器 v1.9.43：手機網頁整個改版，並一併出貨手機外勤路線規劃第一版
 ----------------------------------------------------------------
 0. 版本：這版同時包含原本預計 v1.9.42 的「手機外勤路線規劃第一版」（`customer_api/field_visit_routing.py`、`field_visit_service.py`、`postgres_field_visits.py`、`routes_field_visits.py`、`schemas.py` 的 `save_location`、`customer_mobile_web/field-visit.js` 與 `app.js` 的外勤部分）。v1.9.42 已用在 10/03 的都市計畫伺服器包，所以這版改為 v1.9.43；手機資源版號 33。資料庫結構沒變（v14）。外勤路線規劃的現場驗收清單（`外勤模式使用與驗收說明.txt`）尚未逐項打勾。另外把 `tests/test_customer_api.py` 裡一行過時的斷言（`destination.address`，程式已改成 `placeValue(place)`，行為相同）改成 `normalizedAddress(place.address)`，完整測試才會全過。
