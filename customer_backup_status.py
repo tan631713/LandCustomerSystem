@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from customer_responsive_dialog import ResponsiveDialog as QDialog
+from customer_theme import token
 
 from customer_messages import (
     backup_failure_message,
@@ -182,7 +183,7 @@ class BackupManagementDialog(QDialog):
 
         hint = QLabel("立即清理只會刪除系統在 backups 資料夾中建立的 customers-*.db / *.zip。")
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: #94a3b8;")
+        hint.setStyleSheet(f"color: {token('ink2')};")
         layout.addWidget(hint)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
@@ -506,9 +507,9 @@ class BackupStatusMixin:
         self.backup_status = status
         if getattr(self, "backup_status_button", None) is not None:
             self.backup_status_button.setText(status.short_text)
-            color = "#86efac" if status.healthy else "#fbbf24"
+            color = token("success_ink") if status.healthy else token("amber_ink")
             if not status.database_healthy:
-                color = "#f87171"
+                color = token("seal")
             self.backup_status_button.setStyleSheet(f"color: {color}; padding: 2px 8px;")
         if show_warning and not status.healthy:
             self.statusBar().showMessage(

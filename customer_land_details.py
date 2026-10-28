@@ -1,6 +1,7 @@
 """Read-only parcel summary opened from a land parent node."""
 
 from customer_land_tree import ownership_area
+from customer_theme import token
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
@@ -28,7 +29,7 @@ class LandDetailsDialog(QDialog):
         )
         heading.setTextInteractionFlags(Qt.TextSelectableByMouse)
         heading.setStyleSheet(
-            "background:#1f2937;color:#e5e7eb;border-radius:6px;padding:12px;"
+            f"background:{token('auto')};color:{token('ink')};border-radius:6px;padding:12px;"
         )
         layout.addWidget(heading)
 

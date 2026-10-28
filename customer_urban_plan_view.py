@@ -15,30 +15,47 @@ from PySide6.QtWidgets import (
     QTreeWidgetItem,
 )
 
+from customer_theme import qcolor, token
 from customer_urban_plan_tree import default_expanded_keys
 
 LEVEL_ROLE = Qt.UserRole + 20
 COLUMN_TITLES = ("名稱", "地主數", "持分數", "面積 ㎡")
 NUMBER_COLUMN_WIDTH = 86
 
-# Structural colours: same family as the land tree (#2d2d2d) with the plan and
-# section rows set off a little so the hierarchy reads at a glance.
-PLAN_BACKGROUND = QColor("#34404f")
-SECTION_BACKGROUND = QColor("#2f3743")
-LEVEL_LABEL_COLOR = QColor("#8b98ab")
-OWNER_TEXT_COLOR = QColor("#cbd5e1")
-EMPTY_TEXT_COLOR = QColor("#8b98ab")
+# Structural colours come from the theme (resolved when used, so the theme
+# activated at start-up applies): the plan and section rows are set off a
+# little from the land rows so the hierarchy reads at a glance.
+def plan_background():
+    return qcolor("green_tint")
 
 
-def plan_tree_style(row_height=28):
+def section_background():
+    return qcolor("auto")
+
+
+def level_label_color():
+    return qcolor("ink2")
+
+
+def owner_text_color():
+    return qcolor("ink")
+
+
+def empty_text_color():
+    return qcolor("ink2")
+
+
+def plan_tree_style(row_height=34):
     row_height = max(20, int(row_height))
     return (
-        "QTreeWidget { background-color: #2d2d2d; alternate-background-color: #2d2d2d; }"
+        f"QTreeWidget {{ background-color: {token('paper')};"
+        f" alternate-background-color: {token('paper')}; }}"
         "QTreeWidget::item {"
         f" min-height: {row_height}px;"
-        " border-bottom: 1px solid #374151;"
+        f" border-bottom: 1px solid {token('rule')};"
         " }"
-        "QTreeWidget::item:selected { background-color: #365d8d; color: #ffffff; }"
+        f"QTreeWidget::item:selected {{ background-color: {token('sel')};"
+        f" color: {token('ink')}; }}"
     )
 
 
@@ -76,7 +93,7 @@ class PlanRowDelegate(QStyledItemDelegate):
         try:
             painter.setRenderHint(QPainter.TextAntialiasing, True)
             painter.setFont(font)
-            painter.setPen(LEVEL_LABEL_COLOR)
+            painter.setPen(level_label_color())
             area = QRect(left, option.rect.top(), option.rect.right() - left - 4, option.rect.height())
             painter.drawText(area, int(Qt.AlignVCenter | Qt.AlignLeft), str(caption))
         finally:
@@ -193,7 +210,7 @@ class UrbanPlanTreeView(QTreeWidget):
         if node.kind == "owner":
             item.setText(1, "")
             item.setText(2, node.share_text)
-            item.setForeground(0, QBrush(OWNER_TEXT_COLOR))
+            item.setForeground(0, QBrush(owner_text_color()))
         else:
             item.setText(1, str(node.owner_count))
             item.setText(2, str(node.share_count))
@@ -205,7 +222,7 @@ class UrbanPlanTreeView(QTreeWidget):
             font.setBold(True)
             for column in range(len(COLUMN_TITLES)):
                 item.setFont(column, font)
-            brush = QBrush(PLAN_BACKGROUND if node.kind == "plan" else SECTION_BACKGROUND)
+            brush = QBrush(plan_background() if node.kind == "plan" else section_background())
             for column in range(len(COLUMN_TITLES)):
                 item.setBackground(column, brush)
         self._items[node.key] = item
@@ -352,7 +369,7 @@ class UrbanPlanTreeView(QTreeWidget):
             return
         painter = QPainter(self.viewport())
         try:
-            painter.setPen(EMPTY_TEXT_COLOR)
+            painter.setPen(empty_text_color())
             painter.drawText(self.viewport().rect(), int(Qt.AlignCenter), self.empty_text)
         finally:
             painter.end()

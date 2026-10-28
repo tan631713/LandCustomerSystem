@@ -1,6 +1,16 @@
 土地資料系統 完整版變更紀錄
 ================================
 
+2026-10-28 公司筆電 v1.9.86：桌面主畫面改版（淺色「謄本」風格）
+----------------------------------------------------------------
+1. 範圍與依據：只改桌面客戶端（規格 `桌面主畫面改版規格.md`，視覺依據是使用者確認過的設計稿）。FastAPI、手機網頁、伺服器控制台、打包工具不動；家中伺服器不用更新。`RecordTableModel` 的結構完全沒動，只換顏色常數、土地列的字型，新功能都做在旁邊的元件。
+2. 色票（新檔 `customer_theme.py`）：淺色 LIGHT 與深色 DARK 兩組 token（ground、paper、field、ink、ink2、rule、rule_strong、green、green_tint、sel、checked、watch、overdue、note、mark、seal、amber_ink、auto、seg1–3，以及對話框用的 info／success／muted 與 seal_ink）。預設淺色，設定鍵 `ui_theme`，只在程式啟動時讀取並固定；「設定 → 外觀主題」儲存後提示「重新啟動程式後套用」。`build_app_stylesheet()` 取代 `customer_ui_qt.apply_app_style` 裡寫死的深色 QSS；下拉箭頭與勾選記號用程式畫成小圖存在暫存資料夾（QSS 畫不出來）。其他檔案不再寫死十六進位色碼（標籤預設色與標籤文字對比規則、色彩對話框預設值、地圖與手機分享兩個獨立 HTML 頁除外），測試會掃描。
+3. 字型：`assets/fonts/NotoSerifTC-Bold.otf`（8,253,304 bytes，SHA-256 3ca2b329…5768d）與 `OFL.txt`；`load_bundled_fonts()` 載入失敗只寫 log，標題字退回微軟正黑體粗體；`build_exe.bat` 的 PyInstaller 指令加 `--add-data "assets\fonts;assets\fonts"`。宋體只用在區段標題、右上大地號、清單土地列的地號、持分條。
+4. 版面：工具列（`searchGroup`：篩選範圍＋關鍵字＋搜尋鈕，高 38、最寬 600；排序；清除／資料／工具／設定為 ghost；「新增資料」為 primary）；清單上方的「檢視／輸入到」列；新的 `batchBar`（`customer_flow_layout.FlowLayout` 讓按鈕自動換行；按鈕直接觸發原本選單的 QAction，並以 `action.changed`、角色與唯讀模式同步啟用狀態）；清單列高 28→34、土地列上框線、`ShareBarDelegate` 在「地主數」欄畫「N 位」加持分小條（預設欄寬 78→128）；列底色說明；右側 `LandHeaderWidget`（新檔 `customer_land_header.py`）與 `ShareBarWidget`（自繪、可用滑鼠與鍵盤、姓名取自清單顯示的名稱所以遮罩時不會露出明文、合計不等於 1 時標示「合計未滿／超過 1」）；表單改成零間距格線（外框 rule_strong、格線 rule、焦點 2px green、自動計算格底色 auto）；管理摘要加標題；動作列新增 `saveStateLabel`（只在使用者修改時顯示「有未儲存的修改」，載入資料不算）；狀態列左側連線／登入／遮罩、右側版本。
+5. 沒做（規格 §9 的待使用者決定）：管理摘要拆五格、狀態欄另寫「注意名單／追蹤逾期」文字（會碰到 `RecordTableModel`）、和手機版配色統一。
+6. 測試：新增 `tests/test_desktop_theme.py`（色票與樣式、主題設定、字型載入與失敗退回、打包帶字型與授權、批次操作列、持分條、土地標頭、儲存狀態、表單格線、外觀主題選單、狀態列、掃描寫死色碼）；更新三項既有測試（設定選單多一個「外觀主題」、模型文字色改比 token）。
+7. 版本：`DESKTOP_CLIENT_VERSION` 1.9.86、`DESKTOP_CLIENT_BUILD_DATE` 2026-10-28。尚未打包。
+
 2026-10-27 家中伺服器 v1.9.44：手機網頁 App 圖示修正、手機版號只改一個地方
 ----------------------------------------------------------------
 1. 版本：伺服器 v1.9.44、手機資源版號 34；資料庫結構沒變（v14）；公司筆電客戶端不用更新。commit `3458381`（內容）與本版的版號與紀錄。

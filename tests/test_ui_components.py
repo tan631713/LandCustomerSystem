@@ -10,6 +10,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
+import customer_theme
 import customer_ui_qt as app
 from customer_dialogs import (
     AdvancedSearchDialog,
@@ -137,7 +138,7 @@ class UiComponentTests(unittest.TestCase):
 
         self.assertEqual(model.data(note_index, Qt.BackgroundRole), QColor("#564113"))
         self.assertEqual(model.data(tag_index, Qt.BackgroundRole), QColor("#564113"))
-        self.assertEqual(model.data(tag_index, Qt.ForegroundRole), QColor("#f8fafc"))
+        self.assertEqual(model.data(tag_index, Qt.ForegroundRole), customer_theme.qcolor("ink"))
         self.assertEqual(
             model.data(tag_index, Qt.UserRole + 3),
             [{"tag_id": 3, "name": "優先", "color": "#FF0000"}],

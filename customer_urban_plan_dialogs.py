@@ -22,10 +22,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from customer_theme import muted_text_style, token
 from customer_urban_plan_tree import UNASSIGNED_PLAN_ID, UNASSIGNED_PLAN_NAME
 
 PLAN_ID_ROLE = Qt.UserRole + 31
-MUTED_STYLE = "color: #8b98ab; font-size: 12px;"
 
 
 def _plan_id(plan):
@@ -103,7 +103,7 @@ class UrbanPlanManagementDialog(QDialog):
 
         self.note = QLabel("刪除都市計畫不會刪除任何土地或地主，該計畫的土地會回到「未分類」。")
         self.note.setWordWrap(True)
-        self.note.setStyleSheet(MUTED_STYLE)
+        self.note.setStyleSheet(muted_text_style(12))
         layout.addWidget(self.note)
 
         buttons = QHBoxLayout()
@@ -247,7 +247,7 @@ class ImportPlanChoice(QWidget):
         self.combo.setCurrentIndex(max(0, index))
         layout.addWidget(self.combo)
         note = QLabel("已經屬於其他都市計畫的土地不會被改動，匯入後會列出清單。")
-        note.setStyleSheet(MUTED_STYLE)
+        note.setStyleSheet(muted_text_style(12))
         note.setWordWrap(True)
         layout.addWidget(note, 1)
 
@@ -285,7 +285,7 @@ class ImportPlanResultSection(QWidget):
             f"另有 {kept_count:,} 筆土地原本已屬於其他都市計畫，沒有變更歸屬："
         )
         self.kept_label.setObjectName("importPlanKeptLabel")
-        self.kept_label.setStyleSheet("color: #fbbf24;")
+        self.kept_label.setStyleSheet(f"color: {token('amber_ink')};")
         self.kept_label.setWordWrap(True)
         layout.addWidget(self.kept_label)
         self.table = QTableWidget(len(self.kept_lands), 3)
@@ -302,7 +302,7 @@ class ImportPlanResultSection(QWidget):
         layout.addWidget(self.table, 1)
         if kept_count > len(self.kept_lands):
             more = QLabel(f"…其餘 {kept_count - len(self.kept_lands):,} 筆未列出。")
-            more.setStyleSheet(MUTED_STYLE)
+            more.setStyleSheet(muted_text_style(12))
             layout.addWidget(more)
         buttons = QHBoxLayout()
         self.export_button = QPushButton("匯出這份清單")
@@ -396,8 +396,9 @@ class DeleteUrbanPlanDialog(QDialog):
         self.confirm_button = QPushButton("刪除")
         self.confirm_button.setObjectName("deleteUrbanPlanConfirm")
         self.confirm_button.setStyleSheet(
-            "QPushButton { background-color: #b42318; border-color: #d92d20; color: #ffffff; }"
-            "QPushButton:hover { background-color: #d92d20; }"
+            f"QPushButton {{ background-color: {token('seal')}; border-color: {token('seal')};"
+            f" color: {token('seal_ink')}; }}"
+            f"QPushButton:hover {{ border-color: {token('ink')}; }}"
         )
         self.confirm_button.clicked.connect(self.accept)
         cancel.setDefault(True)
@@ -453,7 +454,7 @@ class SetUrbanPlanDialog(QDialog):
         self.summary_label = QLabel()
         self.summary_label.setObjectName("setUrbanPlanSummary")
         self.summary_label.setWordWrap(True)
-        self.summary_label.setStyleSheet(MUTED_STYLE)
+        self.summary_label.setStyleSheet(muted_text_style(12))
         layout.addWidget(self.summary_label)
 
         buttons = QHBoxLayout()

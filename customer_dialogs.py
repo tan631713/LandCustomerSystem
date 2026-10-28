@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 from customer_responsive_dialog import ResponsiveDialog as QDialog
 
 from customer_domain import parse_shared_land_rows
+from customer_theme import qcolor, token
 from customer_urban_plan_dialogs import ImportPlanChoice, ImportPlanResultSection
 from customer_quality import (
     QUALITY_RULE_OPTIONS,
@@ -30,7 +31,7 @@ FONT_SIZE_OPTIONS = ()
 DEFAULT_FONT_SIZE_KEY = "medium"
 ADVANCED_SEARCH_FIELDS = ()
 BATCH_EDITABLE_FIELDS = ()
-ROW_TEXT_COLOR = QColor("#f8fafc")
+ROW_TEXT_COLOR = qcolor("ink")
 get_operation_logs = lambda: []
 get_watchlist_entries = lambda: []
 replace_watchlist_entries = lambda entries: None
@@ -527,7 +528,7 @@ class DataQualityDialog(QDialog):
                 item = QTableWidgetItem(value)
                 item.setData(Qt.UserRole, category)
                 if counts["重要"] > 0:
-                    item.setBackground(QColor("#5b2230"))
+                    item.setBackground(qcolor("watch"))
                     item.setForeground(ROW_TEXT_COLOR)
                 self.category_summary_table.setItem(row_number, column_number, item)
         self.category_summary_table.resizeRowsToContents()
@@ -560,7 +561,7 @@ class DataQualityDialog(QDialog):
             for column_number, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 if issue.severity == "重要":
-                    item.setBackground(QColor("#5b2230"))
+                    item.setBackground(qcolor("watch"))
                     item.setForeground(ROW_TEXT_COLOR)
                 self.table.setItem(row_number, column_number, item)
         self.table.resizeRowsToContents()
@@ -1105,7 +1106,7 @@ class FollowUpListDialog(QDialog):
             for column_number, value in enumerate(values):
                 item = QTableWidgetItem(str(value or ""))
                 if reminder.get("is_overdue") and reminder.get("status") != "完成":
-                    item.setBackground(QColor("#5b2230"))
+                    item.setBackground(qcolor("watch"))
                     item.setForeground(ROW_TEXT_COLOR)
                 self.table.setItem(row_number, column_number, item)
         self.table.resizeRowsToContents()
@@ -1125,12 +1126,15 @@ class FollowUpListDialog(QDialog):
         self.accept()
 
 
-CALENDAR_STATUS_STYLES = {
-    "scheduled": {"label": "已排定", "bg": QColor("#1e3a5f"), "text": QColor("#93c5fd")},
-    "overdue": {"label": "已逾期", "bg": QColor("#5b2230"), "text": QColor("#fca5a5")},
-    "completed": {"label": "已完成", "bg": QColor("#14532d"), "text": QColor("#86efac")},
-    "skipped": {"label": "已略過", "bg": QColor("#334155"), "text": QColor("#cbd5e1")},
-}
+def calendar_status_styles():
+    """Visit-status colours, resolved from the active theme each time they are used."""
+
+    return {
+        "scheduled": {"label": "已排定", "bg": qcolor("info_bg"), "text": qcolor("info_ink")},
+        "overdue": {"label": "已逾期", "bg": qcolor("watch"), "text": qcolor("seal")},
+        "completed": {"label": "已完成", "bg": qcolor("success_bg"), "text": qcolor("success_ink")},
+        "skipped": {"label": "已略過", "bg": qcolor("muted_bg"), "text": qcolor("muted_ink")},
+    }
 
 
 class _CalendarDayCell(QFrame):
@@ -1222,8 +1226,9 @@ class VisitCalendarDialog(QDialog):
         layout.addLayout(nav_row)
 
         legend_row = QHBoxLayout()
+        status_styles = calendar_status_styles()
         for status in ("scheduled", "overdue", "completed", "skipped"):
-            style = CALENDAR_STATUS_STYLES[status]
+            style = status_styles[status]
             legend_label = QLabel(f"● {style['label']}")
             legend_label.setStyleSheet(f"color: {style['text'].name()}; font-size: 11px;")
             legend_row.addWidget(legend_label)
@@ -1320,7 +1325,7 @@ class VisitCalendarDialog(QDialog):
         for column, label_text in enumerate(["日", "一", "二", "三", "四", "五", "六"]):
             header_label = QLabel(label_text)
             header_label.setAlignment(Qt.AlignCenter)
-            header_label.setStyleSheet("color: #94a3b8; font-size: 11px;")
+            header_label.setStyleSheet(f"color: {token('ink2')}; font-size: 11px;")
             self.grid_layout.addWidget(header_label, 0, column)
 
         today = QDate.currentDate()
@@ -1356,16 +1361,16 @@ class VisitCalendarDialog(QDialog):
         cell.setFrameShape(QFrame.StyledPanel)
         is_selected = date_value == self.selected_date
         is_today = date_value == today
-        background = "#1e293b" if is_selected else "#0f172a"
-        if is_selected:
-            # Amber takes priority over the today-marker blue -- the
-            # actively viewed day needs to read clearly even when it
-            # happens to also be today.
-            border = "2px solid #f5a524"
-        elif is_today:
-            border = "2px solid #60a5fa"
+        # The chosen day is shown by its background; today gets a green
+        # outline and a day with overdue visits an amber one.
+        background = token("green_tint") if is_selected else token("field")
+        has_overdue = any(item.get("calendar_status") == "overdue" for item in items)
+        if is_today:
+            border = f"2px solid {token('green')}"
+        elif has_overdue:
+            border = f"2px solid {token('amber_ink')}"
         else:
-            border = "1px solid #1e293b"
+            border = f"1px solid {token('rule')}"
         cell.setStyleSheet(
             f"QFrame {{ background: {background}; border: {border}; border-radius: 4px; }}"
         )
@@ -1376,13 +1381,14 @@ class VisitCalendarDialog(QDialog):
 
         date_label = QLabel(str(date_value.day()))
         date_font = "font-weight: bold;" if date_value == today else ""
-        date_color = "#60a5fa" if date_value == today else "#cbd5e1"
+        date_color = token("green") if date_value == today else token("ink")
         date_label.setStyleSheet(f"color: {date_color}; font-size: 11px; {date_font}")
         cell_layout.addWidget(date_label)
 
         for item in items[:2]:
-            style = CALENDAR_STATUS_STYLES.get(
-                item.get("calendar_status"), CALENDAR_STATUS_STYLES["scheduled"]
+            status_styles = calendar_status_styles()
+            style = status_styles.get(
+                item.get("calendar_status"), status_styles["scheduled"]
             )
             owner_name = str(item.get("owner_name") or "")
             pill = QLabel(owner_name)
@@ -1402,7 +1408,7 @@ class VisitCalendarDialog(QDialog):
 
         if len(items) > 2:
             more_label = QLabel(f"+{len(items) - 2} 筆")
-            more_label.setStyleSheet("color: #64748b; font-size: 10px;")
+            more_label.setStyleSheet(f"color: {token('ink2')}; font-size: 10px;")
             cell_layout.addWidget(more_label)
 
         cell_layout.addStretch(1)
@@ -1422,8 +1428,9 @@ class VisitCalendarDialog(QDialog):
         self.rows = self.items_by_date.get(date_key, [])
         self.table.setRowCount(len(self.rows))
         for row_number, item in enumerate(self.rows):
-            style = CALENDAR_STATUS_STYLES.get(
-                item.get("calendar_status"), CALENDAR_STATUS_STYLES["scheduled"]
+            status_styles = calendar_status_styles()
+            style = status_styles.get(
+                item.get("calendar_status"), status_styles["scheduled"]
             )
             values = [
                 item.get("owner_name", ""),
@@ -1783,13 +1790,13 @@ class ImportPreviewDialog(QDialog):
             is_flagged = status_text != "將匯入"
             status_item = QTableWidgetItem(status_text)
             if is_flagged:
-                status_item.setBackground(QColor("#fde68a"))
+                status_item.setBackground(qcolor("overdue"))
                 status_item.setForeground(ROW_TEXT_COLOR)
             self.table.setItem(row_index, 0, status_item)
             for column_offset, field_key in enumerate(field_keys, start=1):
                 item = QTableWidgetItem(str(record.get(field_key) or ""))
                 if is_flagged:
-                    item.setBackground(QColor("#fef3c7"))
+                    item.setBackground(qcolor("overdue"))
                     item.setForeground(ROW_TEXT_COLOR)
                 self.table.setItem(row_index, column_offset, item)
 
@@ -2123,10 +2130,10 @@ class SharedLandBatchDialog(QDialog):
             self.row_status_label.setText(
                 f"⚠ 已辨識 {len(parsed_rows)} 筆，{errors[0]}{extra}"
             )
-            self.row_status_label.setStyleSheet("color: #f5a524;")
+            self.row_status_label.setStyleSheet(f"color: {token('amber_ink')};")
         else:
             self.row_status_label.setText(f"✓ 已辨識 {len(parsed_rows)} 筆，格式正確。")
-            self.row_status_label.setStyleSheet("color: #4ade80;")
+            self.row_status_label.setStyleSheet(f"color: {token('success_ink')};")
 
     def values(self):
         return (

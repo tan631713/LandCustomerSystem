@@ -105,6 +105,7 @@ from customer_messages import (
     restore_success_message,
     startup_backup_notice,
 )
+from customer_land_header import LandHeaderMixin
 from customer_models import RecordTableModel, configure_table_model
 from customer_quality import (
     DEFAULT_QUALITY_RULE_KEYS,
@@ -141,6 +142,14 @@ from customer_version import (
     desktop_client_version_label,
     full_version_text,
     version_label,
+)
+from customer_theme import (
+    activate_theme,
+    build_app_stylesheet,
+    configure_storage as configure_theme_storage,
+    load_bundled_fonts,
+    qcolor,
+    theme_tokens,
 )
 from customer_window_ui import DesktopWindowMixin
 from customer_settings_workflows import SettingsWorkflowMixin
@@ -270,12 +279,12 @@ FONT_SIZE_OPTIONS = [
     ("large", "大", 13),
     ("xlarge", "特大", 15),
 ]
-ROW_COLOR_CHECKED = QColor("#1e3a5f")
-ROW_COLOR_WATCHLIST = QColor("#5b2230")
-ROW_COLOR_OVERDUE = QColor("#7c2d12")
-ROW_COLOR_NOTE = QColor("#564113")
-ROW_TEXT_COLOR = QColor("#f8fafc")
-SEARCH_HIGHLIGHT_COLOR = QColor("#6b4f1d")
+ROW_COLOR_CHECKED = qcolor("checked")
+ROW_COLOR_WATCHLIST = qcolor("watch")
+ROW_COLOR_OVERDUE = qcolor("overdue")
+ROW_COLOR_NOTE = qcolor("note")
+ROW_TEXT_COLOR = qcolor("ink")
+SEARCH_HIGHLIGHT_COLOR = qcolor("mark")
 
 
 MANAGEMENT_FIELDS = [
@@ -365,7 +374,7 @@ TABLE_WIDTHS = {
     "checked": 52,
     "rowid": 68,
     "full_land_number": 250,
-    "owner_count": 78,
+    "owner_count": 128,
     "ownership_count": 88,
     "land_use": 130,
     "status_summary": 170,
@@ -475,6 +484,9 @@ def set_setting(setting_key, setting_value):
     return REPOSITORY.set_setting(setting_key, setting_value)
 
 
+configure_theme_storage(get_setting, set_setting)
+
+
 def _setting_integer(setting_key, default, minimum):
     try:
         return max(minimum, int(get_setting(setting_key, str(default))))
@@ -571,164 +583,7 @@ def apply_font_size(app, font_size_key):
 
 
 def apply_app_style(app):
-    app.setStyleSheet(
-        """
-        QWidget {
-            background-color: #232323;
-            color: #f3f4f6;
-            selection-background-color: #365d8d;
-            selection-color: #f9fafb;
-        }
-        QFrame#formFrame {
-            background-color: #262626;
-            border: 1px solid #343434;
-            border-radius: 10px;
-        }
-        QFrame#listFrame {
-            background-color: transparent;
-            border: none;
-        }
-        QMainWindow, QDialog {
-            background-color: #232323;
-        }
-        QLabel {
-            color: #e5e7eb;
-        }
-        QLineEdit, QPlainTextEdit, QComboBox {
-            background-color: #111827;
-            color: #f9fafb;
-            border: 1px solid #374151;
-            border-radius: 8px;
-            padding: 6px 10px;
-            selection-background-color: #365d8d;
-        }
-        QLineEdit:focus, QPlainTextEdit:focus, QComboBox:focus {
-            border: 1px solid #3b82f6;
-        }
-        QLineEdit:disabled, QComboBox:disabled {
-            color: #6b7280;
-            background-color: #1f2937;
-            border-color: #374151;
-        }
-        QLineEdit[readOnly="true"], QPlainTextEdit[readOnly="true"] {
-            background-color: #262626;
-            color: #cbd5e1;
-        }
-        QTableView, QTreeView, QTableWidget {
-            background-color: #2d2d2d;
-            color: #f9fafb;
-            border: 1px solid #454545;
-            border-radius: 6px;
-        }
-        QTableView:focus, QTreeView:focus, QTableWidget:focus {
-            border: 1px solid #6ea8ff;
-        }
-        QPushButton {
-            background-color: #374151;
-            color: #f9fafb;
-            border: 1px solid #4b5563;
-            border-radius: 8px;
-            padding: 6px 16px;
-            font-weight: 500;
-        }
-        QPushButton:hover {
-            background-color: #4b5563;
-            border-color: #6b7280;
-        }
-        QPushButton:pressed {
-            background-color: #1f2937;
-        }
-        QPushButton:disabled {
-            background-color: #1f2937;
-            color: #6b7280;
-            border-color: #374151;
-        }
-        QComboBox::drop-down {
-            border: none;
-            width: 22px;
-        }
-        QComboBox QAbstractItemView {
-            background-color: #111827;
-            color: #f9fafb;
-            border: 1px solid #374151;
-            selection-background-color: #365d8d;
-            outline: none;
-        }
-        QMenu {
-            background-color: #1f2937;
-            color: #f9fafb;
-            border: 1px solid #374151;
-            border-radius: 8px;
-            padding: 4px;
-        }
-        QMenu::item {
-            padding: 6px 22px;
-            border-radius: 6px;
-        }
-        QMenu::item:selected {
-            background-color: #365d8d;
-            color: #ffffff;
-        }
-        QMenu::item:disabled {
-            color: #6b7280;
-        }
-        QMenu::separator {
-            height: 1px;
-            background: #374151;
-            margin: 4px 8px;
-        }
-        QHeaderView::section {
-            background-color: #353535;
-            color: #f3f4f6;
-            border: 1px solid #4a4a4a;
-            padding: 6px 8px;
-            font-weight: 600;
-        }
-        QTableView {
-            gridline-color: #3e3e3e;
-            alternate-background-color: #292929;
-        }
-        QTreeView {
-            background-color: #2d2d2d;
-            alternate-background-color: #2d2d2d;
-        }
-        QTableView::item {
-            padding: 4px 6px;
-        }
-        QTableView::item:selected, QTreeView::item:selected, QTableWidget::item:selected {
-            background-color: #88addc;
-            color: #111827;
-        }
-        QScrollBar:vertical, QScrollBar:horizontal {
-            background: #262626;
-            border: none;
-            margin: 0px;
-        }
-        QScrollBar:vertical {
-            width: 12px;
-        }
-        QScrollBar:horizontal {
-            height: 12px;
-        }
-        QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
-            background: #555555;
-            border-radius: 5px;
-            min-height: 28px;
-            min-width: 28px;
-        }
-        QScrollBar::handle:hover {
-            background: #6b7280;
-        }
-        QScrollBar::add-line, QScrollBar::sub-line, QScrollBar::add-page, QScrollBar::sub-page {
-            background: none;
-            border: none;
-        }
-        QSplitter::handle {
-            background-color: #303030;
-            width: 1px;
-        }
-        """
-    )
+    app.setStyleSheet(build_app_stylesheet(theme_tokens()))
 
 
 def init_watchlist_db(conn):
@@ -863,6 +718,34 @@ configure_search_presets(
     SET_SETTING=set_setting,
     ENCODE_PREFERENCES=encode_table_preferences,
 )
+def refresh_theme_constants():
+    """Re-inject the row colours once the saved theme has been activated."""
+
+    global ROW_COLOR_CHECKED, ROW_COLOR_WATCHLIST, ROW_COLOR_OVERDUE
+    global ROW_COLOR_NOTE, ROW_TEXT_COLOR, SEARCH_HIGHLIGHT_COLOR
+    ROW_COLOR_CHECKED = qcolor("checked")
+    ROW_COLOR_WATCHLIST = qcolor("watch")
+    ROW_COLOR_OVERDUE = qcolor("overdue")
+    ROW_COLOR_NOTE = qcolor("note")
+    ROW_TEXT_COLOR = qcolor("ink")
+    SEARCH_HIGHLIGHT_COLOR = qcolor("mark")
+    configure_dialogs(ROW_TEXT_COLOR=ROW_TEXT_COLOR)
+    configure_table_model(
+        ROW_COLOR_CHECKED=ROW_COLOR_CHECKED,
+        ROW_COLOR_WATCHLIST=ROW_COLOR_WATCHLIST,
+        ROW_COLOR_OVERDUE=ROW_COLOR_OVERDUE,
+        ROW_COLOR_NOTE=ROW_COLOR_NOTE,
+        ROW_TEXT_COLOR=ROW_TEXT_COLOR,
+        SEARCH_HIGHLIGHT_COLOR=SEARCH_HIGHLIGHT_COLOR,
+    )
+    configure_search_controller(
+        ROW_COLOR_CHECKED=ROW_COLOR_CHECKED,
+        ROW_COLOR_WATCHLIST=ROW_COLOR_WATCHLIST,
+        ROW_COLOR_OVERDUE=ROW_COLOR_OVERDUE,
+        ROW_COLOR_NOTE=ROW_COLOR_NOTE,
+    )
+
+
 configure_export_controller(
     APP_DIR=APP_DIR,
     TABLE_COLUMNS=TABLE_COLUMNS,
@@ -1043,6 +926,7 @@ def configure_api_authentication(api_client):
 
 class LandApp(
     UrbanPlanWorkflowMixin,
+    LandHeaderMixin,
     DesktopSupportMixin,
     DesktopStateMixin,
     DesktopWindowMixin,
@@ -1109,6 +993,7 @@ class LandApp(
         self.startup_backup_path = startup_backup_path
         self.selected_record_id = None
         self.checked_record_ids = set()
+        self._saved_state_record_id = None
         self.persisted_selection_snapshot = None
         self.restore_selection_state()
         self.persisted_selection_snapshot = self.selection_state_snapshot()
@@ -1203,6 +1088,8 @@ class LandApp(
             self.setup_backup_status()
             self.setup_notification_status()
             self.setup_offsite_backup()
+        # Last, so the version label ends up right of the backup/notification buttons.
+        self.create_status_bar_content()
         # Apply the saved font size (which touches the tree view's
         # stylesheet and triggers Qt to synchronously walk every row for
         # layout recomputation) BEFORE refresh_records() populates any
@@ -1243,6 +1130,10 @@ def main():
     if APP_ICON_PATH.exists():
         app.setWindowIcon(QIcon(str(APP_ICON_PATH)))
     app.setStyle("Fusion")
+    # The saved theme is read once, here; the colours stay fixed for this run.
+    activate_theme()
+    refresh_theme_constants()
+    load_bundled_fonts()
     apply_font_size(app, get_saved_font_size_key())
     apply_app_style(app)
     api_client = None

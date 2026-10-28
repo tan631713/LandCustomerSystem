@@ -33,6 +33,7 @@ class DesktopStateMixin:
 
     def toggle_readonly_mode(self, enabled):
         self.repository.set_setting(self.readonly_setting_key, "1" if enabled else "0")
+        self.update_batch_bar()
         self.statusBar().showMessage(
             "已啟用唯讀模式，會阻止新增/修改/刪除。" if enabled else "已關閉唯讀模式。",
             3500,
@@ -85,6 +86,7 @@ class DesktopStateMixin:
             return
         self.repository.set_setting(self.privacy_mask_setting_key, "1" if enabled else "0")
         self.privacy_mask_enabled = enabled
+        self.refresh_status_bar_content()
         self.apply_owner_name_visibility()
         self.apply_external_id_visibility()
         self.apply_external_id_button_availability()

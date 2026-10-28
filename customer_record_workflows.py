@@ -303,10 +303,16 @@ class RecordWorkflowMixin:
     def set_field_text(self, key, value):
         widget = self.fields[key]
         text = value or ""
-        if isinstance(widget, QPlainTextEdit):
-            widget.setPlainText(text)
-        else:
-            widget.setText(text)
+        # Loading data into the form is not an edit: the save-state label
+        # ignores text changes made while this counter is raised.
+        self.form_loading_depth += 1
+        try:
+            if isinstance(widget, QPlainTextEdit):
+                widget.setPlainText(text)
+            else:
+                widget.setText(text)
+        finally:
+            self.form_loading_depth -= 1
 
     def update_total_declared_value(self):
         data = {
@@ -372,6 +378,7 @@ class RecordWorkflowMixin:
         else:
             widget.setReadOnly(False)
             widget.setText(self.current_owner_name_plain)
+        self.refresh_owner_section_note()
 
     def select_record_in_table(self, record_id):
         with self._programmatic_land_expansion(restoring=True):
@@ -683,6 +690,7 @@ class RecordWorkflowMixin:
                 else row["owner_name"]
             )
             self.owner_contacts_widget.set_record(record_id, owner_name or "")
+        self.after_record_loaded()
 
     def update_management_summary(self, row=None):
         if self.management_summary_label is None:
@@ -726,6 +734,7 @@ class RecordWorkflowMixin:
         self.set_urban_plan_form_value(self.urban_plan_input_id)
         if getattr(self, "owner_contacts_widget", None) is not None:
             self.owner_contacts_widget.clear_owner()
+        self.after_new_record()
 
     def get_form_data(self):
         self.format_declared_value()
@@ -1032,6 +1041,9 @@ class RecordWorkflowMixin:
             plain_data.get("land_number") or "",
         )
         self._start_saved_record_reconcile()
+        self.mark_form_saved()
+        self.refresh_owner_section_note()
+        self.refresh_land_header()
         self._app_component("QMessageBox").information(self, "完成", "資料已儲存。")
 
     def change_password(self):

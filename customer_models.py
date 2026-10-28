@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from customer_land_tree import LandGroup, group_land_records, ownership_area
 from customer_domain import format_number_text
 from customer_tag_display import normalize_tag_items, safe_tag_qcolor, tag_names
+from customer_theme import heading_font, qcolor
 from PySide6.QtCore import (
     QAbstractItemModel,
     QModelIndex,
@@ -15,17 +16,17 @@ from PySide6.QtCore import (
     QThread,
     Qt,
 )
-from PySide6.QtGui import QColor, QFont, QIcon, QPixmap
+from PySide6.QtGui import QColor, QFont, QGuiApplication, QIcon, QPixmap
 
 TABLE_COLUMNS = ()
 TABLE_BATCH_SIZE = 100
 CHECK_COLUMN = 0
-ROW_COLOR_CHECKED = QColor("#1e3a5f")
-ROW_COLOR_WATCHLIST = QColor("#5b2230")
-ROW_COLOR_OVERDUE = QColor("#7c2d12")
-ROW_COLOR_NOTE = QColor("#564113")
-ROW_TEXT_COLOR = QColor("#f8fafc")
-SEARCH_HIGHLIGHT_COLOR = QColor("#6b4f1d")
+ROW_COLOR_CHECKED = qcolor("checked")
+ROW_COLOR_WATCHLIST = qcolor("watch")
+ROW_COLOR_OVERDUE = qcolor("overdue")
+ROW_COLOR_NOTE = qcolor("note")
+ROW_TEXT_COLOR = qcolor("ink")
+SEARCH_HIGHLIGHT_COLOR = qcolor("mark")
 
 NODE_KIND_ROLE = Qt.UserRole + 1
 NODE_DATA_ROLE = Qt.UserRole + 2
@@ -493,8 +494,8 @@ class RecordTableModel(QAbstractItemModel):
             if node.kind == "land":
                 if node.group.ownership_count == 1:
                     record = node.group.representative
-                    return record.get("background") or QColor("#243244")
-                return QColor("#243244")
+                    return record.get("background") or qcolor("green_tint")
+                return qcolor("green_tint")
             if (
                 node.record.get("background") is None
                 and key in node.record.get("highlighted_fields", set())
@@ -503,11 +504,15 @@ class RecordTableModel(QAbstractItemModel):
             return node.record.get("background")
         if role == Qt.ForegroundRole:
             if node.kind == "land":
-                return QColor("#f8fafc")
+                return qcolor("ink")
             if node.record.get("background") is not None:
                 return ROW_TEXT_COLOR
         if role == Qt.FontRole:
             if node.kind == "land":
+                if key == "full_land_number":
+                    # The parcel number is the one serif text in the list, a
+                    # point larger than the ownership rows below it.
+                    return heading_font(max(8, QGuiApplication.font().pointSize()) + 1)
                 font = QFont()
                 font.setBold(True)
                 return font

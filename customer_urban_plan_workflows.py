@@ -7,6 +7,7 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QMenu,
@@ -17,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from customer_land_details import LandDetailsDialog
 from customer_land_tree import group_land_records
+from customer_theme import muted_text_style, token
 from customer_urban_plan_dialogs import (
     DeleteUrbanPlanDialog,
     SetUrbanPlanDialog,
@@ -35,7 +37,6 @@ VIEW_SETTING_KEY = "urban_plan_view"
 INPUT_SETTING_KEY = "urban_plan_input"
 LEGACY_VIEW = "legacy"
 ALL_VIEW = "all"
-HINT_STYLE = "color: #8b98ab; font-size: 12px;"
 UNSUPPORTED_TEXT = "家中伺服器還不支援都市計畫，請先把伺服器更新到新版。"
 
 
@@ -82,7 +83,14 @@ class UrbanPlanWorkflowMixin:
     def build_urban_plan_row(self, parent_layout):
         """Row 2 of the list: 檢視, 輸入到 and the expand/collapse buttons."""
 
-        row = QHBoxLayout()
+        bar = QFrame()
+        bar.setObjectName("planViewBar")
+        bar.setStyleSheet(
+            "QFrame#planViewBar { background: transparent; border: none;"
+            f" border-bottom: 1px solid {token('rule')}; }}"
+        )
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(12, 10, 12, 10)
         row.setSpacing(6)
         self.plan_view_label = QLabel("檢視")
         self.plan_view_combo = QComboBox()
@@ -100,7 +108,7 @@ class UrbanPlanWorkflowMixin:
         self.collapse_all_button.clicked.connect(self.collapse_all_land_groups)
         self.plan_hint_label = QLabel("")
         self.plan_hint_label.setObjectName("planHintLabel")
-        self.plan_hint_label.setStyleSheet(HINT_STYLE)
+        self.plan_hint_label.setStyleSheet(muted_text_style(12))
         # The hint is a nicety: it must never make the row wider than the list
         # pane (that squeezes the selectors); it clips instead.
         self.plan_hint_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
@@ -117,7 +125,7 @@ class UrbanPlanWorkflowMixin:
         row.addWidget(self.collapse_all_button)
         row.addSpacing(8)
         row.addWidget(self.plan_hint_label, 1)
-        parent_layout.addLayout(row)
+        parent_layout.addWidget(bar)
         self.plan_view_combo.currentIndexChanged.connect(self.on_plan_view_combo_changed)
         self.plan_input_combo.currentIndexChanged.connect(self.on_plan_input_combo_changed)
 
@@ -205,6 +213,7 @@ class UrbanPlanWorkflowMixin:
         container = getattr(self, "form_field_containers", {}).get("urban_plan")
         if container is not None:
             container.setVisible(available)
+            self.refresh_form_cell_borders()
         self.apply_plan_view_mode_to_widgets()
 
     def populate_urban_plan_combos(self):
@@ -361,6 +370,7 @@ class UrbanPlanWorkflowMixin:
             self.urban_plan_view.set_row_height(row_height)
 
     def urban_plan_checks_changed(self):
+        self.update_batch_bar()
         if self.plan_view_active():
             self.urban_plan_view.refresh_check_states()
 

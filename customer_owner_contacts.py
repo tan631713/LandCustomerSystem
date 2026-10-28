@@ -43,6 +43,7 @@ from customer_domain import (
     normalize_taiwan_identity,
 )
 from customer_owner_contact_types import RELATIONSHIP_TYPES
+from customer_theme import qcolor, token
 
 
 def _text(value):
@@ -297,7 +298,7 @@ class OwnerContactDialog(QDialog):
         form.addRow("姓名 *", name)
         if prefix == "new":
             self._match_hint = QLabel("", group)
-            self._match_hint.setStyleSheet("color:#9ca3af;")
+            self._match_hint.setStyleSheet(f"color:{token('ink2')};")
             self._match_hint.hide()
             form.addRow("", self._match_hint)
 
@@ -327,7 +328,8 @@ class OwnerContactDialog(QDialog):
             self._link_banner = QLabel("", group)
             self._link_banner.setWordWrap(True)
             self._link_banner.setStyleSheet(
-                "background:#1e3a5f;color:#bfdbfe;border-radius:5px;padding:6px 8px;"
+                f"background:{token('info_bg')};color:{token('info_ink')};"
+                "border-radius:5px;padding:6px 8px;"
             )
             self._unlink_button = QPushButton("改為手動輸入新資料", group)
             self._unlink_button.clicked.connect(self._clear_contact_link)
@@ -603,18 +605,19 @@ class OwnerContactDialog(QDialog):
         )
         shared_notice.setWordWrap(True)
         shared_notice.setStyleSheet(
-            "background:#3b2f16;color:#fde68a;border:1px solid #92400e;"
+            f"background:{token('overdue')};color:{token('ink')};"
+            f"border:1px solid {token('amber_ink')};"
             "border-radius:5px;padding:8px;"
         )
         layout.addWidget(shared_notice)
         owner_count = int(self.existing.get("owner_count") or 0)
         if owner_count > 1:
             count_label = QLabel(f"目前已連結 {owner_count} 位地主。", self)
-            count_label.setStyleSheet("color:#fbbf24;font-weight:600;")
+            count_label.setStyleSheet(f"color:{token('amber_ink')};font-weight:600;")
             layout.addWidget(count_label)
         layout.addWidget(self._contact_group("edit"))
         relation_notice = QLabel("此區修改只會影響目前地主。", self)
-        relation_notice.setStyleSheet("color:#93c5fd;padding-top:4px;")
+        relation_notice.setStyleSheet(f"color:{token('info_ink')};padding-top:4px;")
         layout.addWidget(relation_notice)
         layout.addWidget(self._relation_group("edit"))
         if self.readonly:
@@ -851,19 +854,28 @@ class OwnerContactTreeView(QGraphicsView):
     _MAX_ZOOM = 4.0
     _ZOOM_STEP = 1.15
 
-    _ROOT_FILL = QColor("#1e3a5f")
-    _ROOT_BORDER = QColor("#60a5fa")
-    _NODE_FILL = QColor("#1f2937")
-    _NODE_BORDER = QColor("#4b5563")
-    _PRIMARY_FILL = QColor("#3f3116")
-    _PRIMARY_BORDER = QColor("#f5a524")
-    _INACTIVE_FILL = QColor("#111827")
-    _INACTIVE_BORDER = QColor("#4b5563")
-    _TEXT_COLOR = QColor("#f8fafc")
-    _MUTED_TEXT_COLOR = QColor("#6b7280")
-    _LINE_COLOR = QColor("#4b5563")
-    _LABEL_COLOR = QColor("#9ca3af")
-    _BACKGROUND_COLOR = QColor("#111827")
+    # Colours come from the theme when drawn (see customer_theme).
+    _COLOR_TOKENS = {
+        "_ROOT_FILL": "green_tint",
+        "_ROOT_BORDER": "green",
+        "_NODE_FILL": "field",
+        "_NODE_BORDER": "rule_strong",
+        "_PRIMARY_FILL": "overdue",
+        "_PRIMARY_BORDER": "amber_ink",
+        "_INACTIVE_FILL": "auto",
+        "_INACTIVE_BORDER": "rule",
+        "_TEXT_COLOR": "ink",
+        "_MUTED_TEXT_COLOR": "ink2",
+        "_LINE_COLOR": "rule_strong",
+        "_LABEL_COLOR": "ink2",
+        "_BACKGROUND_COLOR": "paper",
+    }
+
+    def __getattr__(self, name):
+        token_name = type(self)._COLOR_TOKENS.get(name)
+        if token_name is None:
+            raise AttributeError(name)
+        return qcolor(token_name)
 
     _NODE_HEIGHT = 58
     _NODE_MIN_WIDTH = 110
@@ -1166,7 +1178,7 @@ class OwnerContactsWidget(QWidget, DesktopSupportMixin):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.owner_label_widget = QLabel("請先選取地主", self)
-        self.owner_label_widget.setStyleSheet("color:#dbeafe;font-weight:600;")
+        self.owner_label_widget.setStyleSheet(f"color:{token('ink')};font-weight:600;")
         layout.addWidget(self.owner_label_widget)
 
         toolbar = QGridLayout()
@@ -1251,7 +1263,7 @@ class OwnerContactsWidget(QWidget, DesktopSupportMixin):
 
         self.status_label = QLabel("", self)
         self.status_label.setWordWrap(True)
-        self.status_label.setStyleSheet("color:#9ca3af;")
+        self.status_label.setStyleSheet(f"color:{token('ink2')};")
         layout.addWidget(self.status_label)
 
         self.add_button.clicked.connect(self.add_contact)
@@ -1369,10 +1381,10 @@ class OwnerContactsWidget(QWidget, DesktopSupportMixin):
                 if column in {5, 6, 7}:
                     item.setToolTip(_text(value))
                 if not active:
-                    item.setForeground(QColor("#9ca3af"))
-                    item.setBackground(QColor("#2d2d2d"))
+                    item.setForeground(qcolor("ink2"))
+                    item.setBackground(qcolor("auto"))
                 elif row_data.get("is_primary"):
-                    item.setBackground(QColor("#374151"))
+                    item.setBackground(qcolor("muted_bg"))
                 self.table.setItem(row, column, item)
         self.table.resizeColumnsToContents()
         for column in (5, 6, 7):

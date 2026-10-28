@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import customer_theme
 import customer_ui_qt as app  # noqa: F401 - configures model dependencies
 from cryptography.fernet import Fernet
 from customer_land_tree import (
@@ -643,7 +644,9 @@ class LandTreeGroupingTests(unittest.TestCase):
         apply_land_tree_visual_style(tree, 30)
         self.assertFalse(tree.alternatingRowColors())
         stylesheet = tree.styleSheet()
-        self.assertIn("alternate-background-color: #2d2d2d", stylesheet)
+        base = customer_theme.token("paper")
+        self.assertIn(f"background-color: {base}", stylesheet)
+        self.assertIn(f"alternate-background-color: {base}", stylesheet)
         self.assertIn("QTreeView::item:selected", stylesheet)
         self.assertIn("min-height: 30px", stylesheet)
 

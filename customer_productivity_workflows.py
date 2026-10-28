@@ -13,6 +13,7 @@ from customer_productivity import (
 )
 from customer_quality import inspect_customer_quality, quality_issue_signature
 from customer_security import encrypt_value
+from customer_theme import token
 from PySide6.QtCore import QThread, QTimer
 from PySide6.QtWidgets import QApplication, QDialog, QFileDialog, QPushButton
 
@@ -39,7 +40,7 @@ class ProductivityWorkflowMixin:
             count = 0
         if getattr(self, "notification_status_button", None) is not None:
             self.notification_status_button.setText(f"通知 {count}")
-            color = "#fbbf24" if count else "#86efac"
+            color = token("amber_ink") if count else token("success_ink")
             self.notification_status_button.setStyleSheet(f"color: {color}; padding: 2px 8px;")
         return count
 

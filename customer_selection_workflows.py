@@ -4,7 +4,37 @@ from customer_preferences import encode_table_preferences
 from PySide6.QtCore import QTimer
 
 
+# Batch-bar buttons that change data: they follow the role/read-only rules,
+# on top of whatever their menu action's own enabled state says.
+BATCH_BAR_MODIFYING_ACTIONS = frozenset(
+    {"field_visit_action", "assign_case_action", "batch_tags_action", "batch_edit_action"}
+)
+
+
 class SelectionWorkflowMixin:
+    def can_modify_records(self):
+        return (
+            self.current_user.get("role") in {"admin", "editor"}
+            and not self.is_readonly_mode()
+        )
+
+    def update_batch_bar(self, *_args):
+        """Show the 已勾選 strip while rows are checked; keep its buttons in step."""
+
+        bar = getattr(self, "batch_bar", None)
+        if bar is None:
+            return
+        count = len(self.checked_record_ids)
+        self.batch_bar_count_label.setText(f"已勾選 {count} 筆")
+        bar.setVisible(count > 0)
+        can_modify = self.can_modify_records()
+        for key, button in self.batch_bar_buttons.items():
+            action = self.batch_bar_actions.get(key)
+            enabled = action is not None and action.isEnabled()
+            if enabled and key in BATCH_BAR_MODIFYING_ACTIONS:
+                enabled = can_modify
+            button.setEnabled(enabled)
+
     def set_checked_record_id(self, record_id, checked):
         """Single checked-ID update shared by checkbox and context actions."""
 
@@ -130,6 +160,7 @@ class SelectionWorkflowMixin:
         self.update_selection_status(f"已取消全部勾選：{count} 筆")
 
     def update_selection_status(self, message=None):
+        self.update_batch_bar()
         if self.table_view is None or self.table_model is None:
             return
         if message:

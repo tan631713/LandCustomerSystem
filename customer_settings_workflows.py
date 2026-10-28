@@ -12,7 +12,8 @@ from customer_messages import (
     startup_backup_notice,
 )
 from customer_repository import normalize_watch_name
-from PySide6.QtWidgets import QApplication
+from customer_theme import THEME_OPTIONS, current_theme_key, set_theme_key
+from PySide6.QtWidgets import QApplication, QInputDialog
 
 
 class SettingsWorkflowMixin:
@@ -110,12 +111,13 @@ class SettingsWorkflowMixin:
             return
         self._app_component("apply_font_size")(app, self.current_font_size_key)
         self.update_table_metrics()
+        self.apply_form_field_fonts()
 
     def update_table_metrics(self):
         if self.table_view is None:
             return
         point_size = self._app_component("get_font_size_option")(self.current_font_size_key)[2]
-        row_height = max(28, point_size + 18)
+        row_height = max(34, point_size + 20)
         self.table_view.verticalHeader().setDefaultSectionSize(row_height)
         self.update_urban_plan_view_metrics(row_height)
 
@@ -131,6 +133,26 @@ class SettingsWorkflowMixin:
             self.apply_saved_font_size()
 
         self._show_non_modal_dialog(dialog, on_accepted=on_accepted)
+
+    def change_theme(self):
+        """Choose 淺色/深色; the colours are applied when the program starts."""
+
+        keys = [key for key, _label in THEME_OPTIONS]
+        labels = [label for _key, label in THEME_OPTIONS]
+        saved_key = current_theme_key()
+        choice, accepted = QInputDialog.getItem(
+            self, "外觀主題", "選擇主畫面外觀：", labels, keys.index(saved_key), False
+        )
+        if not accepted or choice not in labels:
+            return False
+        selected_key = keys[labels.index(choice)]
+        if selected_key == saved_key:
+            return False
+        set_theme_key(selected_key)
+        self._app_component("QMessageBox").information(
+            self, "外觀主題", "已儲存外觀設定，重新啟動程式後套用。"
+        )
+        return True
 
     def manage_watchlist(self):
         if not self.ensure_can_modify("注意名單管理"):

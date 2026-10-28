@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 
 from customer_desktop import open_path_or_web_url
 from customer_responsive_dialog import ResponsiveDialog as QDialog
+from customer_tag_display import tag_text_qcolor
 
 
 def _row_id(table, row_number):
@@ -202,7 +203,7 @@ class TagManagementDialog(QDialog):
                 item = self.table.item(row_number, 1)
                 item.setBackground(color)
                 item.setForeground(
-                    QColor("#111827") if color.lightness() >= 150 else QColor("#f8fafc")
+                    tag_text_qcolor(color.name())
                 )
         self.table.blockSignals(previous)
         self.begin_new_tag()
@@ -315,7 +316,7 @@ class CustomerTagsDialog(QDialog):
             if color.isValid():
                 item.setBackground(color)
                 item.setForeground(
-                    QColor("#111827") if color.lightness() >= 150 else QColor("#f8fafc")
+                    tag_text_qcolor(color.name())
                 )
             self.list_widget.addItem(item)
 
@@ -363,7 +364,7 @@ class BatchCustomerTagsDialog(QDialog):
             if color.isValid():
                 item.setBackground(color)
                 item.setForeground(
-                    QColor("#111827") if color.lightness() >= 150 else QColor("#f8fafc")
+                    tag_text_qcolor(color.name())
                 )
             self.list_widget.addItem(item)
 

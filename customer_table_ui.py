@@ -7,11 +7,14 @@ from customer_models import (
     RecordTableModel,
     TAGS_ROLE,
 )
+from customer_flow_layout import FlowLayout
 from customer_tag_display import safe_tag_qcolor, tag_text_qcolor
-from PySide6.QtCore import QRect, QSize, Qt
+from customer_theme import heading_font, qcolor, set_button_variant, token
+from PySide6.QtCore import QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QAction, QKeySequence, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -19,23 +22,28 @@ from PySide6.QtWidgets import (
     QPushButton,
     QStyle,
     QStyledItemDelegate,
+    QSizePolicy,
     QStyleOptionViewItem,
     QTreeView,
+    QVBoxLayout,
+    QWidget,
 )
 
 
-def apply_land_tree_visual_style(tree, row_height=28):
+def apply_land_tree_visual_style(tree, row_height=34):
     """Apply a uniform structural colour while preserving semantic model colours."""
 
     row_height = max(20, int(row_height))
     tree.setAlternatingRowColors(False)
     tree.setStyleSheet(
-        "QTreeView { background-color: #2d2d2d; alternate-background-color: #2d2d2d; }"
+        f"QTreeView {{ background-color: {token('paper')};"
+        f" alternate-background-color: {token('paper')}; }}"
         "QTreeView::item {"
         f" min-height: {row_height}px;"
-        " border-bottom: 1px solid #374151;"
+        f" border-bottom: 1px solid {token('rule')};"
         " }"
-        "QTreeView::item:selected { background-color: #365d8d; color: #ffffff; }"
+        f"QTreeView::item:selected {{ background-color: {token('sel')};"
+        f" color: {token('ink')}; }}"
     )
 
 
@@ -44,7 +52,7 @@ class _TreeVerticalHeaderAdapter:
 
     def __init__(self, tree):
         self.tree = tree
-        self.default_size = 28
+        self.default_size = 34
 
     def setVisible(self, _visible):
         return None
@@ -81,6 +89,18 @@ class LandTreeView(QTreeView):
 
     def verticalHeader(self):
         return self._vertical_header_adapter
+
+    def drawRow(self, painter, option, index):
+        super().drawRow(painter, option, index)
+        # A land (top-level) row opens a new group: rule it off from the rows above.
+        if index.isValid() and not index.parent().isValid() and index.row() > 0:
+            painter.save()
+            try:
+                painter.setPen(qcolor("rule_strong"))
+                top = option.rect.top()
+                painter.drawLine(option.rect.left(), top, option.rect.right(), top)
+            finally:
+                painter.restore()
 
 
 class TagPillDelegate(QStyledItemDelegate):
@@ -180,6 +200,95 @@ class TagPillDelegate(QStyledItemDelegate):
         return QSize(width, height)
 
 
+class ShareBarDelegate(QStyledItemDelegate):
+    """Land rows: "N 位" plus a small bar, one segment per owner's share.
+
+    Child (ownership) rows are painted normally.  Data is read through the
+    public model API (group_for_index); a share with a non-positive numerator
+    or denominator is skipped.
+    """
+
+    BAR_WIDTH = 64
+    BAR_HEIGHT = 6
+    SEGMENT_GAP = 1
+
+    def __init__(self, source_model_for, parent=None):
+        super().__init__(parent)
+        # Maps a view index (proxy) to ``(source_model, source_index)``.
+        self._source_model_for = source_model_for
+        self.selected_owner_id = lambda: None
+
+    def _segments(self, index):
+        resolved = self._source_model_for(index)
+        if resolved is None:
+            return None
+        model, source_index = resolved
+        if index.data(NODE_KIND_ROLE) != "land":
+            return None
+        group = model.group_for_index(source_index)
+        if group is None:
+            return None
+        from customer_domain import parse_number
+
+        segments = []
+        for record in group.records:
+            raw = record.get("raw") or {}
+            numerator = parse_number(raw.get("numerator"))
+            denominator = parse_number(raw.get("denominator"))
+            if numerator is None or denominator is None or numerator <= 0 or denominator <= 0:
+                continue
+            segments.append((int(record["id"]), numerator / denominator))
+        return segments
+
+    def paint(self, painter, option, index):
+        segments = self._segments(index)
+        if segments is None:
+            super().paint(painter, option, index)
+            return
+        base = QStyleOptionViewItem(option)
+        self.initStyleOption(base, index)
+        base.text = ""
+        style = base.widget.style() if base.widget else None
+        if style is not None:
+            style.drawControl(QStyle.CE_ItemViewItem, base, painter, base.widget)
+        painter.save()
+        try:
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            painter.setClipRect(option.rect)
+            text = f"{index.data(Qt.DisplayRole) or 0} 位"
+            text_rect = QRect(option.rect)
+            text_rect.setLeft(option.rect.left() + 8)
+            painter.setPen(qcolor("ink"))
+            painter.drawText(text_rect, int(Qt.AlignLeft | Qt.AlignVCenter), text)
+            if not segments:
+                return
+            bar_left = option.rect.right() - self.BAR_WIDTH - 8
+            if bar_left <= option.rect.left() + painter.fontMetrics().horizontalAdvance(text) + 14:
+                return
+            total = max(1.0, sum(share for _id, share in segments))
+            top = option.rect.center().y() - self.BAR_HEIGHT // 2
+            selected_id = self.selected_owner_id()
+            palette = ("seg1", "seg2", "seg3")
+            x = float(bar_left)
+            other = 0
+            for position, (record_id, share) in enumerate(segments):
+                width = self.BAR_WIDTH * share / total
+                gap = self.SEGMENT_GAP if position < len(segments) - 1 else 0
+                if record_id == selected_id:
+                    color = qcolor("green")
+                else:
+                    color = qcolor(palette[other % len(palette)])
+                    other += 1
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(color)
+                painter.drawRoundedRect(
+                    QRectF(x, top, max(1.0, width - gap), self.BAR_HEIGHT), 2, 2
+                )
+                x += width
+        finally:
+            painter.restore()
+
+
 def _build_record_table(self, parent_layout, TABLE_COLUMNS, TABLE_WIDTHS):
     self.table_column_indexes = {
         key: index for index, (key, _label) in enumerate(TABLE_COLUMNS)
@@ -195,6 +304,18 @@ def _build_record_table(self, parent_layout, TABLE_COLUMNS, TABLE_WIDTHS):
     self.table_view.configure_tag_delegate(
         self.tag_pill_delegate,
         self.table_column_indexes["tag_names"],
+    )
+    self.share_bar_delegate = ShareBarDelegate(
+        lambda proxy_index: (
+            (self.table_model, self.source_table_index(proxy_index))
+            if proxy_index.isValid()
+            else None
+        ),
+        self.table_view,
+    )
+    self.share_bar_delegate.selected_owner_id = lambda: self.selected_record_id
+    self.table_view.setItemDelegateForColumn(
+        self.table_column_indexes["owner_count"], self.share_bar_delegate
     )
     self.table_view.setSelectionBehavior(QAbstractItemView.SelectRows)
     self.table_view.setSelectionMode(QAbstractItemView.ExtendedSelection)
@@ -242,11 +363,25 @@ def _build_record_table(self, parent_layout, TABLE_COLUMNS, TABLE_WIDTHS):
     # Row 2 (檢視 / 輸入到 / 全部展開 / 全部收合) sits above the list; the list
     # itself is a stack of the land tree and the 都市計畫 tree.
     self.build_urban_plan_row(parent_layout)
+    _build_batch_bar(self, parent_layout)
     self.build_urban_plan_stack(parent_layout)
-    paging = QHBoxLayout()
-    paging.addStretch(1)
+    footer = QFrame()
+    footer.setObjectName("listFooter")
+    footer.setStyleSheet(
+        f"QFrame#listFooter {{ background: transparent; border: none;"
+        f" border-top: 1px solid {token('rule')}; }}"
+    )
+    paging = QHBoxLayout(footer)
+    paging.setContentsMargins(12, 8, 12, 8)
+    paging.setSpacing(8)
+    paging.addLayout(_build_row_color_legend())
     self.land_count_label = QLabel("土地 0 筆｜地主／所有權資料 0 筆")
-    paging.addWidget(self.land_count_label)
+    self.land_count_label.setStyleSheet(f"color: {token('ink2')};")
+    # It may be clipped on a narrow list; the legend and pager buttons may not.
+    self.land_count_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+    self.land_count_label.setMinimumWidth(0)
+    self.land_count_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+    paging.addWidget(self.land_count_label, 1)
     self.previous_land_page_button = QPushButton("上一頁")
     self.previous_land_page_button.clicked.connect(self.previous_land_page)
     paging.addWidget(self.previous_land_page_button)
@@ -255,7 +390,98 @@ def _build_record_table(self, parent_layout, TABLE_COLUMNS, TABLE_WIDTHS):
     self.next_land_page_button = QPushButton("下一頁")
     self.next_land_page_button.clicked.connect(self.next_land_page)
     paging.addWidget(self.next_land_page_button)
-    parent_layout.addLayout(paging)
+    parent_layout.addWidget(footer)
+
+
+# (object name, label, background token) for the swatches under the list.
+ROW_COLOR_LEGEND = (
+    ("legendChecked", "已勾選", "checked"),
+    ("legendWatchlist", "注意名單", "watch"),
+    ("legendOverdue", "追蹤逾期", "overdue"),
+    ("legendNote", "有備註", "note"),
+)
+
+
+def _build_row_color_legend():
+    layout = QHBoxLayout()
+    layout.setSpacing(10)
+    for object_name, label, color_token in ROW_COLOR_LEGEND:
+        item = QHBoxLayout()
+        item.setSpacing(5)
+        swatch = QLabel()
+        swatch.setObjectName(object_name)
+        swatch.setFixedSize(12, 12)
+        swatch.setStyleSheet(
+            f"background-color: {token(color_token)};"
+            f" border: 1px solid {token('rule_strong')}; border-radius: 2px;"
+        )
+        text = QLabel(label)
+        text.setStyleSheet(f"color: {token('ink2')}; font-size: 12px;")
+        text.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+        item.addWidget(swatch)
+        item.addWidget(text)
+        layout.addLayout(item)
+    return layout
+
+
+# Bar button text -> key of the existing QAction it triggers (see _wire_batch_bar).
+BATCH_BAR_BUTTONS = (
+    ("加入今日行程", "field_visit_action", True),
+    ("加入案件", "assign_case_action", True),
+    ("批量設定標籤", "batch_tags_action", True),
+    ("批次修改", "batch_edit_action", True),
+    ("匯出選取", "export_selected_action", False),
+)
+
+
+def _build_batch_bar(self, parent_layout):
+    """The strip above the list that appears while rows are checked."""
+
+    bar = QFrame()
+    bar.setObjectName("batchBar")
+    bar.setStyleSheet(
+        f"QFrame#batchBar {{ background-color: {token('checked')}; border: none;"
+        f" border-bottom: 1px solid {token('rule')}; }}"
+        f"QFrame#batchBar QLabel {{ color: {token('checked_ink')}; background: transparent; }}"
+        f"QFrame#batchBar QPushButton {{ color: {token('checked_ink')}; }}"
+    )
+    # Wraps to a second row on a narrow list or a large font instead of
+    # squeezing the button labels.
+    layout = FlowLayout(bar, margins=(12, 8, 12, 8), h_spacing=6, v_spacing=6)
+    self.batch_bar_count_label = QLabel("")
+    self.batch_bar_count_label.setObjectName("batchBarCount")
+    font = self.batch_bar_count_label.font()
+    font.setBold(True)
+    self.batch_bar_count_label.setFont(font)
+    layout.addWidget(self.batch_bar_count_label)
+    self.batch_bar_buttons = {}
+    for text, action_key, _modifies in BATCH_BAR_BUTTONS:
+        button = QPushButton(text)
+        button.setObjectName(f"batchBar_{action_key}")
+        layout.addWidget(button)
+        self.batch_bar_buttons[action_key] = button
+    clear_button = QPushButton("取消全部勾選")
+    clear_button.setObjectName("batchBar_clear_checked_action")
+    set_button_variant(clear_button, "ghost")
+    layout.addWidget(clear_button)
+    self.batch_bar_buttons["clear_checked_action"] = clear_button
+    bar.hide()
+    self.batch_bar = bar
+    self.batch_bar_actions = {}
+    parent_layout.addWidget(bar)
+
+
+def _wire_batch_bar(self, actions):
+    """Connect the bar's buttons to the existing menu actions (no new logic)."""
+
+    for key, button in self.batch_bar_buttons.items():
+        action = actions.get(key)
+        if action is None:
+            continue
+        self.batch_bar_actions[key] = action
+        button.clicked.connect(lambda _checked=False, act=action: act.trigger())
+        action.changed.connect(self.update_batch_bar)
+    self.update_batch_bar()
 
 
 
@@ -412,6 +638,7 @@ def _build_data_menu(self):
         share_mobile_action,
     )
     self.api_preview_unavailable_data_actions = ()
+    return {name: value for name, value in locals().items() if name.endswith("_action")}
 
 
 
@@ -648,6 +875,9 @@ def _build_settings_menu(self):
     font_size_action = QAction("字體大小", self)
     font_size_action.triggered.connect(self.change_font_size)
     self.settings_menu.addAction(font_size_action)
+    theme_action = QAction("外觀主題", self)
+    theme_action.triggered.connect(self.change_theme)
+    self.settings_menu.addAction(theme_action)
     column_visibility_action = QAction("欄位顯示", self)
     column_visibility_action.triggered.connect(self.change_column_visibility)
     self.settings_menu.addAction(column_visibility_action)
@@ -749,6 +979,7 @@ def _configure_api_action_groups(self, actions):
         actions["watchlist_action"],
         actions["operation_log_action"],
         actions["font_size_action"],
+        actions["theme_action"],
         actions["column_visibility_action"],
         self.privacy_mask_action,
         self.readonly_mode_action,
@@ -778,7 +1009,9 @@ def _configure_api_action_groups(self, actions):
 def build_customer_table_ui(self, parent_layout, TABLE_COLUMNS, TABLE_WIDTHS):
     _build_record_table(self, parent_layout, TABLE_COLUMNS, TABLE_WIDTHS)
     _build_record_menu(self)
-    _build_data_menu(self)
+    data_actions = _build_data_menu(self)
     actions = _build_tools_menu(self)
+    actions.update(data_actions)
     actions.update(_build_settings_menu(self))
     _configure_api_action_groups(self, actions)
+    _wire_batch_bar(self, actions)

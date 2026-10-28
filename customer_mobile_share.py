@@ -12,6 +12,7 @@ from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout
 
 from customer_responsive_dialog import ResponsiveDialog as QDialog
+from customer_theme import token
 
 
 def get_lan_ip_address():
@@ -144,7 +145,7 @@ class MobileShareDialog(QDialog):
         url_label = QLabel(self.share_server.url)
         url_label.setAlignment(Qt.AlignCenter)
         url_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        url_label.setStyleSheet("color: #9ec5fe;")
+        url_label.setStyleSheet(f"color: {token('info_ink')};")
         layout.addWidget(url_label)
 
         stop_button = QPushButton("停止分享")
