@@ -109,7 +109,7 @@ class CustomerApiTests(unittest.TestCase):
         self.assertEqual(health.status_code, 200)
         self.assertEqual(health.json()["backend"], "sqlite")
         self.assertEqual(health.json()["schema_version"], 9)
-        self.assertEqual(health.json()["mobile_asset_version"], 25)
+        self.assertEqual(health.json()["mobile_asset_version"], 26)
 
         bad_login = self.client.post(
             "/api/v1/auth/login",
@@ -165,6 +165,21 @@ class CustomerApiTests(unittest.TestCase):
         self.assertEqual(detail.status_code, 200, detail.text)
         self.assertEqual(detail.json()["owner_name"], "")
 
+    def test_mobile_search_inputs_do_not_trigger_ios_contact_autofill(self):
+        # iOS Safari 把含「姓名／地址」的欄位當聯絡人欄位，自動填寫列會蓋掉注音選字列。
+        import re
+        page = self.client.get("/mobile/")
+        self.assertEqual(page.status_code, 200)
+        for input_id in ("owner-query", "land-query", "land-district", "land-section", "field-plan-query"):
+            match = re.search(r'<input id="%s"[^>]*>' % input_id, page.text)
+            self.assertIsNotNone(match, input_id)
+            tag = match.group(0)
+            self.assertIn('autocomplete="off"', tag)
+            self.assertIn('autocorrect="off"', tag)
+            placeholder = re.search(r'placeholder="([^"]*)"', tag).group(1)
+            self.assertNotIn("姓名", placeholder)
+            self.assertNotIn("地址", placeholder)
+
     def test_mobile_pwa_is_served_with_security_headers(self):
         root = self.client.get("/")
         self.assertEqual(root.status_code, 200)
@@ -174,7 +189,7 @@ class CustomerApiTests(unittest.TestCase):
         self.assertEqual(page.status_code, 200)
         self.assertIn("地主開發助手", page.text)
         self.assertIn('src="./field-visit.js?v=2"', page.text)
-        self.assertIn('src="./app.js?v=25"', page.text)
+        self.assertIn('src="./app.js?v=26"', page.text)
         self.assertIn('id="login-connection-check"', page.text)
         self.assertIn('id="login-connection-retry"', page.text)
         self.assertIn('id="connection-banner-retry"', page.text)
@@ -229,9 +244,9 @@ class CustomerApiTests(unittest.TestCase):
         service_worker = self.client.get("/mobile/service-worker.js")
         self.assertEqual(service_worker.status_code, 200)
         self.assertIn('url.pathname.startsWith("/api/")', service_worker.text)
-        self.assertIn('land-customer-mobile-v25', service_worker.text)
+        self.assertIn('land-customer-mobile-v26', service_worker.text)
         self.assertIn('/mobile/field-visit.js?v=2', service_worker.text)
-        self.assertIn('/mobile/app.js?v=25', service_worker.text)
+        self.assertIn('/mobile/app.js?v=26', service_worker.text)
         self.assertIn('fetch(event.request, { cache: "no-store" })', service_worker.text)
         self.assertIn("no-store", service_worker.headers["cache-control"])
 
@@ -250,11 +265,11 @@ class CustomerApiTests(unittest.TestCase):
         self.assertIn("window.isSecureContext === false", field_visit_script.text)
         self.assertIn("navigator.geolocation.getCurrentPosition(", field_visit_script.text)
 
-        app_script = self.client.get("/mobile/app.js?v=25")
+        app_script = self.client.get("/mobile/app.js?v=26")
         self.assertEqual(app_script.status_code, 200)
         self.assertEqual(app_script.headers["cache-control"], "no-store")
         self.assertIn("function maskIdentity(value)", app_script.text)
-        self.assertIn("const MOBILE_ASSET_VERSION = 25", app_script.text)
+        self.assertIn("const MOBILE_ASSET_VERSION = 26", app_script.text)
         self.assertIn("function checkMobileAssetVersion(", app_script.text)
         self.assertIn("health.mobile_asset_version", app_script.text)
         self.assertIn("async function registerMobileServiceWorker(", app_script.text)
