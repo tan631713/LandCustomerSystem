@@ -25,10 +25,91 @@ LAND_LIST_MINIMUM_WIDTH = 540
 DETAIL_PANEL_MINIMUM_WIDTH = 460
 DEFAULT_SPLITTER_SIZES = (760, 480)
 
+# Modern dark, rounded look for buttons and input fields. Applied once to the
+# central widget so it cascades to every QPushButton / QLineEdit /
+# QPlainTextEdit / QComboBox underneath, without touching per-widget
+# setStyleSheet calls used elsewhere for labels/titles.
+CONTROL_STYLESHEET = """
+QPushButton {
+    background-color: #374151;
+    color: #f9fafb;
+    border: 1px solid #4b5563;
+    border-radius: 8px;
+    padding: 6px 16px;
+    font-weight: 500;
+}
+QPushButton:hover {
+    background-color: #4b5563;
+    border-color: #6b7280;
+}
+QPushButton:pressed {
+    background-color: #1f2937;
+}
+QPushButton:disabled {
+    background-color: #1f2937;
+    color: #6b7280;
+    border-color: #374151;
+}
+
+QLineEdit, QPlainTextEdit, QComboBox {
+    background-color: #111827;
+    color: #f9fafb;
+    border: 1px solid #374151;
+    border-radius: 8px;
+    padding: 6px 10px;
+    selection-background-color: #365d8d;
+}
+QLineEdit:focus, QPlainTextEdit:focus, QComboBox:focus {
+    border: 1px solid #3b82f6;
+}
+QLineEdit:disabled, QComboBox:disabled {
+    color: #6b7280;
+    background-color: #1f2937;
+    border-color: #374151;
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 22px;
+}
+QComboBox QAbstractItemView {
+    background-color: #111827;
+    color: #f9fafb;
+    border: 1px solid #374151;
+    selection-background-color: #365d8d;
+    outline: none;
+}
+
+QMenu {
+    background-color: #1f2937;
+    color: #f9fafb;
+    border: 1px solid #374151;
+    border-radius: 8px;
+    padding: 4px;
+}
+QMenu::item {
+    padding: 6px 22px;
+    border-radius: 6px;
+}
+QMenu::item:selected {
+    background-color: #365d8d;
+    color: #ffffff;
+}
+QMenu::item:disabled {
+    color: #6b7280;
+}
+QMenu::separator {
+    height: 1px;
+    background: #374151;
+    margin: 4px 8px;
+}
+"""
+
 
 class DesktopWindowMixin:
     def create_layout(self):
         central = QWidget()
+        self.setStyleSheet(CONTROL_STYLESHEET)
         self.setCentralWidget(central)
 
         root = QVBoxLayout(central)
