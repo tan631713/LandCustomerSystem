@@ -122,10 +122,59 @@ def build_parser():
         action="store_true",
         help="在家中主機本地驗證既有帳號後安全重設 admin 密碼",
     )
+    parser.add_argument(
+        "--diagnose-owner-ids",
+        action="store_true",
+        help="唯讀統計地主身分證長度與疑似撞號（只輸出數字），存成 txt 後結束",
+    )
+    parser.add_argument(
+        "--report-dir",
+        metavar="PATH",
+        help="--diagnose-owner-ids 報告存放資料夾（預設為伺服器資料夾）",
+    )
     return parser
 
 
+def default_report_directory():
+    """The server package folder (the one with 啟動家中伺服器.bat)."""
+
+    from pathlib import Path
+
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent.parent
+    return Path(__file__).resolve().parent
+
+
+def run_owner_id_diagnostics(args, *, load_dsn=None, ask=input, ask_secret=getpass.getpass):
+    from customer_owner_id_diagnostics import DiagnosticError, format_report, run_diagnostics
+    from customer_version import APP_VERSION
+
+    if load_dsn is None:
+        from customer_api.local_postgres import load_postgres_dsn as load_dsn
+    try:
+        username = ask("管理員帳號（直接按 Enter 使用 admin）：").strip() or "admin"
+        password = ask_secret(f"請輸入 {username} 的密碼（畫面不會顯示）：")
+        path, stats = run_diagnostics(
+            load_dsn(),
+            username,
+            password,
+            output_dir=args.report_dir or default_report_directory(),
+            version=APP_VERSION,
+        )
+    except DiagnosticError as exc:
+        print(f"診斷未完成：{exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:  # noqa: BLE001 - never show the connection string
+        print(f"診斷未完成：{type(exc).__name__}", file=sys.stderr)
+        return 1
+    print(format_report(stats, version=APP_VERSION))
+    print(f"報告已存到：{path}")
+    return 0
+
+
 def run_maintenance_action(args):
+    if getattr(args, "diagnose_owner_ids", False):
+        return True, run_owner_id_diagnostics(args)
     if args.import_migration_package:
         from customer_api.local_postgres import load_postgres_dsn
         from customer_migration_package import import_migration_package
