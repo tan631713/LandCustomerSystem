@@ -572,6 +572,50 @@ class DesktopOwnerMatchTests(unittest.TestCase):
         self.assertEqual(len(self.server.created_values), 1)
         self.assertEqual(self.server.reviews, [(self.window.selected_record_id, 3)])
 
+    def test_choosing_folds_the_list_into_one_line_and_cancel_unfolds_it(self):
+        self.type_new_owner()
+        panel = self.window.owner_match_panel
+        panel.choose_button.click()
+        self.assertFalse(panel.isHidden())
+        self.assertTrue(panel.table.isHidden())
+        self.assertTrue(panel.choose_button.isHidden())
+        self.assertTrue(panel.new_owner_button.isHidden())
+        self.assertTrue(panel.title_label.isHidden())
+        self.assertFalse(panel.clear_choice_button.isHidden())
+        self.assertEqual(
+            panel.chosen_label.text(),
+            "已選擇既有地主：王大明3（A100****3，1 筆土地），儲存時會加到這位地主名下",
+        )
+        panel.clear_choice_button.click()
+        self.assertIsNone(panel.chosen)
+        self.assertFalse(panel.table.isHidden())
+        self.assertFalse(panel.choose_button.isHidden())
+        self.assertFalse(panel.new_owner_button.isHidden())
+        self.assertTrue(panel.clear_choice_button.isHidden())
+        self.assertEqual(panel.chosen_label.text(), "")
+        # The masked ID the choice filled in goes away with it.
+        self.assertEqual(self.window.get_field_text("external_id"), "")
+
+    def test_panel_hides_after_save_new_record_and_decline(self):
+        panel = self.window.owner_match_panel
+        self.type_new_owner()
+        panel.choose_button.click()
+        self.save()
+        self.assertTrue(panel.isHidden())
+        self.assertIsNone(panel.chosen)
+
+        self.type_new_owner()
+        self.assertFalse(panel.isHidden())
+        panel.choose_button.click()
+        self.window.new_record()  # 「新增」 clears the form
+        self.assertTrue(panel.isHidden())
+        self.assertIsNone(panel.chosen)
+
+        self.type_new_owner()
+        self.assertFalse(panel.isHidden())
+        panel.new_owner_button.click()
+        self.assertTrue(panel.isHidden())
+
     def test_editing_an_existing_record_never_asks(self):
         self.window.load_record(2)
         self.window.wait_for_background_tasks()

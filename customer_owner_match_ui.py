@@ -61,6 +61,19 @@ def candidate_summary(item):
     return "，".join(part for part in parts if part)
 
 
+def chosen_owner_text(item):
+    """「已選擇既有地主：邱小姐（H2211，13 筆土地），儲存時會加到這位地主名下」"""
+
+    details = []
+    if item.get("external_id_masked"):
+        details.append(str(item["external_id_masked"]))
+    details.append(f"{int(item.get('land_count') or 0)} 筆土地")
+    return (
+        f"已選擇既有地主：{item.get('owner_name') or ''}（{'，'.join(details)}），"
+        "儲存時會加到這位地主名下"
+    )
+
+
 class OwnerMatchPanel(QWidget):
     """The candidate list; emits what the user picked, holds no record state."""
 
@@ -121,7 +134,6 @@ class OwnerMatchPanel(QWidget):
         self.chosen = None
         self.table.setRowCount(0)
         self.chosen_label.setText("")
-        self.chosen_label.hide()
         self.hint_label.setText(OWNER_MATCH_DEFAULT_HINT)
         self.setVisible(False)
         self._sync_buttons()
@@ -188,12 +200,8 @@ class OwnerMatchPanel(QWidget):
         self.chosen = None if item is None else dict(item)
         if self.chosen is None:
             self.chosen_label.setText("")
-            self.chosen_label.hide()
         else:
-            self.chosen_label.setText(
-                "已選擇既有地主：" + candidate_summary(self.chosen)
-                + "。儲存時這筆土地會加到這位地主名下，不會新增地主。"
-            )
+            self.chosen_label.setText(chosen_owner_text(self.chosen))
             self.chosen_label.show()
             self.setVisible(True)
         self._sync_buttons()
@@ -210,12 +218,17 @@ class OwnerMatchPanel(QWidget):
             self.choose_requested.emit(dict(item))
 
     def _sync_buttons(self):
-        has_items = bool(self.items)
-        self.table.setVisible(has_items)
-        self.choose_button.setVisible(has_items)
-        self.new_owner_button.setVisible(has_items and self.chosen is None)
+        # Once an owner is chosen the list folds away and only the one-line
+        # 「已選擇既有地主」 bar with 取消選擇 stays; 取消選擇 unfolds it again.
+        chosen = self.chosen is not None
+        listing = bool(self.items) and not chosen
+        self.title_label.setVisible(not chosen)
+        self.hint_label.setVisible(not chosen)
+        self.table.setVisible(listing)
+        self.choose_button.setVisible(listing)
+        self.new_owner_button.setVisible(listing)
         self.choose_button.setEnabled(self.selected_item() is not None)
-        self.clear_choice_button.setVisible(self.chosen is not None)
+        self.clear_choice_button.setVisible(chosen)
 
 
 class _OwnerMatchBridge(QObject):

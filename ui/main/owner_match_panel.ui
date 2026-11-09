@@ -13,7 +13,7 @@
   <property name="toolTip">
    <string>手動新增資料時，依姓名找出可能是同一位的既有地主。</string>
   </property>
-  <layout class="QVBoxLayout" name="ownerMatchLayout" stretch="0,0,1,0">
+  <layout class="QVBoxLayout" name="ownerMatchLayout" stretch="0,1,0">
    <property name="spacing">
     <number>6</number>
    </property>
@@ -52,16 +52,6 @@
       </widget>
      </item>
     </layout>
-   </item>
-   <item>
-    <widget class="QLabel" name="ownerMatchChosenLabel">
-     <property name="text">
-      <string/>
-     </property>
-     <property name="wordWrap">
-      <bool>true</bool>
-     </property>
-    </widget>
    </item>
    <item>
     <widget class="TableWidget" name="ownerMatchTable">
@@ -118,17 +108,14 @@
       <number>8</number>
      </property>
      <item>
-      <spacer name="ownerMatchButtonSpacer">
-       <property name="orientation">
-        <enum>Qt::Orientation::Horizontal</enum>
+      <widget class="QLabel" name="ownerMatchChosenLabel">
+       <property name="text">
+        <string/>
        </property>
-       <property name="sizeHint" stdset="0">
-        <size>
-         <width>40</width>
-         <height>20</height>
-        </size>
+       <property name="wordWrap">
+        <bool>true</bool>
        </property>
-      </spacer>
+      </widget>
      </item>
      <item>
       <widget class="PushButton" name="ownerMatchClearChoiceButton">
