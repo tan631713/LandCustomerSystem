@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>watchlistDialogContent</class>
+ <widget class="QWidget" name="watchlistDialogContent">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>560</width>
+    <height>420</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>注意名單管理</string>
+  </property>
+  <property name="dialogSize" stdset="0">
+   <size>
+    <width>560</width>
+    <height>420</height>
+   </size>
+  </property>
+  <layout class="QVBoxLayout" name="watchlistLayout" stretch="1,0">
+   <property name="spacing">
+    <number>10</number>
+   </property>
+   <property name="leftMargin">
+    <number>18</number>
+   </property>
+   <property name="topMargin">
+    <number>18</number>
+   </property>
+   <property name="rightMargin">
+    <number>18</number>
+   </property>
+   <property name="bottomMargin">
+    <number>18</number>
+   </property>
+   <item>
+    <widget class="TableWidget" name="watchlistTable">
+     <property name="selectionMode">
+      <enum>QAbstractItemView::SingleSelection</enum>
+     </property>
+     <property name="selectionBehavior">
+      <enum>QAbstractItemView::SelectRows</enum>
+     </property>
+     <attribute name="verticalHeaderVisible">
+      <bool>false</bool>
+     </attribute>
+     <column>
+      <property name="text">
+       <string>姓名</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>備註</string>
+      </property>
+     </column>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="buttonRow" stretch="0,0,1,0">
+     <property name="spacing">
+      <number>10</number>
+     </property>
+     <property name="leftMargin">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <property name="rightMargin">
+      <number>0</number>
+     </property>
+     <property name="bottomMargin">
+      <number>0</number>
+     </property>
+     <item>
+      <widget class="PushButton" name="addButton">
+       <property name="text">
+        <string>新增</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PushButton" name="deleteButton">
+       <property name="text">
+        <string>刪除</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="buttonRowSpacer">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>0</width>
+         <height>0</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="PrimaryPushButton" name="saveButton">
+       <property name="text">
+        <string>儲存</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+ <customwidget>
+  <class>PrimaryPushButton</class>
+  <extends>QPushButton</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>PushButton</class>
+  <extends>QPushButton</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>TableWidget</class>
+  <extends>QTableWidget</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ </customwidgets>
+ <resources />
+ <connections />
+</ui>

@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>serverBackupRestoreDialogContent</class>
+ <widget class="QWidget" name="serverBackupRestoreDialogContent">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>820</width>
+    <height>480</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>還原家中伺服器備份</string>
+  </property>
+  <property name="dialogSize" stdset="0">
+   <size>
+    <width>820</width>
+    <height>480</height>
+   </size>
+  </property>
+  <layout class="QVBoxLayout" name="serverBackupRestoreLayout">
+   <property name="spacing">
+    <number>6</number>
+   </property>
+   <property name="leftMargin">
+    <number>11</number>
+   </property>
+   <property name="topMargin">
+    <number>11</number>
+   </property>
+   <property name="rightMargin">
+    <number>11</number>
+   </property>
+   <property name="bottomMargin">
+    <number>11</number>
+   </property>
+   <item>
+    <widget class="QLabel" name="warningLabel">
+     <property name="text">
+      <string>還原會取代家中伺服器的 PostgreSQL 正式資料與納管附件。系統會先自動建立還原前安全備份，完成後所有裝置必須重新登入。</string>
+     </property>
+     <property name="wordWrap">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="TableWidget" name="backupsTable">
+     <property name="selectionMode">
+      <enum>QAbstractItemView::SingleSelection</enum>
+     </property>
+     <property name="selectionBehavior">
+      <enum>QAbstractItemView::SelectRows</enum>
+     </property>
+     <column>
+      <property name="text">
+       <string>備份檔</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>建立時間</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>資料筆數</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>附件數</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>大小</string>
+      </property>
+     </column>
+    </widget>
+   </item>
+   <item>
+    <widget class="LineEdit" name="confirmationEdit" />
+   </item>
+   <item>
+    <widget class="DialogButtonBox" name="buttonBox">
+     <property name="standardButtons">
+      <set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok</set>
+     </property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+ <customwidget>
+  <class>LineEdit</class>
+  <extends>QLineEdit</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>TableWidget</class>
+  <extends>QTableWidget</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+  <customwidget>
+  <class>DialogButtonBox</class>
+  <extends>QDialogButtonBox</extends>
+  <header>customer_fluent</header>
+ </customwidget>
+ </customwidgets>
+ <resources />
+ <connections />
+</ui>

@@ -3,6 +3,8 @@
 from customer_dialogs import ImportPreviewDialog, ImportResultDialog, SharedLandBatchDialog
 from customer_domain import (
     build_duplicate_signature,
+    mask_identity_to_four_digits,
+    mask_owner_display_name,
     parse_number,
     parse_shared_land_rows,
 )
@@ -32,6 +34,7 @@ class ImportControllerMixin:
                 {
                     "district": row["district"],
                     "section": row["section"],
+                    "subsection": row["subsection"] if "subsection" in row.keys() else "",
                     "registration_order": row["registration_order"],
                     "land_number": row["land_number"],
                     "owner_name": decrypt_value(self.fernet, row["owner_name"] or ""),
@@ -42,17 +45,40 @@ class ImportControllerMixin:
                 signatures[signature] = row["id"]
         return signatures
 
-    def annotate_import_duplicates(self, records):
+    def annotate_import_duplicates(self, records, imported_keys=None):
         repository = self.active_import_repository()
         existing_signatures = self.collect_existing_duplicate_signatures()
+        existing_ids = set()
+        if any(record.get("record_id") for record in records):
+            existing_ids = {
+                int(row["id"]) for row in repository.fetch_duplicate_candidates()
+            }
         import_signatures = set()
+        import_record_ids = set()
         duplicate_indexes = set()
         watchlist_indexes = set()
         for index, record in enumerate(records):
             duplicate_reasons = []
             status_reasons = []
             signature = build_duplicate_signature(record)
-            if signature:
+            record_id = int(record.get("record_id") or 0)
+            if record_id:
+                # 系統ID is authoritative: the row came from this record, even
+                # when the corrected 姓名／身分證 no longer match its signature.
+                if record_id in import_record_ids:
+                    duplicate_reasons.append("本次匯入重複")
+                    record["_unmatched_record_id"] = True
+                elif record_id in existing_ids:
+                    record["_existing_record_id"] = record_id
+                    record["_matched_by_record_id"] = True
+                    duplicate_reasons.append("系統ID相符")
+                else:
+                    duplicate_reasons.append("系統ID不存在")
+                    record["_unmatched_record_id"] = True
+                import_record_ids.add(record_id)
+                if signature:
+                    import_signatures.add(signature)
+            elif signature:
                 if signature in existing_signatures:
                     duplicate_reasons.append("資料庫已存在")
                     record["_existing_record_id"] = existing_signatures[signature]
@@ -70,7 +96,44 @@ class ImportControllerMixin:
                 duplicate_indexes.add(index)
                 status_reasons = [*duplicate_reasons, *status_reasons]
             record["_duplicate_reason"] = "、".join(status_reasons)
+            if imported_keys and record.get("_existing_record_id"):
+                self.annotate_import_changes(
+                    record, record["_existing_record_id"], imported_keys
+                )
         return duplicate_indexes, watchlist_indexes
+
+    def annotate_import_changes(self, record, record_id, imported_keys):
+        """Store what updating `record_id` from this row would change, so the
+        preview can show 舊值 → 新值 before anything is written."""
+        old_row = self.active_import_repository().get_customer(record_id)
+        if old_row is None:
+            record["_change_summary"] = "找不到原資料"
+            record["_import_warnings"] = []
+            record["_has_changes"] = False
+            return
+        old_plain = self.get_plain_record_data(old_row)
+        merged, warnings = self.build_import_update_record(
+            old_plain, record, imported_keys
+        )
+        parts = [
+            f"{label}：{old or '(空白)'} → {new or '(空白)'}"
+            for _key, label, old, new in self.import_record_changes(old_plain, merged)
+        ]
+        record["_has_changes"] = bool(parts)
+        if not parts:
+            parts.append("無變更")
+        record["_change_summary"] = "；".join([*parts, *warnings])
+        record["_import_warnings"] = warnings
+
+    @staticmethod
+    def import_record_changes(old_plain, new_plain):
+        changes = []
+        for key, label in LAND_FIELDS:
+            old_text = str(old_plain.get(key) or "").strip()
+            new_text = str(new_plain.get(key) or "").strip()
+            if old_text != new_text:
+                changes.append((key, label, old_text, new_text))
+        return changes
 
     def get_imported_field_labels(self, column_map):
         label_by_key = {key: label for key, label in LAND_FIELDS}
@@ -149,11 +212,13 @@ class ImportControllerMixin:
         error_rows,
         updated_count=0,
         plan_summary=None,
+        unchanged_count=0,
     ):
         summary_lines = [
             f"總讀取筆數：{total_count}",
             f"成功新增：{imported_count}",
             f"成功更新：{updated_count}",
+            *([f"內容相同未更新：{unchanged_count}"] if unchanged_count else []),
             f"重複略過：{skipped_duplicate_count}",
             f"注意名單：{watchlist_count}",
             f"錯誤列數：{error_count}",
@@ -228,8 +293,12 @@ class ImportControllerMixin:
                 return
 
             original_records = [dict(record) for record in records]
-            duplicate_indexes, watchlist_indexes = self.annotate_import_duplicates(records)
+            duplicate_indexes, watchlist_indexes = self.annotate_import_duplicates(
+                records, set(column_map.values())
+            )
             preview_columns = self.build_import_preview_columns(column_map)
+            if any("_change_summary" in record for record in records):
+                preview_columns.insert(0, ("_change_summary", "變更內容"))
             if self.urban_plans_available():
                 preview_dialog = ImportPreviewDialog(
                     records,
@@ -283,6 +352,7 @@ class ImportControllerMixin:
         try:
             skipped_duplicate_count = 0
             updated_count = 0
+            unchanged_count = 0
             records_to_insert = list(records)
             update_plans = []
             if records and preview_dialog.import_mode == "skip_duplicates":
@@ -292,12 +362,21 @@ class ImportControllerMixin:
                     for index, record in enumerate(records)
                     if index not in duplicate_indexes
                 ]
-            elif records and preview_dialog.import_mode == "update_duplicates":
+            elif records:
+                # A row whose 系統ID matched updates the record it came from
+                # under 全部匯入 too -- inserting it again would duplicate it --
+                # and a 系統ID that matched nothing is never inserted.
+                update_mode = preview_dialog.import_mode == "update_duplicates"
                 records_to_insert = []
                 imported_keys = set(column_map.values())
                 for index, record in enumerate(records):
+                    if record.get("_unmatched_record_id"):
+                        skipped_duplicate_count += 1
+                        continue
                     existing_record_id = record.get("_existing_record_id")
-                    if existing_record_id:
+                    if existing_record_id and (
+                        update_mode or record.get("_matched_by_record_id")
+                    ):
                         old_row = repository.get_customer(existing_record_id)
                         if old_row is None:
                             skipped_duplicate_count += 1
@@ -308,8 +387,11 @@ class ImportControllerMixin:
                             record,
                             imported_keys,
                         )
+                        if not self.import_record_changes(old_plain, new_plain):
+                            unchanged_count += 1
+                            continue
                         update_plans.append((existing_record_id, old_plain, new_plain))
-                    elif index in duplicate_indexes:
+                    elif update_mode and index in duplicate_indexes:
                         skipped_duplicate_count += 1
                     else:
                         records_to_insert.append(record)
@@ -329,6 +411,7 @@ class ImportControllerMixin:
                     detail_lines,
                     error_rows,
                     updated_count,
+                    unchanged_count=unchanged_count,
                 )
                 return
 
@@ -422,6 +505,7 @@ class ImportControllerMixin:
                 error_rows,
                 updated_count,
                 plan_summary=plan_summary,
+                unchanged_count=unchanged_count,
             )
         except Exception as exc:
             QMessageBox.critical(self, "匯入失敗", f"處理匯入結果時發生錯誤：{exc}")
@@ -430,15 +514,41 @@ class ImportControllerMixin:
         return self.active_import_repository().insert_customers(records)
 
     def merge_import_update_record(self, old_plain, imported_record, imported_keys):
+        return self.build_import_update_record(old_plain, imported_record, imported_keys)[0]
+
+    def build_import_update_record(self, old_plain, imported_record, imported_keys):
+        """Merge one imported row over the stored record.
+
+        Returns (merged, warnings). A blank cell keeps the stored value -- a
+        corrected export leaves cells blank where nothing was known, not to
+        erase them. A 姓名／身分證 that is exactly the privacy mask of the
+        stored value is the masked export echoing it back, so it is kept; a
+        身分證 with * in it is a masked value, refused and reported. Short
+        身分證 are written as-is: 謄本 often only show part of the number."""
         merged = dict(old_plain)
+        warnings = []
         for key in imported_keys:
-            if key in merged:
-                merged[key] = imported_record.get(key)
+            if key not in merged:
+                continue
+            value = imported_record.get(key)
+            text = str(value or "").strip()
+            if not text:
+                continue
+            old_text = str(old_plain.get(key) or "").strip()
+            if key == "owner_name" and old_text and text == mask_owner_display_name(old_text):
+                continue
+            if key == "external_id" and text != old_text:
+                if old_text and text == mask_identity_to_four_digits(old_text):
+                    continue
+                if "*" in text or "＊" in text:
+                    warnings.append(f"⚠ 身分證「{text}」是遮罩值，未更新")
+                    continue
+            merged[key] = value
         if "owner_name" in imported_keys:
             merged["name"] = merged.get("owner_name") or ""
         if imported_keys & {"area", "declared_value", "numerator", "denominator", "ping"}:
             merged = self.normalize_record_data(merged)
-        return merged
+        return merged, warnings
 
     def batch_add_shared_land_records(self):
         if hasattr(self, "ensure_can_modify") and not self.ensure_can_modify("同地號批量新增"):

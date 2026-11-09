@@ -20,15 +20,12 @@ from urllib.request import Request, urlopen
 
 from PySide6.QtCore import QDate, QObject, QThread, QUrl, Qt, Signal, Slot
 from PySide6.QtWidgets import (
-    QAbstractItemView,
     QApplication,
     QCheckBox,
     QComboBox,
     QDateEdit,
     QDialogButtonBox,
     QFileDialog,
-    QFormLayout,
-    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QInputDialog,
@@ -42,13 +39,13 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
-    QTabWidget,
-    QVBoxLayout,
     QWidget,
 )
+from qfluentwidgets import ComboBox as FluentComboBox
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from customer_responsive_dialog import ResponsiveDialog as QDialog
+from customer_ui_loader import find_child, install_ui, put_in_slot
 
 from customer_domain import mask_owner_display_name, normalize_match_text
 from customer_offline_map import (
@@ -60,6 +57,11 @@ from customer_offline_map import (
 from customer_excel import HEADER_MAP, normalize_header
 from customer_word import write_report_docx
 from customer_security import decrypt_value
+
+# 案件規劃的狀態／優先順序選項（Fluent 下拉不讀 .ui 裡的選項，改由程式加入）。
+CASE_STATUS_OPTIONS = ("進行中", "等待中", "完成", "暫停")
+TASK_STATUS_OPTIONS = ("待處理", "進行中", "等待中", "完成")
+PRIORITY_OPTIONS = ("一般", "高", "緊急")
 
 
 ROLE_LABELS = {"admin": "管理員", "editor": "編輯者", "viewer": "唯讀人員"}
@@ -685,18 +687,17 @@ class OffsiteBackupWorker(QObject):
 
 
 class RecycleBinDialog(QDialog):
+    # Layout: ui/dialogs/recycle_bin_dialog.ui.
+    ui_file = "dialogs/recycle_bin_dialog.ui"
+    ui_object_names = ("recycleTable", "restoreButton", "purgeButton", "purgeAllButton", "closeButton")
+
     def __init__(self, rows, parent=None):
         super().__init__(parent)
         self.rows = [dict(row) for row in rows]
         self.action = None
-        self.setWindowTitle("回收桶")
-        self.resize(820, 500)
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("刪除的土地資料會連同案件、標籤、附件與聯絡關聯保存在這裡。"))
-        self.table = QTableWidget(len(self.rows), 6)
-        self.table.setHorizontalHeaderLabels(["ID", "原始ID", "資料", "刪除者", "刪除時間", "類型"])
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.table = find_child(content, "recycleTable", QTableWidget)
+        self.table.setRowCount(len(self.rows))
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         for index, row in enumerate(self.rows):
             _set_table_row(
@@ -704,22 +705,10 @@ class RecycleBinDialog(QDialog):
                 [row["id"], row["original_id"], row["display_label"], row["deleted_by"], row["deleted_at"], row["entity_type"]],
                 row["id"],
             )
-        layout.addWidget(self.table)
-        buttons = QHBoxLayout()
-        restore = QPushButton("還原選取")
-        purge = QPushButton("永久刪除選取")
-        purge_all = QPushButton("清空回收桶")
-        close = QPushButton("關閉")
-        restore.clicked.connect(lambda: self._request("restore"))
-        purge.clicked.connect(lambda: self._request("purge"))
-        purge_all.clicked.connect(lambda: self._request("purge_all"))
-        close.clicked.connect(self.reject)
-        buttons.addWidget(restore)
-        buttons.addStretch(1)
-        buttons.addWidget(purge)
-        buttons.addWidget(purge_all)
-        buttons.addWidget(close)
-        layout.addLayout(buttons)
+        find_child(content, "restoreButton", QPushButton).clicked.connect(lambda: self._request("restore"))
+        find_child(content, "purgeButton", QPushButton).clicked.connect(lambda: self._request("purge"))
+        find_child(content, "purgeAllButton", QPushButton).clicked.connect(lambda: self._request("purge_all"))
+        find_child(content, "closeButton", QPushButton).clicked.connect(self.reject)
 
     def _request(self, action):
         if action != "purge_all" and not _selected_ids(self.table):
@@ -733,27 +722,24 @@ class RecycleBinDialog(QDialog):
 
 
 class UndoOperationsDialog(QDialog):
+    # Layout: ui/dialogs/undo_operations_dialog.ui.
+    ui_file = "dialogs/undo_operations_dialog.ui"
+    ui_object_names = ("operationsTable", "buttonBox")
+
     def __init__(self, rows, parent=None):
         super().__init__(parent)
         self.rows = [dict(row) for row in rows]
         self.operation_id = None
-        self.setWindowTitle("批次操作復原")
-        self.resize(760, 440)
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("可復原批次修改、Excel 匯入、同地號新增與資料合併。"))
-        self.table = QTableWidget(len(self.rows), 6)
-        self.table.setHorizontalHeaderLabels(["ID", "操作", "摘要", "執行者", "狀態", "時間"])
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.table = find_child(content, "operationsTable", QTableWidget)
+        self.table.setRowCount(len(self.rows))
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         for index, row in enumerate(self.rows):
             _set_table_row(self.table, index, [row["id"], row["operation_type"], row["summary"], row["actor_username"], row["status"], row["created_at"]], row["id"])
-        layout.addWidget(self.table)
-        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        buttons = find_child(content, "buttonBox", QDialogButtonBox)
         undo = buttons.addButton("復原選取操作", QDialogButtonBox.ActionRole)
         undo.clicked.connect(self.request_undo)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
 
     def request_undo(self):
         ids = _selected_ids(self.table)
@@ -765,55 +751,33 @@ class UndoOperationsDialog(QDialog):
 
 
 class UserManagementDialog(QDialog):
+    # Layout: ui/dialogs/user_management_dialog.ui.
+    ui_file = "dialogs/user_management_dialog.ui"
+    ui_object_names = (
+        "usersTable", "usernameEdit", "displayNameEdit", "passwordEdit", "roleCombo", "activeCheckBox",
+        "newModeButton", "createButton", "updateButton", "resetPasswordButton", "closeButton",
+    )
+
     def __init__(self, repository, data_key, parent=None):
         super().__init__(parent)
         self.repository = repository
         self.data_key = data_key
-        self.setWindowTitle("使用者與權限管理")
-        self.resize(780, 540)
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("管理員可管理帳號；編輯者可修改資料；唯讀人員只能查詢與匯出。"))
-        self.table = QTableWidget(0, 7)
-        self.table.setHorizontalHeaderLabels(["ID", "帳號", "顯示名稱", "角色", "啟用", "建立時間", "最後登入"])
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.table = find_child(content, "usersTable", QTableWidget)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.table.itemSelectionChanged.connect(self.load_selected)
-        layout.addWidget(self.table)
-        form = QFormLayout()
-        self.username = QLineEdit()
-        self.display_name = QLineEdit()
-        self.password = QLineEdit()
-        self.password.setEchoMode(QLineEdit.Password)
-        self.role = QComboBox()
+        self.username = find_child(content, "usernameEdit", QLineEdit)
+        self.display_name = find_child(content, "displayNameEdit", QLineEdit)
+        self.password = find_child(content, "passwordEdit", QLineEdit)
+        self.role = find_child(content, "roleCombo", FluentComboBox)
         for key, label in ROLE_LABELS.items():
-            self.role.addItem(label, key)
-        self.active = QCheckBox("啟用帳號")
-        self.active.setChecked(True)
-        form.addRow("帳號", self.username)
-        form.addRow("顯示名稱", self.display_name)
-        form.addRow("新密碼", self.password)
-        form.addRow("角色", self.role)
-        form.addRow("狀態", self.active)
-        layout.addLayout(form)
-        buttons = QHBoxLayout()
-        new_mode = QPushButton("新增模式")
-        create = QPushButton("新增帳號")
-        update = QPushButton("更新角色/狀態")
-        reset = QPushButton("重設選取帳號密碼")
-        close = QPushButton("關閉")
-        new_mode.clicked.connect(self.clear_form)
-        create.clicked.connect(self.create_user)
-        update.clicked.connect(self.update_user)
-        reset.clicked.connect(self.reset_password)
-        close.clicked.connect(self.accept)
-        buttons.addWidget(new_mode)
-        buttons.addWidget(create)
-        buttons.addWidget(update)
-        buttons.addWidget(reset)
-        buttons.addStretch(1)
-        buttons.addWidget(close)
-        layout.addLayout(buttons)
+            self.role.addItem(label, userData=key)
+        self.active = find_child(content, "activeCheckBox", QCheckBox)
+        find_child(content, "newModeButton", QPushButton).clicked.connect(self.clear_form)
+        find_child(content, "createButton", QPushButton).clicked.connect(self.create_user)
+        find_child(content, "updateButton", QPushButton).clicked.connect(self.update_user)
+        find_child(content, "resetPasswordButton", QPushButton).clicked.connect(self.reset_password)
+        find_child(content, "closeButton", QPushButton).clicked.connect(self.accept)
         self.refresh()
 
     def clear_form(self):
@@ -883,56 +847,35 @@ class UserManagementDialog(QDialog):
 
 
 class BackupTargetsDialog(QDialog):
+    # Layout: ui/dialogs/backup_targets_dialog.ui.
+    ui_file = "dialogs/backup_targets_dialog.ui"
+    ui_object_names = (
+        "targetsTable", "nameEdit", "pathEdit", "browseButton", "enabledCheckBox",
+        "backupPasswordEdit", "backupPasswordConfirmEdit", "rememberPasswordCheckBox",
+        "saveButton", "deleteButton", "restoreButton", "syncButton", "closeButton",
+    )
+
     def __init__(self, repository, service, parent=None):
         super().__init__(parent)
         self.repository = repository
         self.service = service
         self.restore_succeeded = False
-        self.setWindowTitle("異地備份")
-        self.resize(820, 520)
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("目的地可選 USB、NAS 或 OneDrive 同步資料夾；每次同步都會驗證 SHA-256。"))
-        self.table = QTableWidget(0, 6)
-        self.table.setHorizontalHeaderLabels(["ID", "名稱", "資料夾", "啟用", "最後成功", "錯誤"])
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.table = find_child(content, "targetsTable", QTableWidget)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.table.itemSelectionChanged.connect(self.load_selected)
-        layout.addWidget(self.table)
-        row = QHBoxLayout()
-        self.name = QLineEdit()
-        self.name.setPlaceholderText("例如：辦公室 NAS")
-        self.path = QLineEdit()
-        browse = QPushButton("瀏覽")
-        browse.clicked.connect(self.browse)
-        self.enabled = QCheckBox("啟用")
-        self.enabled.setChecked(True)
-        row.addWidget(QLabel("名稱")); row.addWidget(self.name)
-        row.addWidget(QLabel("資料夾")); row.addWidget(self.path, 1); row.addWidget(browse); row.addWidget(self.enabled)
-        layout.addLayout(row)
-        password_row = QHBoxLayout()
-        self.backup_password = QLineEdit()
-        self.backup_password.setEchoMode(QLineEdit.Password)
-        self.backup_password.setPlaceholderText("至少 10 個字元；災難還原時需要")
-        self.backup_password_confirm = QLineEdit()
-        self.backup_password_confirm.setEchoMode(QLineEdit.Password)
-        self.remember_password = QCheckBox("加密保存在本機並每日自動同步")
-        self.remember_password.setChecked(True)
-        password_row.addWidget(QLabel("備份密碼"))
-        password_row.addWidget(self.backup_password)
-        password_row.addWidget(QLabel("確認"))
-        password_row.addWidget(self.backup_password_confirm)
-        password_row.addWidget(self.remember_password)
-        layout.addLayout(password_row)
-        buttons = QHBoxLayout()
-        save = QPushButton("新增/更新")
-        delete = QPushButton("刪除")
-        sync = QPushButton("立即建立完整備份並同步")
-        restore = QPushButton("還原完整備份")
-        close = QPushButton("關閉")
-        save.clicked.connect(self.save); delete.clicked.connect(self.delete); sync.clicked.connect(self.sync); restore.clicked.connect(self.restore); close.clicked.connect(self.accept)
-        buttons.addWidget(save); buttons.addWidget(delete); buttons.addStretch(1); buttons.addWidget(restore); buttons.addWidget(sync); buttons.addWidget(close)
-        layout.addLayout(buttons)
+        self.name = find_child(content, "nameEdit", QLineEdit)
+        self.path = find_child(content, "pathEdit", QLineEdit)
+        find_child(content, "browseButton", QPushButton).clicked.connect(self.browse)
+        self.enabled = find_child(content, "enabledCheckBox", QCheckBox)
+        self.backup_password = find_child(content, "backupPasswordEdit", QLineEdit)
+        self.backup_password_confirm = find_child(content, "backupPasswordConfirmEdit", QLineEdit)
+        self.remember_password = find_child(content, "rememberPasswordCheckBox", QCheckBox)
+        find_child(content, "saveButton", QPushButton).clicked.connect(self.save)
+        find_child(content, "deleteButton", QPushButton).clicked.connect(self.delete)
+        find_child(content, "syncButton", QPushButton).clicked.connect(self.sync)
+        find_child(content, "restoreButton", QPushButton).clicked.connect(self.restore)
+        find_child(content, "closeButton", QPushButton).clicked.connect(self.accept)
         self.refresh()
 
     def refresh(self):
@@ -1042,83 +985,58 @@ class WorkflowDialog(QDialog):
     attach the currently selected/checked records to a case or jump back to
     the main table filtered to just that case's records."""
 
+    # Layout: ui/dialogs/workflow_dialog.ui (both tabs).
+    ui_file = "dialogs/workflow_dialog.ui"
+    ui_object_names = (
+        "workflowTabs", "caseTable", "caseTitleEdit", "caseStatusCombo", "caseAssigneeEdit", "caseDueEdit",
+        "casePriorityCombo", "caseNextEdit", "caseNoteEdit", "caseArchivedCheckBox", "newCaseButton",
+        "saveCaseButton", "archiveCaseButton", "deleteCaseButton", "attachStatusLabel", "attachButton",
+        "filterButton", "taskTable", "taskCaseCombo", "taskTitleEdit", "taskAssigneeEdit", "taskDueEdit",
+        "taskStatusCombo", "taskPriorityCombo", "taskChecklistEdit", "newTaskButton", "saveTaskButton",
+        "deleteTaskButton", "buttonBox",
+    )
+
     def __init__(self, repository, parent=None, *, record_ids_to_attach=None):
         super().__init__(parent)
         self.repository = repository
         self.record_ids_to_attach = sorted({int(value) for value in (record_ids_to_attach or [])})
         self.filter_requested_title = None
-        self.setWindowTitle("案件規劃")
-        self.resize(1000, 680)
-        layout = QVBoxLayout(self)
-        tabs = QTabWidget()
-        tabs.addTab(self._case_tab(), "案件")
-        tabs.addTab(self._task_tab(), "任務")
-        layout.addWidget(tabs)
-        close = QDialogButtonBox(QDialogButtonBox.Close)
-        close.rejected.connect(self.accept)
-        layout.addWidget(close)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self._case_tab(content)
+        self._task_tab(content)
+        find_child(content, "buttonBox", QDialogButtonBox).rejected.connect(self.accept)
         self.refresh_all()
 
-    def _case_tab(self):
-        widget = QWidget(); layout = QVBoxLayout(widget)
-        self.case_table = QTableWidget(0, 9)
-        self.case_table.setHorizontalHeaderLabels(["ID", "案件", "狀態", "負責人", "期限", "優先", "下一步", "資料數", "封存"])
-        self.case_table.setSelectionBehavior(QAbstractItemView.SelectRows); self.case_table.setSelectionMode(QAbstractItemView.SingleSelection)
+    def _case_tab(self, content):
+        ui = lambda name, cls: find_child(content, name, cls)  # noqa: E731
+        self.case_table = ui("caseTable", QTableWidget)
         self.case_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.case_table.itemSelectionChanged.connect(self.load_case)
-        layout.addWidget(self.case_table)
-        form = QGridLayout()
-        self.case_title = QLineEdit(); self.case_status = QComboBox(); self.case_status.addItems(["進行中", "等待中", "完成", "暫停"])
-        self.case_assignee = QLineEdit(); self.case_due = QDateEdit(); _configure_optional_date_edit(self.case_due)
-        self.case_priority = QComboBox(); self.case_priority.addItems(["一般", "高", "緊急"])
-        self.case_next = QLineEdit(); self.case_note = QPlainTextEdit(); self.case_note.setMaximumHeight(70); self.case_archived = QCheckBox("封存")
-        fields = [("案件", self.case_title), ("狀態", self.case_status), ("負責人", self.case_assignee), ("期限", self.case_due), ("優先", self.case_priority), ("下一步", self.case_next)]
-        for index, (label, control) in enumerate(fields):
-            row, col = divmod(index, 2); form.addWidget(QLabel(label), row, col * 2); form.addWidget(control, row, col * 2 + 1)
-        form.addWidget(QLabel("備註"), 3, 0); form.addWidget(self.case_note, 3, 1, 1, 3); form.addWidget(self.case_archived, 4, 1)
-        layout.addLayout(form)
-        buttons = QHBoxLayout(); new = QPushButton("新增模式"); save = QPushButton("儲存案件"); archive = QPushButton("封存/取消封存"); delete = QPushButton("刪除案件")
-        new.clicked.connect(self.clear_case); save.clicked.connect(self.save_case); archive.clicked.connect(self.toggle_archive); delete.clicked.connect(self.delete_case)
-        buttons.addWidget(new); buttons.addWidget(save); buttons.addWidget(archive); buttons.addWidget(delete); buttons.addStretch(1); layout.addLayout(buttons)
-
-        attach_row = QHBoxLayout()
+        self.case_title = ui("caseTitleEdit", QLineEdit); self.case_status = ui("caseStatusCombo", FluentComboBox); self.case_status.addItems(CASE_STATUS_OPTIONS)
+        self.case_assignee = ui("caseAssigneeEdit", QLineEdit); self.case_due = ui("caseDueEdit", QDateEdit); _configure_optional_date_edit(self.case_due)
+        self.case_priority = ui("casePriorityCombo", FluentComboBox); self.case_priority.addItems(PRIORITY_OPTIONS)
+        self.case_next = ui("caseNextEdit", QLineEdit); self.case_note = ui("caseNoteEdit", QPlainTextEdit); self.case_archived = ui("caseArchivedCheckBox", QCheckBox)
+        ui("newCaseButton", QPushButton).clicked.connect(self.clear_case); ui("saveCaseButton", QPushButton).clicked.connect(self.save_case)
+        ui("archiveCaseButton", QPushButton).clicked.connect(self.toggle_archive); ui("deleteCaseButton", QPushButton).clicked.connect(self.delete_case)
         attach_count = len(self.record_ids_to_attach)
-        self.attach_status_label = QLabel(
-            f"目前已勾選 {attach_count} 筆資料：" if attach_count else "（未從主畫面帶入勾選資料）"
-        )
-        attach_button = QPushButton("加入這個案件")
-        attach_button.clicked.connect(self.attach_selected_records)
-        filter_button = QPushButton("篩選顯示此案件資料")
-        filter_button.clicked.connect(self.filter_by_selected_case)
-        attach_row.addWidget(self.attach_status_label)
-        attach_row.addWidget(attach_button)
-        attach_row.addWidget(filter_button)
-        attach_row.addStretch(1)
-        layout.addLayout(attach_row)
-        return widget
+        self.attach_status_label = ui("attachStatusLabel", QLabel)
+        if attach_count:
+            self.attach_status_label.setText(f"目前已勾選 {attach_count} 筆資料：")
+        ui("attachButton", QPushButton).clicked.connect(self.attach_selected_records)
+        ui("filterButton", QPushButton).clicked.connect(self.filter_by_selected_case)
 
-    def _task_tab(self):
-        widget = QWidget(); layout = QVBoxLayout(widget)
-        self.task_table = QTableWidget(0, 8)
-        self.task_table.setHorizontalHeaderLabels(["ID", "案件", "任務", "負責人", "期限", "狀態", "優先", "檢查清單"])
-        self.task_table.setSelectionBehavior(QAbstractItemView.SelectRows); self.task_table.setSelectionMode(QAbstractItemView.SingleSelection)
+    def _task_tab(self, content):
+        ui = lambda name, cls: find_child(content, name, cls)  # noqa: E731
+        self.task_table = ui("taskTable", QTableWidget)
         self.task_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.task_table.itemSelectionChanged.connect(self.load_task)
-        layout.addWidget(self.task_table)
-        form = QGridLayout()
-        self.task_case = QComboBox(); self.task_title = QLineEdit(); self.task_assignee = QLineEdit(); self.task_due = QDateEdit(); _configure_optional_date_edit(self.task_due)
-        self.task_status = QComboBox(); self.task_status.addItems(["待處理", "進行中", "等待中", "完成"])
-        self.task_priority = QComboBox(); self.task_priority.addItems(["一般", "高", "緊急"])
-        self.task_checklist = QPlainTextEdit(); self.task_checklist.setPlaceholderText("每行一個檢查項目"); self.task_checklist.setMaximumHeight(80)
-        fields = [("案件", self.task_case), ("任務", self.task_title), ("負責人", self.task_assignee), ("期限", self.task_due), ("狀態", self.task_status), ("優先", self.task_priority)]
-        for index, (label, control) in enumerate(fields):
-            row, col = divmod(index, 2); form.addWidget(QLabel(label), row, col * 2); form.addWidget(control, row, col * 2 + 1)
-        form.addWidget(QLabel("檢查清單"), 3, 0); form.addWidget(self.task_checklist, 3, 1, 1, 3)
-        layout.addLayout(form)
-        buttons = QHBoxLayout(); new = QPushButton("新增模式"); save = QPushButton("儲存任務"); delete = QPushButton("刪除任務")
-        new.clicked.connect(self.clear_task); save.clicked.connect(self.save_task); delete.clicked.connect(self.delete_task)
-        buttons.addWidget(new); buttons.addWidget(save); buttons.addWidget(delete); buttons.addStretch(1); layout.addLayout(buttons)
-        return widget
+        self.task_case = ui("taskCaseCombo", FluentComboBox); self.task_title = ui("taskTitleEdit", QLineEdit); self.task_assignee = ui("taskAssigneeEdit", QLineEdit)
+        self.task_due = ui("taskDueEdit", QDateEdit); _configure_optional_date_edit(self.task_due)
+        self.task_status = ui("taskStatusCombo", FluentComboBox); self.task_status.addItems(TASK_STATUS_OPTIONS)
+        self.task_priority = ui("taskPriorityCombo", FluentComboBox); self.task_priority.addItems(PRIORITY_OPTIONS)
+        self.task_checklist = ui("taskChecklistEdit", QPlainTextEdit)
+        ui("newTaskButton", QPushButton).clicked.connect(self.clear_task); ui("saveTaskButton", QPushButton).clicked.connect(self.save_task)
+        ui("deleteTaskButton", QPushButton).clicked.connect(self.delete_task)
 
     def refresh_all(self):
         self.cases = [dict(row) for row in self.repository.list_cases()]
@@ -1129,7 +1047,7 @@ class WorkflowDialog(QDialog):
         self.task_case.clear()
         for row in self.cases:
             if not row["archived_at"]:
-                self.task_case.addItem(row["title"], row["id"])
+                self.task_case.addItem(row["title"], userData=row["id"])
         if current_case is not None:
             self.task_case.setCurrentIndex(max(0, self.task_case.findData(current_case)))
         self.tasks = [dict(row) for row in self.repository.list_case_tasks()]
@@ -1215,16 +1133,27 @@ class WorkflowDialog(QDialog):
 
 
 class NotificationCenterDialog(QDialog):
+    # Layout: ui/dialogs/notification_center_dialog.ui.
+    ui_file = "dialogs/notification_center_dialog.ui"
+    ui_object_names = (
+        "includeReadCheckBox", "notificationsTable", "markReadButton",
+        "dismissButton", "refreshButton", "closeButton",
+    )
+
     def __init__(self, repository, parent=None):
         super().__init__(parent)
         self.repository = repository
         self.repository.refresh_notifications(date.today().isoformat())
-        self.setWindowTitle("通知中心")
-        self.resize(850, 500)
-        layout = QVBoxLayout(self)
-        top = QHBoxLayout(); self.include_read = QCheckBox("包含已讀"); self.include_read.toggled.connect(self.refresh); top.addWidget(QLabel("今日到期與逾期的追蹤、案件及任務會集中顯示。")); top.addStretch(1); top.addWidget(self.include_read); layout.addLayout(top)
-        self.table = QTableWidget(0, 7); self.table.setHorizontalHeaderLabels(["ID", "嚴重度", "類型", "標題", "內容", "已讀", "時間"]); self.table.setSelectionBehavior(QAbstractItemView.SelectRows); self.table.setSelectionMode(QAbstractItemView.ExtendedSelection); self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch); self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch); layout.addWidget(self.table)
-        buttons = QHBoxLayout(); read = QPushButton("標記已讀"); dismiss = QPushButton("隱藏選取"); refresh = QPushButton("重新整理"); close = QPushButton("關閉"); read.clicked.connect(lambda: self.mark("read")); dismiss.clicked.connect(lambda: self.mark("dismiss")); refresh.clicked.connect(self.refresh); close.clicked.connect(self.accept); buttons.addWidget(read); buttons.addWidget(dismiss); buttons.addStretch(1); buttons.addWidget(refresh); buttons.addWidget(close); layout.addLayout(buttons)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.include_read = find_child(content, "includeReadCheckBox", QCheckBox)
+        self.include_read.toggled.connect(self.refresh)
+        self.table = find_child(content, "notificationsTable", QTableWidget)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
+        find_child(content, "markReadButton", QPushButton).clicked.connect(lambda: self.mark("read"))
+        find_child(content, "dismissButton", QPushButton).clicked.connect(lambda: self.mark("dismiss"))
+        find_child(content, "refreshButton", QPushButton).clicked.connect(self.refresh)
+        find_child(content, "closeButton", QPushButton).clicked.connect(self.accept)
         self.refresh()
 
     def refresh(self):
@@ -1238,14 +1167,21 @@ class NotificationCenterDialog(QDialog):
 
 
 class ImportProfilesDialog(QDialog):
+    # Layout: ui/dialogs/import_profiles_dialog.ui (the field-code list is added here).
+    ui_file = "dialogs/import_profiles_dialog.ui"
+    ui_object_names = (
+        "introLabel", "profilesTable", "nameEdit", "mappingEdit", "defaultCheckBox",
+        "newButton", "saveButton", "deleteButton", "closeButton",
+    )
+
     def __init__(self, repository, field_labels, parent=None):
         super().__init__(parent)
         self.repository = repository; self.field_labels = dict(field_labels)
-        self.setWindowTitle("Excel 匯入設定檔"); self.resize(850, 560)
-        layout = QVBoxLayout(self); layout.addWidget(QLabel("每行格式：Excel欄名=系統欄位代碼。儲存為預設後，下一次匯入會自動套用。\n可用代碼：" + "、".join(f"{key}({label})" for key, label in self.field_labels.items())))
-        self.table = QTableWidget(0, 4); self.table.setHorizontalHeaderLabels(["ID", "名稱", "預設", "欄位對應"]); self.table.setSelectionBehavior(QAbstractItemView.SelectRows); self.table.setSelectionMode(QAbstractItemView.SingleSelection); self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch); self.table.itemSelectionChanged.connect(self.load_selected); layout.addWidget(self.table)
-        form = QFormLayout(); self.name = QLineEdit(); self.mapping = QPlainTextEdit(); self.mapping.setMaximumHeight(120); self.default = QCheckBox("設為預設"); form.addRow("名稱", self.name); form.addRow("對應", self.mapping); form.addRow("", self.default); layout.addLayout(form)
-        buttons = QHBoxLayout(); new = QPushButton("新增模式"); save = QPushButton("儲存"); delete = QPushButton("刪除"); close = QPushButton("關閉"); new.clicked.connect(self.clear); save.clicked.connect(self.save); delete.clicked.connect(self.delete); close.clicked.connect(self.accept); buttons.addWidget(new); buttons.addWidget(save); buttons.addWidget(delete); buttons.addStretch(1); buttons.addWidget(close); layout.addLayout(buttons); self.refresh()
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        find_child(content, "introLabel", QLabel).setText("每行格式：Excel欄名=系統欄位代碼。儲存為預設後，下一次匯入會自動套用。\n可用代碼：" + "、".join(f"{key}({label})" for key, label in self.field_labels.items()))
+        self.table = find_child(content, "profilesTable", QTableWidget); self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch); self.table.itemSelectionChanged.connect(self.load_selected)
+        self.name = find_child(content, "nameEdit", QLineEdit); self.mapping = find_child(content, "mappingEdit", QPlainTextEdit); self.default = find_child(content, "defaultCheckBox", QCheckBox)
+        find_child(content, "newButton", QPushButton).clicked.connect(self.clear); find_child(content, "saveButton", QPushButton).clicked.connect(self.save); find_child(content, "deleteButton", QPushButton).clicked.connect(self.delete); find_child(content, "closeButton", QPushButton).clicked.connect(self.accept); self.refresh()
 
     def refresh(self):
         self.rows = [dict(row) for row in self.repository.list_import_profiles()]; self.table.setRowCount(len(self.rows))
@@ -1282,17 +1218,22 @@ class ImportProfilesDialog(QDialog):
 
 
 class ReportTemplatesDialog(QDialog):
+    # Layout: ui/dialogs/report_templates_dialog.ui (one checkable item per field is added here).
+    ui_file = "dialogs/report_templates_dialog.ui"
+    ui_object_names = (
+        "templatesTable", "nameEdit", "titleEdit", "headerEdit", "footerEdit", "fieldsList",
+        "newButton", "saveButton", "deleteButton", "exportButton", "closeButton",
+    )
+
     def __init__(self, repository, field_labels, parent=None):
         super().__init__(parent)
         self.repository = repository; self.field_labels = dict(field_labels); self.export_template = None
-        self.setWindowTitle("報表與列印範本"); self.resize(900, 650)
-        layout = QVBoxLayout(self)
-        self.table = QTableWidget(0, 4); self.table.setHorizontalHeaderLabels(["ID", "名稱", "報表標題", "欄位"]); self.table.setSelectionBehavior(QAbstractItemView.SelectRows); self.table.setSelectionMode(QAbstractItemView.SingleSelection); self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch); self.table.itemSelectionChanged.connect(self.load_selected); layout.addWidget(self.table)
-        body = QHBoxLayout(); form = QFormLayout(); self.name = QLineEdit(); self.title = QLineEdit("土地資料報表"); self.header = QPlainTextEdit(); self.header.setMaximumHeight(70); self.footer = QPlainTextEdit(); self.footer.setMaximumHeight(70); form.addRow("範本名稱", self.name); form.addRow("報表標題", self.title); form.addRow("頁首文字", self.header); form.addRow("頁尾文字", self.footer); body.addLayout(form, 2)
-        self.fields = QListWidget()
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.table = find_child(content, "templatesTable", QTableWidget); self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch); self.table.itemSelectionChanged.connect(self.load_selected)
+        self.name = find_child(content, "nameEdit", QLineEdit); self.title = find_child(content, "titleEdit", QLineEdit); self.header = find_child(content, "headerEdit", QPlainTextEdit); self.footer = find_child(content, "footerEdit", QPlainTextEdit)
+        self.fields = find_child(content, "fieldsList", QListWidget)
         for key, label in self.field_labels.items(): item = QListWidgetItem(f"{label}（{key}）"); item.setData(Qt.UserRole, key); item.setFlags(item.flags() | Qt.ItemIsUserCheckable); item.setCheckState(Qt.Checked if key in {"district", "section", "land_number", "owner_name", "address"} else Qt.Unchecked); self.fields.addItem(item)
-        body.addWidget(self.fields, 1); layout.addLayout(body)
-        buttons = QHBoxLayout(); new = QPushButton("新增模式"); save = QPushButton("儲存範本"); delete = QPushButton("刪除"); export = QPushButton("用選取範本匯出勾選資料"); close = QPushButton("關閉"); new.clicked.connect(self.clear); save.clicked.connect(self.save); delete.clicked.connect(self.delete); export.clicked.connect(self.request_export); close.clicked.connect(self.reject); buttons.addWidget(new); buttons.addWidget(save); buttons.addWidget(delete); buttons.addStretch(1); buttons.addWidget(export); buttons.addWidget(close); layout.addLayout(buttons); self.refresh()
+        find_child(content, "newButton", QPushButton).clicked.connect(self.clear); find_child(content, "saveButton", QPushButton).clicked.connect(self.save); find_child(content, "deleteButton", QPushButton).clicked.connect(self.delete); find_child(content, "exportButton", QPushButton).clicked.connect(self.request_export); find_child(content, "closeButton", QPushButton).clicked.connect(self.reject); self.refresh()
 
     def refresh(self):
         self.rows = [dict(row) for row in self.repository.list_report_templates()]; self.table.setRowCount(len(self.rows))
@@ -1327,13 +1268,16 @@ class ReportTemplatesDialog(QDialog):
 
 
 class DuplicateFinderDialog(QDialog):
+    # Layout: ui/dialogs/duplicate_finder_dialog.ui.
+    ui_file = "dialogs/duplicate_finder_dialog.ui"
+    ui_object_names = ("pairsTable", "mergeButton", "ignoreButton", "closeButton")
+
     def __init__(self, pairs, parent=None):
         super().__init__(parent); self.pairs = list(pairs); self.action = None; self.pair = None
-        self.setWindowTitle("智慧重複資料檢查"); self.resize(900, 520)
-        layout = QVBoxLayout(self); layout.addWidget(QLabel("分數綜合身分證、地號、姓名、地址與序號；合併前仍會顯示既有合併預覽。"))
-        self.table = QTableWidget(len(self.pairs), 7); self.table.setHorizontalHeaderLabels(["左ID", "右ID", "相似度", "判斷原因", "左資料", "右資料", "狀態"]); self.table.setSelectionBehavior(QAbstractItemView.SelectRows); self.table.setSelectionMode(QAbstractItemView.SingleSelection); self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.table = find_child(content, "pairsTable", QTableWidget); self.table.setRowCount(len(self.pairs)); self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         for index, pair in enumerate(self.pairs): _set_table_row(self.table, index, [pair["left_id"], pair["right_id"], f"{pair['score']}%", pair["reason"], pair["left_label"], pair["right_label"], "待確認"], pair["left_id"])
-        layout.addWidget(self.table); buttons = QHBoxLayout(); merge = QPushButton("合併選取組合"); ignore = QPushButton("忽略此組"); close = QPushButton("關閉"); merge.clicked.connect(lambda: self.request("merge")); ignore.clicked.connect(lambda: self.request("ignore")); close.clicked.connect(self.reject); buttons.addWidget(merge); buttons.addWidget(ignore); buttons.addStretch(1); buttons.addWidget(close); layout.addLayout(buttons)
+        find_child(content, "mergeButton", QPushButton).clicked.connect(lambda: self.request("merge")); find_child(content, "ignoreButton", QPushButton).clicked.connect(lambda: self.request("ignore")); find_child(content, "closeButton", QPushButton).clicked.connect(self.reject)
 
     def request(self, action):
         row = self.table.currentRow()
@@ -1580,6 +1524,13 @@ class BatchGeocodeWorker(QObject):
 
 
 class MapLocationsDialog(QDialog):
+    ui_file = "dialogs/map_locations_dialog.ui"
+    ui_object_names = (
+        "providerHintLabel", "locationsTable", "addressInput", "geocodeButton", "batchGeocodeButton",
+        "googleKeyButton", "customerIdEdit", "latitudeEdit", "longitudeEdit", "saveButton", "exportButton",
+        "closeButton",
+    )
+
     def __init__(
         self,
         repository,
@@ -1615,48 +1566,30 @@ class MapLocationsDialog(QDialog):
         # only ever has one repository to pass -- keep working unchanged.
         self.settings_repository = settings_repository or repository
         self.google_api_key = load_google_geocoding_api_key(self.settings_repository)
-        self.setWindowTitle("地圖與地號視覺化"); self.resize(1360, 680)
+        # Layout: ui/dialogs/map_locations_dialog.ui is the left-hand controls;
+        # the map beside them is added here.  The QWebEngineView must stay a
+        # direct child of the dialog: inside the loaded .ui it crashes the web
+        # engine when the process exits.
         outer_layout = QHBoxLayout(self)
-        controls_widget = QWidget(self)
-        layout = QVBoxLayout(controls_widget); layout.addWidget(QLabel("下方已列出系統內所有地主；輸入地址後按「查座標」單筆定位，或用「全部自動查座標」一次處理所有還沒有座標的地主。"))
-        self.provider_hint = QLabel(); layout.addWidget(self.provider_hint)
-        self.table = QTableWidget(0, 8); self.table.setHorizontalHeaderLabels(["資料ID", "地區", "地段", "小段", "地號", "姓名", "緯度", "經度"]); self.table.setSelectionBehavior(QAbstractItemView.SelectRows); self.table.setSelectionMode(QAbstractItemView.SingleSelection); self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Stretch); self.table.itemSelectionChanged.connect(self.load_selected); layout.addWidget(self.table)
+        content = install_ui(self, self.ui_file, self.ui_object_names, layout=outer_layout)
+        ui = lambda name, cls: find_child(content, name, cls)  # noqa: E731
+        self.provider_hint = ui("providerHintLabel", QLabel)
+        self.table = ui("locationsTable", QTableWidget); self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Stretch); self.table.itemSelectionChanged.connect(self.load_selected)
+        self.address_input = ui("addressInput", QLineEdit)
+        ui("geocodeButton", QPushButton).clicked.connect(self.geocode_address)
+        ui("batchGeocodeButton", QPushButton).clicked.connect(self.batch_geocode_all)
+        ui("googleKeyButton", QPushButton).clicked.connect(self.configure_google_api_key)
+        self.customer_id = ui("customerIdEdit", QLineEdit); self.customer_id.setText(str(selected_customer_id or ""))
+        self.latitude = ui("latitudeEdit", QLineEdit); self.longitude = ui("longitudeEdit", QLineEdit)
+        ui("saveButton", QPushButton).clicked.connect(self.save); ui("exportButton", QPushButton).clicked.connect(self.request_export); ui("closeButton", QPushButton).clicked.connect(self.reject)
 
-        address_row = QHBoxLayout()
-        self.address_input = QLineEdit()
-        self.address_input.setPlaceholderText("例：桃園市桃園區泰成路75號")
-        geocode_button = QPushButton("查座標")
-        geocode_button.clicked.connect(self.geocode_address)
-        batch_geocode_button = QPushButton("全部自動查座標")
-        batch_geocode_button.setToolTip(
-            "依序查詢所有「有地址」但還沒有座標、以及先前自動查過（非手動輸入）的地主"
-            "（沒有地址、只有地區/地段/地號的地主無法自動查詢，請補地址或手動輸入座標），"
-            "外部服務有速率限制，資料多時會需要一段時間。"
-        )
-        batch_geocode_button.clicked.connect(self.batch_geocode_all)
-        google_key_button = QPushButton("設定 Google API 金鑰")
-        google_key_button.setToolTip(
-            "設定 Google Maps Geocoding API 金鑰後，查座標會優先改用 Google（涵蓋較完整），"
-            "留空可清除設定、改回使用免費的 Nominatim。"
-        )
-        google_key_button.clicked.connect(self.configure_google_api_key)
-        address_row.addWidget(QLabel("地址定位"))
-        address_row.addWidget(self.address_input, 1)
-        address_row.addWidget(geocode_button)
-        address_row.addWidget(batch_geocode_button)
-        address_row.addWidget(google_key_button)
-        layout.addLayout(address_row)
-
-        row = QHBoxLayout(); self.customer_id = QLineEdit(str(selected_customer_id or "")); self.latitude = QLineEdit(); self.longitude = QLineEdit(); row.addWidget(QLabel("資料ID")); row.addWidget(self.customer_id); row.addWidget(QLabel("緯度")); row.addWidget(self.latitude); row.addWidget(QLabel("經度")); row.addWidget(self.longitude); layout.addLayout(row)
-        buttons = QHBoxLayout(); save = QPushButton("儲存座標"); export = QPushButton("產生視覺化 HTML"); close = QPushButton("關閉"); save.clicked.connect(self.save); export.clicked.connect(self.request_export); close.clicked.connect(self.reject); buttons.addWidget(save); buttons.addStretch(1); buttons.addWidget(export); buttons.addWidget(close); layout.addLayout(buttons)
-
-        outer_layout.addWidget(controls_widget, 1)
         # Explicit user request: see the map screen directly inside the
         # client, not just as an exported file opened separately in a
         # browser. Shares render_map_html_document() with the "產生視覺化
         # HTML" export button, so both always show exactly the same map.
         self.map_view = QWebEngineView(self)
         self.map_view.setMinimumWidth(480)
+        outer_layout.setStretch(0, 1)
         outer_layout.addWidget(self.map_view, 1)
 
         self.refresh()

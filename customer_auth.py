@@ -3,9 +3,7 @@
 import math
 import time
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QGridLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -13,6 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from customer_responsive_dialog import ResponsiveDialog as QDialog
+from customer_ui_loader import find_child, install_ui
 
 from customer_messages import (
     fixed_admin_account_message,
@@ -72,48 +71,48 @@ def configure_auth_dialog(*, admin_username, create_admin_user, authenticate_use
 
 
 class AuthDialog(QDialog):
+    # Layout: ui/dialogs/auth_dialog.ui (the 確認密碼 row only shows in setup mode).
+    ui_file = "dialogs/auth_dialog.ui"
+    ui_object_names = (
+        "topLabel",
+        "usernameEdit",
+        "passwordEdit",
+        "confirmLabel",
+        "confirmEdit",
+        "submitButton",
+    )
+    SETUP_EXTRA_HEIGHT = 30
+
     def __init__(self, setup_mode=False, parent=None, attempt_limiter=None):
         super().__init__(parent)
         self.setup_mode = setup_mode
         self.encryption_key = None
         self.attempt_limiter = attempt_limiter or LOGIN_ATTEMPT_LIMITER
 
-        self.setWindowTitle("設定密碼" if setup_mode else "登入")
         self.setModal(True)
-        self.setFixedSize(360, 220 if setup_mode else 190)
-
-        self.username_edit = QLineEdit(ADMIN_USERNAME if setup_mode else "")
-        self.password_edit = QLineEdit()
-        self.password_edit.setEchoMode(QLineEdit.Password)
-        self.confirm_edit = QLineEdit()
-        self.confirm_edit.setEchoMode(QLineEdit.Password)
-
         self.create_layout()
 
     def create_layout(self):
-        layout = QGridLayout(self)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setHorizontalSpacing(10)
-        layout.setVerticalSpacing(8)
-
-        top_label = QLabel("第一次啟動，請設定 admin 密碼" if self.setup_mode else "請先登入")
-        layout.addWidget(top_label, 0, 0, 1, 2)
-
-        layout.addWidget(QLabel("帳號"), 1, 0)
-        layout.addWidget(self.username_edit, 1, 1)
-
-        layout.addWidget(QLabel("密碼"), 2, 0)
-        layout.addWidget(self.password_edit, 2, 1)
-
-        next_row = 3
+        content = install_ui(self, self.ui_file, self.ui_object_names)
         if self.setup_mode:
-            layout.addWidget(QLabel("確認密碼"), 3, 0)
-            layout.addWidget(self.confirm_edit, 3, 1)
-            next_row = 4
+            self.setWindowTitle("設定密碼")
+            self.setFixedSize(
+                self.minimumWidth(), self.minimumHeight() + self.SETUP_EXTRA_HEIGHT
+            )
 
-        submit_button = QPushButton("建立密碼" if self.setup_mode else "登入")
+        self.username_edit = find_child(content, "usernameEdit", QLineEdit)
+        self.username_edit.setText(ADMIN_USERNAME if self.setup_mode else "")
+        self.password_edit = find_child(content, "passwordEdit", QLineEdit)
+        self.confirm_edit = find_child(content, "confirmEdit", QLineEdit)
+        find_child(content, "confirmLabel", QLabel).setVisible(self.setup_mode)
+        self.confirm_edit.setVisible(self.setup_mode)
+
+        if self.setup_mode:
+            find_child(content, "topLabel", QLabel).setText("第一次啟動，請設定 admin 密碼")
+        submit_button = find_child(content, "submitButton", QPushButton)
+        if self.setup_mode:
+            submit_button.setText("建立密碼")
         submit_button.clicked.connect(self.submit)
-        layout.addWidget(submit_button, next_row, 1, alignment=Qt.AlignRight)
 
         self.password_edit.returnPressed.connect(self.submit)
         self.confirm_edit.returnPressed.connect(self.submit)

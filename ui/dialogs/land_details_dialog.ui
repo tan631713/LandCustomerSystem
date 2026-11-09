@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>landDetailsDialogContent</class>
+ <widget class="QWidget" name="landDetailsDialogContent">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>980</width>
+    <height>520</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>土地詳細資料</string>
+  </property>
+  <property name="dialogSize" stdset="0">
+   <size>
+    <width>980</width>
+    <height>520</height>
+   </size>
+  </property>
+  <layout class="QVBoxLayout" name="landDetailsLayout" stretch="0,1,0">
+   <property name="spacing">
+    <number>6</number>
+   </property>
+   <property name="leftMargin">
+    <number>11</number>
+   </property>
+   <property name="topMargin">
+    <number>11</number>
+   </property>
+   <property name="rightMargin">
+    <number>11</number>
+   </property>
+   <property name="bottomMargin">
+    <number>11</number>
+   </property>
+   <item>
+    <widget class="QLabel" name="headingLabel">
+     <property name="text">
+      <string />
+     </property>
+     <property name="textInteractionFlags">
+      <set>Qt::TextSelectableByMouse</set>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="TableWidget" name="detailsTable">
+     <property name="editTriggers">
+      <set>QAbstractItemView::NoEditTriggers</set>
+     </property>
+     <property name="alternatingRowColors">
+      <bool>true</bool>
+     </property>
+     <property name="selectionBehavior">
+      <enum>QAbstractItemView::SelectRows</enum>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="DialogButtonBox" name="buttonBox">
+     <property name="standardButtons">
+      <set>QDialogButtonBox::Close</set>
+     </property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+ <customwidget>
+  <class>DialogButtonBox</class>
+  <extends>QDialogButtonBox</extends>
+  <header>customer_fluent</header>
+ </customwidget>
+ <customwidget>
+  <class>TableWidget</class>
+  <extends>QTableWidget</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ </customwidgets>
+ <resources />
+ <connections />
+</ui>

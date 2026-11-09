@@ -1,0 +1,6 @@
+{
+  "說明": "Fluent 元件（按鈕、輸入框、下拉選單、勾選框）的主色與字型。改完重新開啟程式即生效；寫錯（例如色碼打錯、少了逗號）時程式會改用預設值，不會打不開。primaryColor = 淺色主題的主色；darkPrimaryColor = 深色主題的主色；fontFamilies = 字型，由前往後找第一個電腦裡有的。字體大小請用程式裡的「設定 → 字體大小」。",
+  "primaryColor": "#2F6B4F",
+  "darkPrimaryColor": "#6DBE93",
+  "fontFamilies": ["Microsoft JhengHei UI", "Microsoft JhengHei", "Segoe UI"]
+}

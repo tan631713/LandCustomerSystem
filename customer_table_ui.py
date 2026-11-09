@@ -9,20 +9,18 @@ from customer_models import (
 )
 from customer_flow_layout import FlowLayout
 from customer_tag_display import safe_tag_qcolor, tag_text_qcolor
-from customer_theme import heading_font, qcolor, set_button_variant, token
+from customer_theme import heading_font, qcolor, token
+from customer_ui_loader import find_child, load_ui
 from PySide6.QtCore import QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QAction, QKeySequence, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QFrame,
-    QHBoxLayout,
     QHeaderView,
     QLabel,
     QMenu,
     QPushButton,
     QStyle,
     QStyledItemDelegate,
-    QSizePolicy,
     QStyleOptionViewItem,
     QTreeView,
     QVBoxLayout,
@@ -40,7 +38,7 @@ def apply_land_tree_visual_style(tree, row_height=34):
         f" alternate-background-color: {token('paper')}; }}"
         "QTreeView::item {"
         f" min-height: {row_height}px;"
-        f" border-bottom: 1px solid {token('rule')};"
+        f" border-bottom: 1px solid {token('row_rule')};"
         " }"
         f"QTreeView::item:selected {{ background-color: {token('sel')};"
         f" color: {token('ink')}; }}"
@@ -365,33 +363,29 @@ def _build_record_table(self, parent_layout, TABLE_COLUMNS, TABLE_WIDTHS):
     self.build_urban_plan_row(parent_layout)
     _build_batch_bar(self, parent_layout)
     self.build_urban_plan_stack(parent_layout)
-    footer = QFrame()
-    footer.setObjectName("listFooter")
-    footer.setStyleSheet(
-        f"QFrame#listFooter {{ background: transparent; border: none;"
-        f" border-top: 1px solid {token('rule')}; }}"
+    # Layout: ui/main/list_footer.ui; colours (legend swatches too): ui/theme.qss.
+    footer = load_ui(
+        LIST_FOOTER_UI_FILE,
+        required_names=(
+            "landCountLabel",
+            "previousPageButton",
+            "landPageLabel",
+            "nextPageButton",
+            *(object_name for object_name, _label, _token in ROW_COLOR_LEGEND),
+        ),
     )
-    paging = QHBoxLayout(footer)
-    paging.setContentsMargins(12, 8, 12, 8)
-    paging.setSpacing(8)
-    paging.addLayout(_build_row_color_legend())
-    self.land_count_label = QLabel("土地 0 筆｜地主／所有權資料 0 筆")
-    self.land_count_label.setStyleSheet(f"color: {token('ink2')};")
-    # It may be clipped on a narrow list; the legend and pager buttons may not.
-    self.land_count_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-    self.land_count_label.setMinimumWidth(0)
-    self.land_count_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-    paging.addWidget(self.land_count_label, 1)
-    self.previous_land_page_button = QPushButton("上一頁")
+    # The count may be clipped on a narrow list; the legend and pager may not.
+    self.land_count_label = find_child(footer, "landCountLabel", QLabel)
+    self.previous_land_page_button = find_child(footer, "previousPageButton", QPushButton)
     self.previous_land_page_button.clicked.connect(self.previous_land_page)
-    paging.addWidget(self.previous_land_page_button)
-    self.land_page_label = QLabel("第 1 / 1 頁")
-    paging.addWidget(self.land_page_label)
-    self.next_land_page_button = QPushButton("下一頁")
+    self.land_page_label = find_child(footer, "landPageLabel", QLabel)
+    self.next_land_page_button = find_child(footer, "nextPageButton", QPushButton)
     self.next_land_page_button.clicked.connect(self.next_land_page)
-    paging.addWidget(self.next_land_page_button)
     parent_layout.addWidget(footer)
 
+
+LIST_FOOTER_UI_FILE = "main/list_footer.ui"
+BATCH_BAR_UI_FILE = "main/batch_bar.ui"
 
 # (object name, label, background token) for the swatches under the list.
 ROW_COLOR_LEGEND = (
@@ -400,28 +394,6 @@ ROW_COLOR_LEGEND = (
     ("legendOverdue", "追蹤逾期", "overdue"),
     ("legendNote", "有備註", "note"),
 )
-
-
-def _build_row_color_legend():
-    layout = QHBoxLayout()
-    layout.setSpacing(10)
-    for object_name, label, color_token in ROW_COLOR_LEGEND:
-        item = QHBoxLayout()
-        item.setSpacing(5)
-        swatch = QLabel()
-        swatch.setObjectName(object_name)
-        swatch.setFixedSize(12, 12)
-        swatch.setStyleSheet(
-            f"background-color: {token(color_token)};"
-            f" border: 1px solid {token('rule_strong')}; border-radius: 2px;"
-        )
-        text = QLabel(label)
-        text.setStyleSheet(f"color: {token('ink2')}; font-size: 12px;")
-        text.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
-        item.addWidget(swatch)
-        item.addWidget(text)
-        layout.addLayout(item)
-    return layout
 
 
 # Bar button text -> key of the existing QAction it triggers (see _wire_batch_bar).
@@ -435,36 +407,29 @@ BATCH_BAR_BUTTONS = (
 
 
 def _build_batch_bar(self, parent_layout):
-    """The strip above the list that appears while rows are checked."""
+    """The strip above the list that appears while rows are checked.
 
-    bar = QFrame()
-    bar.setObjectName("batchBar")
-    bar.setStyleSheet(
-        f"QFrame#batchBar {{ background-color: {token('checked')}; border: none;"
-        f" border-bottom: 1px solid {token('rule')}; }}"
-        f"QFrame#batchBar QLabel {{ color: {token('checked_ink')}; background: transparent; }}"
-        f"QFrame#batchBar QPushButton {{ color: {token('checked_ink')}; }}"
+    The label and buttons come from ui/main/batch_bar.ui (colours: ui/theme.qss);
+    they are arranged by a FlowLayout here, which wraps to a second row on a
+    narrow list or a large font instead of squeezing the button labels.
+    """
+
+    keys = [key for _text, key, _modifies in BATCH_BAR_BUTTONS] + ["clear_checked_action"]
+    bar = load_ui(
+        BATCH_BAR_UI_FILE,
+        required_names=["batchBarCount", *(f"batchBar_{key}" for key in keys)],
     )
-    # Wraps to a second row on a narrow list or a large font instead of
-    # squeezing the button labels.
     layout = FlowLayout(bar, margins=(12, 8, 12, 8), h_spacing=6, v_spacing=6)
-    self.batch_bar_count_label = QLabel("")
-    self.batch_bar_count_label.setObjectName("batchBarCount")
+    self.batch_bar_count_label = find_child(bar, "batchBarCount", QLabel)
     font = self.batch_bar_count_label.font()
     font.setBold(True)
     self.batch_bar_count_label.setFont(font)
     layout.addWidget(self.batch_bar_count_label)
     self.batch_bar_buttons = {}
-    for text, action_key, _modifies in BATCH_BAR_BUTTONS:
-        button = QPushButton(text)
-        button.setObjectName(f"batchBar_{action_key}")
+    for key in keys:
+        button = find_child(bar, f"batchBar_{key}", QPushButton)
         layout.addWidget(button)
-        self.batch_bar_buttons[action_key] = button
-    clear_button = QPushButton("取消全部勾選")
-    clear_button.setObjectName("batchBar_clear_checked_action")
-    set_button_variant(clear_button, "ghost")
-    layout.addWidget(clear_button)
-    self.batch_bar_buttons["clear_checked_action"] = clear_button
+        self.batch_bar_buttons[key] = button
     bar.hide()
     self.batch_bar = bar
     self.batch_bar_actions = {}

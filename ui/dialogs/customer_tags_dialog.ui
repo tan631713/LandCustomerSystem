@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>customerTagsDialogContent</class>
+ <widget class="QWidget" name="customerTagsDialogContent">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>440</width>
+    <height>420</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>設定資料標籤</string>
+  </property>
+  <property name="dialogSize" stdset="0">
+   <size>
+    <width>440</width>
+    <height>420</height>
+   </size>
+  </property>
+  <layout class="QVBoxLayout" name="customerTagsLayout" stretch="0,1,0">
+   <property name="spacing">
+    <number>6</number>
+   </property>
+   <property name="leftMargin">
+    <number>11</number>
+   </property>
+   <property name="topMargin">
+    <number>11</number>
+   </property>
+   <property name="rightMargin">
+    <number>11</number>
+   </property>
+   <property name="bottomMargin">
+    <number>11</number>
+   </property>
+   <item>
+    <widget class="QLabel" name="promptLabel">
+     <property name="text">
+      <string>勾選要套用到此資料的標籤。</string>
+     </property>
+     <property name="wordWrap">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="ListWidget" name="tagsList" />
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="buttonRow" stretch="1,0,0">
+     <property name="spacing">
+      <number>6</number>
+     </property>
+     <property name="leftMargin">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <property name="rightMargin">
+      <number>0</number>
+     </property>
+     <property name="bottomMargin">
+      <number>0</number>
+     </property>
+     <item>
+      <spacer name="buttonRowSpacer">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>0</width>
+         <height>0</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="PushButton" name="cancelButton">
+       <property name="text">
+        <string>取消</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PrimaryPushButton" name="saveButton">
+       <property name="text">
+        <string>儲存</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+ <customwidget>
+  <class>ListWidget</class>
+  <extends>QListWidget</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>PrimaryPushButton</class>
+  <extends>QPushButton</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>PushButton</class>
+  <extends>QPushButton</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ </customwidgets>
+ <resources />
+ <connections />
+</ui>

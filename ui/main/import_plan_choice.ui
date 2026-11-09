@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>importPlanChoiceContent</class>
+ <widget class="QWidget" name="importPlanChoiceContent">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>600</width>
+    <height>40</height>
+   </rect>
+  </property>
+  <layout class="QHBoxLayout" name="importPlanChoiceLayout" stretch="0,0,1">
+   <property name="spacing">
+    <number>6</number>
+   </property>
+   <property name="leftMargin">
+    <number>0</number>
+   </property>
+   <property name="topMargin">
+    <number>0</number>
+   </property>
+   <property name="rightMargin">
+    <number>0</number>
+   </property>
+   <property name="bottomMargin">
+    <number>0</number>
+   </property>
+   <item>
+    <widget class="QLabel" name="importPlanLabel">
+     <property name="text">
+      <string>這批資料屬於：</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="ComboBox" name="importPlanCombo">
+     <property name="minimumSize">
+      <size>
+       <width>200</width>
+       <height>0</height>
+      </size>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="importPlanNote">
+     <property name="text">
+      <string>已經屬於其他都市計畫的土地不會被改動，匯入後會列出清單。</string>
+     </property>
+     <property name="wordWrap">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+ <customwidget>
+  <class>ComboBox</class>
+  <extends>QPushButton</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ </customwidgets>
+ <resources />
+ <connections />
+</ui>

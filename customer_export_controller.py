@@ -8,20 +8,19 @@ from customer_excel import ExcelExportWorker
 from customer_mobile_share import MobileShareDialog
 from customer_security import decrypt_value
 from customer_word import write_records_docx
+from customer_ui_loader import find_child, install_ui
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
-    QHBoxLayout,
     QInputDialog,
     QLabel,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
     QPushButton,
-    QVBoxLayout,
 )
 
 APP_DIR = None
@@ -42,26 +41,33 @@ class PreviousExportDuplicatesDialog(QDialog):
     usual. window_title/message default to the original Excel-export
     wording so existing callers don't need to change."""
 
+    # Layout: ui/dialogs/previous_export_duplicates_dialog.ui.
+    ui_file = "dialogs/previous_export_duplicates_dialog.ui"
+    ui_object_names = (
+        "messageLabel",
+        "duplicatesList",
+        "checkAllButton",
+        "uncheckAllButton",
+        "buttonBox",
+    )
+
     def __init__(
         self, duplicate_rows, parent=None, *, window_title=None, message=None, reasons=None
     ):
         super().__init__(parent)
-        self.setWindowTitle(window_title or "偵測到已匯出過的地主")
-        self.resize(520, 480)
-
-        layout = QVBoxLayout(self)
-        layout.addWidget(
-            QLabel(
-                message
-                or (
-                    f"這次要匯出的資料裡，有 {len(duplicate_rows)} 筆地主先前已經匯出過 Excel。\n"
-                    "勾選要「排除」的項目（不勾選的會照常匯出）："
-                )
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        if window_title:
+            self.setWindowTitle(window_title)
+        find_child(content, "messageLabel", QLabel).setText(
+            message
+            or (
+                f"這次要匯出的資料裡，有 {len(duplicate_rows)} 筆地主先前已經匯出過 Excel。\n"
+                "勾選要「排除」的項目（不勾選的會照常匯出）："
             )
         )
 
         reasons = reasons or {}
-        self.list_widget = QListWidget()
+        self.list_widget = find_child(content, "duplicatesList", QListWidget)
         for row in duplicate_rows:
             raw = row.get("raw") or {}
             label = " ".join(
@@ -77,23 +83,14 @@ class PreviousExportDuplicatesDialog(QDialog):
             item.setCheckState(Qt.Unchecked)
             item.setData(Qt.UserRole, int(row["id"]))
             self.list_widget.addItem(item)
-        layout.addWidget(self.list_widget)
 
-        select_all_row = QHBoxLayout()
-        select_all_button = QPushButton("全部勾選")
-        select_all_button.clicked.connect(self._check_all)
-        clear_all_button = QPushButton("全部取消勾選")
-        clear_all_button.clicked.connect(self._uncheck_all)
-        select_all_row.addWidget(select_all_button)
-        select_all_row.addWidget(clear_all_button)
-        select_all_row.addStretch(1)
-        layout.addLayout(select_all_row)
+        find_child(content, "checkAllButton", QPushButton).clicked.connect(self._check_all)
+        find_child(content, "uncheckAllButton", QPushButton).clicked.connect(self._uncheck_all)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons = find_child(content, "buttonBox", QDialogButtonBox)
         buttons.button(QDialogButtonBox.Ok).setText("繼續匯出")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
 
     def _check_all(self):
         for index in range(self.list_widget.count()):

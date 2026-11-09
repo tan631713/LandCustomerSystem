@@ -1,0 +1,285 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>backupStatusDialogContent</class>
+ <widget class="QWidget" name="backupStatusDialogContent">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>520</width>
+    <height>360</height>
+   </rect>
+  </property>
+  <property name="minimumSize">
+   <size>
+    <width>520</width>
+    <height>0</height>
+   </size>
+  </property>
+  <property name="windowTitle">
+   <string>備份狀態</string>
+  </property>
+  <layout class="QVBoxLayout" name="backupStatusLayout">
+   <property name="spacing">
+    <number>6</number>
+   </property>
+   <property name="leftMargin">
+    <number>11</number>
+   </property>
+   <property name="topMargin">
+    <number>11</number>
+   </property>
+   <property name="rightMargin">
+    <number>11</number>
+   </property>
+   <property name="bottomMargin">
+    <number>11</number>
+   </property>
+   <item>
+    <layout class="QGridLayout" name="statusGrid">
+     <property name="horizontalSpacing">
+      <number>14</number>
+     </property>
+     <property name="verticalSpacing">
+      <number>10</number>
+     </property>
+     <property name="leftMargin">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <property name="rightMargin">
+      <number>0</number>
+     </property>
+     <property name="bottomMargin">
+      <number>0</number>
+     </property>
+     <item row="0" column="0">
+      <widget class="QLabel" name="databaseLabel">
+       <property name="text">
+        <string>資料庫狀態</string>
+       </property>
+       <property name="styleSheet">
+        <string>font-weight: 600;</string>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="1">
+      <widget class="QLabel" name="databaseValue">
+       <property name="text">
+        <string />
+       </property>
+       <property name="wordWrap">
+        <bool>true</bool>
+       </property>
+       <property name="textInteractionFlags">
+        <set>Qt::TextSelectableByMouse</set>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="0">
+      <widget class="QLabel" name="integrityLabel">
+       <property name="text">
+        <string>完整性檢查</string>
+       </property>
+       <property name="styleSheet">
+        <string>font-weight: 600;</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="1">
+      <widget class="QLabel" name="integrityValue">
+       <property name="text">
+        <string />
+       </property>
+       <property name="wordWrap">
+        <bool>true</bool>
+       </property>
+       <property name="textInteractionFlags">
+        <set>Qt::TextSelectableByMouse</set>
+       </property>
+      </widget>
+     </item>
+     <item row="2" column="0">
+      <widget class="QLabel" name="backupCountLabel">
+       <property name="text">
+        <string>備份檔案數量</string>
+       </property>
+       <property name="styleSheet">
+        <string>font-weight: 600;</string>
+       </property>
+      </widget>
+     </item>
+     <item row="2" column="1">
+      <widget class="QLabel" name="backupCountValue">
+       <property name="text">
+        <string />
+       </property>
+       <property name="wordWrap">
+        <bool>true</bool>
+       </property>
+       <property name="textInteractionFlags">
+        <set>Qt::TextSelectableByMouse</set>
+       </property>
+      </widget>
+     </item>
+     <item row="3" column="0">
+      <widget class="QLabel" name="compressedCountLabel">
+       <property name="text">
+        <string>ZIP 壓縮備份</string>
+       </property>
+       <property name="styleSheet">
+        <string>font-weight: 600;</string>
+       </property>
+      </widget>
+     </item>
+     <item row="3" column="1">
+      <widget class="QLabel" name="compressedCountValue">
+       <property name="text">
+        <string />
+       </property>
+       <property name="wordWrap">
+        <bool>true</bool>
+       </property>
+       <property name="textInteractionFlags">
+        <set>Qt::TextSelectableByMouse</set>
+       </property>
+      </widget>
+     </item>
+     <item row="4" column="0">
+      <widget class="QLabel" name="totalSizeLabel">
+       <property name="text">
+        <string>備份佔用空間</string>
+       </property>
+       <property name="styleSheet">
+        <string>font-weight: 600;</string>
+       </property>
+      </widget>
+     </item>
+     <item row="4" column="1">
+      <widget class="QLabel" name="totalSizeValue">
+       <property name="text">
+        <string />
+       </property>
+       <property name="wordWrap">
+        <bool>true</bool>
+       </property>
+       <property name="textInteractionFlags">
+        <set>Qt::TextSelectableByMouse</set>
+       </property>
+      </widget>
+     </item>
+     <item row="5" column="0">
+      <widget class="QLabel" name="latestTimeLabel">
+       <property name="text">
+        <string>最近備份時間</string>
+       </property>
+       <property name="styleSheet">
+        <string>font-weight: 600;</string>
+       </property>
+      </widget>
+     </item>
+     <item row="5" column="1">
+      <widget class="QLabel" name="latestTimeValue">
+       <property name="text">
+        <string />
+       </property>
+       <property name="wordWrap">
+        <bool>true</bool>
+       </property>
+       <property name="textInteractionFlags">
+        <set>Qt::TextSelectableByMouse</set>
+       </property>
+      </widget>
+     </item>
+     <item row="6" column="0">
+      <widget class="QLabel" name="latestFileLabel">
+       <property name="text">
+        <string>最近備份檔案</string>
+       </property>
+       <property name="styleSheet">
+        <string>font-weight: 600;</string>
+       </property>
+      </widget>
+     </item>
+     <item row="6" column="1">
+      <widget class="QLabel" name="latestFileValue">
+       <property name="text">
+        <string />
+       </property>
+       <property name="wordWrap">
+        <bool>true</bool>
+       </property>
+       <property name="textInteractionFlags">
+        <set>Qt::TextSelectableByMouse</set>
+       </property>
+      </widget>
+     </item>
+     <item row="7" column="0">
+      <widget class="QLabel" name="directoryLabel">
+       <property name="text">
+        <string>備份資料夾</string>
+       </property>
+       <property name="styleSheet">
+        <string>font-weight: 600;</string>
+       </property>
+      </widget>
+     </item>
+     <item row="7" column="1">
+      <widget class="QLabel" name="directoryValue">
+       <property name="text">
+        <string />
+       </property>
+       <property name="wordWrap">
+        <bool>true</bool>
+       </property>
+       <property name="textInteractionFlags">
+        <set>Qt::TextSelectableByMouse</set>
+       </property>
+      </widget>
+     </item>
+     <item row="8" column="0">
+      <widget class="QLabel" name="guidanceLabel">
+       <property name="text">
+        <string>建議處理</string>
+       </property>
+       <property name="styleSheet">
+        <string>font-weight: 600;</string>
+       </property>
+      </widget>
+     </item>
+     <item row="8" column="1">
+      <widget class="QLabel" name="guidanceValue">
+       <property name="text">
+        <string />
+       </property>
+       <property name="wordWrap">
+        <bool>true</bool>
+       </property>
+       <property name="textInteractionFlags">
+        <set>Qt::TextSelectableByMouse</set>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="DialogButtonBox" name="buttonBox">
+     <property name="standardButtons">
+      <set>QDialogButtonBox::Close</set>
+     </property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+ <customwidget>
+  <class>DialogButtonBox</class>
+  <extends>QDialogButtonBox</extends>
+  <header>customer_fluent</header>
+ </customwidget>
+ </customwidgets>
+ <resources />
+ <connections />
+</ui>

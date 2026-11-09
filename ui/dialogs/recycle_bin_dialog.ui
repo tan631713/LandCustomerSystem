@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>recycleBinDialogContent</class>
+ <widget class="QWidget" name="recycleBinDialogContent">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>820</width>
+    <height>500</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>回收桶</string>
+  </property>
+  <property name="dialogSize" stdset="0">
+   <size>
+    <width>820</width>
+    <height>500</height>
+   </size>
+  </property>
+  <layout class="QVBoxLayout" name="recycleBinLayout">
+   <property name="spacing">
+    <number>6</number>
+   </property>
+   <property name="leftMargin">
+    <number>11</number>
+   </property>
+   <property name="topMargin">
+    <number>11</number>
+   </property>
+   <property name="rightMargin">
+    <number>11</number>
+   </property>
+   <property name="bottomMargin">
+    <number>11</number>
+   </property>
+   <item>
+    <widget class="QLabel" name="introLabel">
+     <property name="text">
+      <string>刪除的土地資料會連同案件、標籤、附件與聯絡關聯保存在這裡。</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="TableWidget" name="recycleTable">
+     <property name="selectionMode">
+      <enum>QAbstractItemView::ExtendedSelection</enum>
+     </property>
+     <property name="selectionBehavior">
+      <enum>QAbstractItemView::SelectRows</enum>
+     </property>
+     <column>
+      <property name="text">
+       <string>ID</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>原始ID</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>資料</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>刪除者</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>刪除時間</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>類型</string>
+      </property>
+     </column>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="buttonRow" stretch="0,1,0,0,0">
+     <property name="spacing">
+      <number>6</number>
+     </property>
+     <property name="leftMargin">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <property name="rightMargin">
+      <number>0</number>
+     </property>
+     <property name="bottomMargin">
+      <number>0</number>
+     </property>
+     <item>
+      <widget class="PrimaryPushButton" name="restoreButton">
+       <property name="text">
+        <string>還原選取</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="buttonRowSpacer">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>0</width>
+         <height>0</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="PushButton" name="purgeButton">
+       <property name="text">
+        <string>永久刪除選取</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PushButton" name="purgeAllButton">
+       <property name="text">
+        <string>清空回收桶</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PushButton" name="closeButton">
+       <property name="text">
+        <string>關閉</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+ <customwidget>
+  <class>PrimaryPushButton</class>
+  <extends>QPushButton</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>PushButton</class>
+  <extends>QPushButton</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>TableWidget</class>
+  <extends>QTableWidget</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ </customwidgets>
+ <resources />
+ <connections />
+</ui>

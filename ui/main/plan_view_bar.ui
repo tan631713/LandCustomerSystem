@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>planViewBar</class>
+ <widget class="QFrame" name="planViewBar">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>760</width>
+    <height>58</height>
+   </rect>
+  </property>
+  <layout class="QHBoxLayout" name="planViewRow" stretch="0,0,0,0,0,0,0,0,1">
+   <property name="spacing">
+    <number>6</number>
+   </property>
+   <property name="leftMargin">
+    <number>12</number>
+   </property>
+   <property name="topMargin">
+    <number>10</number>
+   </property>
+   <property name="rightMargin">
+    <number>12</number>
+   </property>
+   <property name="bottomMargin">
+    <number>10</number>
+   </property>
+   <item>
+    <widget class="QLabel" name="planViewLabel">
+     <property name="text">
+      <string>檢視</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="ComboBox" name="planViewCombo">
+     <property name="minimumSize">
+      <size>
+       <width>140</width>
+       <height>0</height>
+      </size>
+     </property>
+     <property name="toolTip">
+      <string>選擇其中一個都市計畫時，清單只會顯示那個都市計畫。</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="planInputLabel">
+     <property name="text">
+      <string>輸入到</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="ComboBox" name="planInputCombo">
+     <property name="minimumSize">
+      <size>
+       <width>140</width>
+       <height>0</height>
+      </size>
+     </property>
+     <property name="toolTip">
+      <string>新增資料與匯入 Excel 時，預設歸入這個都市計畫。</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <spacer name="planViewSpacing">
+     <property name="orientation">
+      <enum>Qt::Horizontal</enum>
+     </property>
+     <property name="sizeType">
+      <enum>QSizePolicy::Fixed</enum>
+     </property>
+     <property name="sizeHint" stdset="0">
+      <size>
+       <width>6</width>
+       <height>0</height>
+      </size>
+     </property>
+    </spacer>
+   </item>
+   <item>
+    <widget class="PushButton" name="expandAllButton">
+     <property name="text">
+      <string>全部展開</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="PushButton" name="collapseAllButton">
+     <property name="text">
+      <string>全部收合</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <spacer name="planHintSpacing">
+     <property name="orientation">
+      <enum>Qt::Horizontal</enum>
+     </property>
+     <property name="sizeType">
+      <enum>QSizePolicy::Fixed</enum>
+     </property>
+     <property name="sizeHint" stdset="0">
+      <size>
+       <width>8</width>
+       <height>0</height>
+      </size>
+     </property>
+    </spacer>
+   </item>
+   <item>
+    <widget class="QLabel" name="planHintLabel">
+     <property name="text">
+      <string />
+     </property>
+     <property name="sizePolicy">
+      <sizepolicy hsizetype="Ignored" vsizetype="Preferred">
+       <horstretch>0</horstretch>
+       <verstretch>0</verstretch>
+      </sizepolicy>
+     </property>
+     <property name="minimumSize">
+      <size>
+       <width>0</width>
+       <height>0</height>
+      </size>
+     </property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+ <customwidget>
+  <class>ComboBox</class>
+  <extends>QPushButton</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>PushButton</class>
+  <extends>QPushButton</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ </customwidgets>
+ <resources />
+ <connections />
+</ui>

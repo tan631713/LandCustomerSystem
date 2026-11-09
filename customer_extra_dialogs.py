@@ -5,14 +5,11 @@ from datetime import datetime
 from PySide6.QtCore import QDate, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QAbstractItemView,
     QCheckBox,
     QColorDialog,
     QComboBox,
     QDateEdit,
     QFileDialog,
-    QGridLayout,
-    QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
@@ -23,11 +20,15 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
-    QVBoxLayout,
+    QWidget,
 )
 
+from qfluentwidgets import CheckBox as FluentCheckBox
+from qfluentwidgets import ComboBox as FluentComboBox
+from qfluentwidgets import LineEdit as FluentLineEdit
 from customer_desktop import open_path_or_web_url
 from customer_responsive_dialog import ResponsiveDialog as QDialog
+from customer_ui_loader import chain_tab_order, find_child, install_ui, size_like_unparented
 from customer_tag_display import tag_text_qcolor
 
 
@@ -47,6 +48,10 @@ def _set_row_values(table, row_number, values, row_id=None):
 
 
 class CaseSelectDialog(QDialog):
+    # Layout: ui/dialogs/case_select_dialog.ui (title and 加入 text vary by caller).
+    ui_file = "dialogs/case_select_dialog.ui"
+    ui_object_names = ("promptLabel", "caseCombo", "cancelButton", "okButton")
+
     def __init__(
         self,
         cases,
@@ -58,70 +63,53 @@ class CaseSelectDialog(QDialog):
     ):
         super().__init__(parent)
         self.cases = [dict(row) for row in cases]
+        content = install_ui(self, self.ui_file, self.ui_object_names)
         self.setWindowTitle(dialog_title)
-        self.resize(420, 180)
-        self.case_combo = QComboBox()
+        self.case_combo = find_child(content, "caseCombo", FluentComboBox)
         for case in self.cases:
             self.case_combo.addItem(
                 f"{case.get('title')} ({case.get('status') or '進行中'})",
-                case.get("id"),
+                userData=case.get("id"),
             )
 
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(f"將對 {selected_count} 筆資料執行「{action_text}」："))
-        layout.addWidget(self.case_combo)
-        buttons = QHBoxLayout()
-        cancel_button = QPushButton("取消")
-        cancel_button.clicked.connect(self.reject)
-        ok_button = QPushButton(action_text)
+        find_child(content, "promptLabel", QLabel).setText(
+            f"將對 {selected_count} 筆資料執行「{action_text}」："
+        )
+        find_child(content, "cancelButton", QPushButton).clicked.connect(self.reject)
+        ok_button = find_child(content, "okButton", QPushButton)
+        ok_button.setText(action_text)
         ok_button.clicked.connect(self.accept)
-        buttons.addStretch(1)
-        buttons.addWidget(cancel_button)
-        buttons.addWidget(ok_button)
-        layout.addLayout(buttons)
 
     def selected_case_id(self):
         return self.case_combo.currentData()
 
 
 class FieldVisitScheduleDialog(QDialog):
+    # Layout: ui/dialogs/field_visit_schedule_dialog.ui.
+    ui_file = "dialogs/field_visit_schedule_dialog.ui"
+    ui_object_names = (
+        "promptLabel",
+        "dateEdit",
+        "titleEdit",
+        "priorityCheckBox",
+        "cancelButton",
+        "submitButton",
+    )
+
     def __init__(self, selected_count=0, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("加入今日行程")
-        self.resize(460, 220)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
 
-        self.date_edit = QDateEdit(QDate.currentDate())
-        self.date_edit.setCalendarPopup(True)
-        self.date_edit.setDisplayFormat("yyyy-MM-dd")
-        self.title_edit = QLineEdit("今日拜訪行程")
-        self.title_edit.setMaxLength(200)
-        self.priority_checkbox = QCheckBox("將這次新增的地主設為優先拜訪")
-        self.priority_checkbox.setToolTip(
-            "重新規劃路線時，優先地主會排在一般地主之前；同組內仍依距離安排。"
+        self.date_edit = find_child(content, "dateEdit", QDateEdit)
+        self.date_edit.setDate(QDate.currentDate())
+        self.title_edit = find_child(content, "titleEdit", QLineEdit)
+        self.priority_checkbox = find_child(content, "priorityCheckBox", QCheckBox)
+
+        find_child(content, "promptLabel", QLabel).setText(
+            f"將 {int(selected_count)} 筆已選資料加入拜訪行程："
         )
-
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(f"將 {int(selected_count)} 筆已選資料加入拜訪行程："))
-        form = QGridLayout()
-        form.addWidget(QLabel("拜訪日期"), 0, 0)
-        form.addWidget(self.date_edit, 0, 1)
-        form.addWidget(QLabel("行程名稱"), 1, 0)
-        form.addWidget(self.title_edit, 1, 1)
-        layout.addLayout(form)
-        layout.addWidget(self.priority_checkbox)
-
-        hint = QLabel("同一天已存在行程時，資料會加入原有行程，不會另建重複行程。")
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
-        buttons = QHBoxLayout()
-        cancel_button = QPushButton("取消")
-        cancel_button.clicked.connect(self.reject)
-        submit_button = QPushButton("加入行程")
-        submit_button.clicked.connect(self.accept)
-        buttons.addStretch(1)
-        buttons.addWidget(cancel_button)
-        buttons.addWidget(submit_button)
-        layout.addLayout(buttons)
+        find_child(content, "cancelButton", QPushButton).clicked.connect(self.reject)
+        find_child(content, "submitButton", QPushButton).clicked.connect(self.accept)
 
     def selected_date(self):
         return self.date_edit.date().toString("yyyy-MM-dd")
@@ -134,6 +122,20 @@ class FieldVisitScheduleDialog(QDialog):
 
 
 class TagManagementDialog(QDialog):
+    # Layout: ui/dialogs/tag_management_dialog.ui.
+    ui_file = "dialogs/tag_management_dialog.ui"
+    ui_object_names = (
+        "tagsTable",
+        "nameEdit",
+        "colorEdit",
+        "colorButton",
+        "newButton",
+        "viewButton",
+        "deleteButton",
+        "closeButton",
+        "saveButton",
+    )
+
     def __init__(self, tags, parent=None):
         super().__init__(parent)
         self.tags = [dict(row) for row in tags]
@@ -141,51 +143,22 @@ class TagManagementDialog(QDialog):
         self.current_tag_id = None
         self.selected_tag = None
         self.edit_mode = False
-        self.setWindowTitle("標籤管理")
-        self.resize(620, 420)
-        self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["ID", "標籤", "顏色", "筆數"])
-        self.table.verticalHeader().setVisible(False)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SingleSelection)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.table = find_child(content, "tagsTable", QTableWidget)
         self.table.itemSelectionChanged.connect(self.load_current_tag)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.name_edit = QLineEdit()
-        self.color_edit = QLineEdit()
-        self.color_edit.setPlaceholderText("#ffcc00，可空白")
-        self.color_button = QPushButton("選色")
+        self.name_edit = find_child(content, "nameEdit", QLineEdit)
+        self.color_edit = find_child(content, "colorEdit", QLineEdit)
+        self.color_button = find_child(content, "colorButton", QPushButton)
         self.color_button.clicked.connect(self.choose_color)
 
-        layout = QVBoxLayout(self)
-        layout.addWidget(self.table, 1)
-        form = QGridLayout()
-        form.addWidget(QLabel("標籤名稱"), 0, 0)
-        form.addWidget(self.name_edit, 0, 1)
-        form.addWidget(QLabel("顏色"), 1, 0)
-        color_row = QHBoxLayout()
-        color_row.addWidget(self.color_edit, 1)
-        color_row.addWidget(self.color_button)
-        form.addLayout(color_row, 1, 1)
-        layout.addLayout(form)
-        buttons = QHBoxLayout()
-        self.new_button = QPushButton("新增標籤")
+        self.new_button = find_child(content, "newButton", QPushButton)
         self.new_button.clicked.connect(self.begin_new_tag)
-        self.save_button = QPushButton("新增標籤")
+        self.save_button = find_child(content, "saveButton", QPushButton)
         self.save_button.clicked.connect(self.request_save)
-        delete_button = QPushButton("刪除選取標籤")
-        delete_button.clicked.connect(self.request_delete)
-        view_button = QPushButton("顯示標籤資料")
-        view_button.clicked.connect(self.request_view)
-        close_button = QPushButton("關閉")
-        close_button.clicked.connect(self.reject)
-        buttons.addWidget(self.new_button)
-        buttons.addWidget(view_button)
-        buttons.addStretch(1)
-        buttons.addWidget(delete_button)
-        buttons.addWidget(close_button)
-        buttons.addWidget(self.save_button)
-        layout.addLayout(buttons)
+        find_child(content, "deleteButton", QPushButton).clicked.connect(self.request_delete)
+        find_child(content, "viewButton", QPushButton).clicked.connect(self.request_view)
+        find_child(content, "closeButton", QPushButton).clicked.connect(self.reject)
         self.load_rows()
 
     def load_rows(self):
@@ -300,13 +273,16 @@ class TagManagementDialog(QDialog):
 
 
 class CustomerTagsDialog(QDialog):
+    # Layout: ui/dialogs/customer_tags_dialog.ui.
+    ui_file = "dialogs/customer_tags_dialog.ui"
+    ui_object_names = ("promptLabel", "tagsList", "cancelButton", "saveButton")
+
     def __init__(self, tags, selected_tag_ids=None, record_label="", parent=None):
         super().__init__(parent)
         self.tags = [dict(row) for row in tags]
         self.selected_tag_ids = set(selected_tag_ids or [])
-        self.setWindowTitle("設定資料標籤")
-        self.resize(440, 420)
-        self.list_widget = QListWidget()
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.list_widget = find_child(content, "tagsList", QListWidget)
         for tag in self.tags:
             item = QListWidgetItem(tag.get("name") or "")
             item.setData(Qt.UserRole, tag.get("id"))
@@ -320,20 +296,10 @@ class CustomerTagsDialog(QDialog):
                 )
             self.list_widget.addItem(item)
 
-        layout = QVBoxLayout(self)
-        label = QLabel(record_label or "勾選要套用到此資料的標籤。")
-        label.setWordWrap(True)
-        layout.addWidget(label)
-        layout.addWidget(self.list_widget, 1)
-        buttons = QHBoxLayout()
-        cancel_button = QPushButton("取消")
-        cancel_button.clicked.connect(self.reject)
-        save_button = QPushButton("儲存")
-        save_button.clicked.connect(self.accept)
-        buttons.addStretch(1)
-        buttons.addWidget(cancel_button)
-        buttons.addWidget(save_button)
-        layout.addLayout(buttons)
+        if record_label:
+            find_child(content, "promptLabel", QLabel).setText(record_label)
+        find_child(content, "cancelButton", QPushButton).clicked.connect(self.reject)
+        find_child(content, "saveButton", QPushButton).clicked.connect(self.accept)
 
     def selected_ids(self):
         ids = []
@@ -345,16 +311,19 @@ class CustomerTagsDialog(QDialog):
 
 
 class BatchCustomerTagsDialog(QDialog):
+    # Layout: ui/dialogs/batch_customer_tags_dialog.ui.
+    ui_file = "dialogs/batch_customer_tags_dialog.ui"
+    ui_object_names = ("titleLabel", "modeCombo", "tagsList", "cancelButton", "applyButton")
+
     def __init__(self, tags, selected_count=0, parent=None):
         super().__init__(parent)
         self.tags = [dict(row) for row in tags]
-        self.setWindowTitle("批量設定標籤")
-        self.resize(460, 480)
-        self.mode_combo = QComboBox()
-        self.mode_combo.addItem("加入所選標籤（保留原有）", "add")
-        self.mode_combo.addItem("移除所選標籤", "remove")
-        self.mode_combo.addItem("完全取代原有標籤", "replace")
-        self.list_widget = QListWidget()
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.mode_combo = find_child(content, "modeCombo", FluentComboBox)
+        self.mode_combo.addItem("加入所選標籤（保留原有）", userData="add")
+        self.mode_combo.addItem("移除所選標籤", userData="remove")
+        self.mode_combo.addItem("完全取代原有標籤", userData="replace")
+        self.list_widget = find_child(content, "tagsList", QListWidget)
         for tag in self.tags:
             item = QListWidgetItem(tag.get("name") or "")
             item.setData(Qt.UserRole, tag.get("id"))
@@ -368,23 +337,11 @@ class BatchCustomerTagsDialog(QDialog):
                 )
             self.list_widget.addItem(item)
 
-        layout = QVBoxLayout(self)
-        title = QLabel(f"將處理 {selected_count} 筆選取或勾選資料。")
-        title.setWordWrap(True)
-        layout.addWidget(title)
-        layout.addWidget(QLabel("處理方式"))
-        layout.addWidget(self.mode_combo)
-        layout.addWidget(QLabel("選擇標籤"))
-        layout.addWidget(self.list_widget, 1)
-        buttons = QHBoxLayout()
-        cancel_button = QPushButton("取消")
-        cancel_button.clicked.connect(self.reject)
-        apply_button = QPushButton("套用")
-        apply_button.clicked.connect(self.request_apply)
-        buttons.addStretch(1)
-        buttons.addWidget(cancel_button)
-        buttons.addWidget(apply_button)
-        layout.addLayout(buttons)
+        find_child(content, "titleLabel", QLabel).setText(
+            f"將處理 {selected_count} 筆選取或勾選資料。"
+        )
+        find_child(content, "cancelButton", QPushButton).clicked.connect(self.reject)
+        find_child(content, "applyButton", QPushButton).clicked.connect(self.request_apply)
 
     def selected_ids(self):
         return [
@@ -404,6 +361,21 @@ class BatchCustomerTagsDialog(QDialog):
 
 
 class AttachmentDialog(QDialog):
+    # Layout: ui/dialogs/attachment_dialog.ui.
+    ui_file = "dialogs/attachment_dialog.ui"
+    ui_object_names = (
+        "titleLabel",
+        "attachmentsTable",
+        "pathEdit",
+        "browseButton",
+        "descriptionEdit",
+        "managedCheckBox",
+        "openButton",
+        "deleteButton",
+        "closeButton",
+        "addButton",
+    )
+
     def __init__(
         self, attachments, record_label="", parent=None, *, open_attachment=None
     ):
@@ -411,53 +383,21 @@ class AttachmentDialog(QDialog):
         self.attachments = [dict(row) for row in attachments]
         self.open_attachment = open_attachment
         self.action = None
-        self.setWindowTitle("附件管理")
-        self.resize(780, 470)
-        self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["ID", "檔案／路徑", "說明", "保存方式", "建立時間"])
-        self.table.verticalHeader().setVisible(False)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SingleSelection)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.table = find_child(content, "attachmentsTable", QTableWidget)
         self.table.itemDoubleClicked.connect(self.open_selected_file)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.path_edit = QLineEdit()
-        self.description_edit = QLineEdit()
-        self.managed_checkbox = QCheckBox("複製到系統附件庫（建議，會隨完整備份保存）")
-        self.managed_checkbox.setChecked(True)
+        self.path_edit = find_child(content, "pathEdit", QLineEdit)
+        self.description_edit = find_child(content, "descriptionEdit", QLineEdit)
+        self.managed_checkbox = find_child(content, "managedCheckBox", QCheckBox)
 
-        layout = QVBoxLayout(self)
-        title = QLabel(record_label or "附件可由系統完整納管，也可只連結外部檔案。")
-        title.setWordWrap(True)
-        layout.addWidget(title)
-        layout.addWidget(self.table, 1)
-        row = QHBoxLayout()
-        row.addWidget(QLabel("檔案"))
-        row.addWidget(self.path_edit, 1)
-        browse_button = QPushButton("瀏覽")
-        browse_button.clicked.connect(self.browse_file)
-        row.addWidget(browse_button)
-        layout.addLayout(row)
-        row2 = QHBoxLayout()
-        row2.addWidget(QLabel("說明"))
-        row2.addWidget(self.description_edit, 1)
-        layout.addLayout(row2)
-        layout.addWidget(self.managed_checkbox)
-        buttons = QHBoxLayout()
-        add_button = QPushButton("新增附件")
-        add_button.clicked.connect(self.request_add)
-        delete_button = QPushButton("刪除選取附件")
-        delete_button.clicked.connect(self.request_delete)
-        open_button = QPushButton("開啟選取檔案")
-        open_button.clicked.connect(self.open_selected_file)
-        close_button = QPushButton("關閉")
-        close_button.clicked.connect(self.reject)
-        buttons.addWidget(open_button)
-        buttons.addStretch(1)
-        buttons.addWidget(delete_button)
-        buttons.addWidget(close_button)
-        buttons.addWidget(add_button)
-        layout.addLayout(buttons)
+        if record_label:
+            find_child(content, "titleLabel", QLabel).setText(record_label)
+        find_child(content, "browseButton", QPushButton).clicked.connect(self.browse_file)
+        find_child(content, "addButton", QPushButton).clicked.connect(self.request_add)
+        find_child(content, "deleteButton", QPushButton).clicked.connect(self.request_delete)
+        find_child(content, "openButton", QPushButton).clicked.connect(self.open_selected_file)
+        find_child(content, "closeButton", QPushButton).clicked.connect(self.reject)
         self.load_rows()
 
     def load_rows(self):
@@ -547,47 +487,33 @@ class AttachmentDialog(QDialog):
 
 
 class CustomFieldManagementDialog(QDialog):
+    # Layout: ui/dialogs/custom_field_management_dialog.ui.
+    ui_file = "dialogs/custom_field_management_dialog.ui"
+    ui_object_names = (
+        "fieldsTable",
+        "labelEdit",
+        "keyEdit",
+        "clearButton",
+        "deleteButton",
+        "closeButton",
+        "saveButton",
+    )
+
     def __init__(self, fields, parent=None):
         super().__init__(parent)
         self.fields = [dict(row) for row in fields]
         self.action = None
-        self.setWindowTitle("自訂欄位管理")
-        self.resize(620, 420)
-        self.table = QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(["ID", "欄位代碼", "欄位名稱"])
-        self.table.verticalHeader().setVisible(False)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SingleSelection)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.table = find_child(content, "fieldsTable", QTableWidget)
         self.table.itemSelectionChanged.connect(self.load_current_field)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        self.key_edit = QLineEdit()
-        self.key_edit.setPlaceholderText("可空白，系統會自動產生")
-        self.label_edit = QLineEdit()
+        self.key_edit = find_child(content, "keyEdit", QLineEdit)
+        self.label_edit = find_child(content, "labelEdit", QLineEdit)
 
-        layout = QVBoxLayout(self)
-        layout.addWidget(self.table, 1)
-        form = QGridLayout()
-        form.addWidget(QLabel("欄位名稱"), 0, 0)
-        form.addWidget(self.label_edit, 0, 1)
-        form.addWidget(QLabel("欄位代碼"), 1, 0)
-        form.addWidget(self.key_edit, 1, 1)
-        layout.addLayout(form)
-        buttons = QHBoxLayout()
-        clear_button = QPushButton("清空")
-        clear_button.clicked.connect(self.clear_form)
-        save_button = QPushButton("新增/更新")
-        save_button.clicked.connect(self.request_save)
-        delete_button = QPushButton("刪除選取欄位")
-        delete_button.clicked.connect(self.request_delete)
-        close_button = QPushButton("關閉")
-        close_button.clicked.connect(self.reject)
-        buttons.addWidget(clear_button)
-        buttons.addStretch(1)
-        buttons.addWidget(delete_button)
-        buttons.addWidget(close_button)
-        buttons.addWidget(save_button)
-        layout.addLayout(buttons)
+        find_child(content, "clearButton", QPushButton).clicked.connect(self.clear_form)
+        find_child(content, "saveButton", QPushButton).clicked.connect(self.request_save)
+        find_child(content, "deleteButton", QPushButton).clicked.connect(self.request_delete)
+        find_child(content, "closeButton", QPushButton).clicked.connect(self.reject)
         self.load_rows()
 
     def load_rows(self):
@@ -640,33 +566,32 @@ class CustomFieldManagementDialog(QDialog):
 
 
 class CustomerCustomValuesDialog(QDialog):
+    # Layout: ui/dialogs/customer_custom_values_dialog.ui; one row per custom
+    # field (they come from the database) is added to customFieldsContainer.
+    ui_file = "dialogs/customer_custom_values_dialog.ui"
+    ui_object_names = ("titleLabel", "customFieldsContainer", "cancelButton", "saveButton")
+
     def __init__(self, fields, values=None, record_label="", parent=None):
         super().__init__(parent)
         self.fields = [dict(row) for row in fields]
         self.values = dict(values or {})
         self.edits = {}
-        self.setWindowTitle("設定自訂欄位")
-        self.resize(520, 420)
-        layout = QVBoxLayout(self)
-        title = QLabel(record_label or "填寫此資料的自訂欄位。")
-        title.setWordWrap(True)
-        layout.addWidget(title)
-        form = QGridLayout()
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        if record_label:
+            find_child(content, "titleLabel", QLabel).setText(record_label)
+        fields_container = find_child(content, "customFieldsContainer", QWidget)
+        form = fields_container.layout()
         for row_number, field in enumerate(self.fields):
-            edit = QLineEdit(str(self.values.get(field.get("id")) or ""))
+            edit = FluentLineEdit()
+            edit.setText(str(self.values.get(field.get("id")) or ""))
             self.edits[field.get("id")] = edit
             form.addWidget(QLabel(field.get("label") or field.get("field_key")), row_number, 0)
             form.addWidget(edit, row_number, 1)
-        layout.addLayout(form, 1)
-        buttons = QHBoxLayout()
-        cancel_button = QPushButton("取消")
+        cancel_button = find_child(content, "cancelButton", QPushButton)
         cancel_button.clicked.connect(self.reject)
-        save_button = QPushButton("儲存")
+        save_button = find_child(content, "saveButton", QPushButton)
         save_button.clicked.connect(self.accept)
-        buttons.addStretch(1)
-        buttons.addWidget(cancel_button)
-        buttons.addWidget(save_button)
-        layout.addLayout(buttons)
+        chain_tab_order([*self.edits.values(), cancel_button, save_button], after=fields_container)
 
     def result_values(self):
         return {
@@ -676,39 +601,39 @@ class CustomerCustomValuesDialog(QDialog):
 
 
 class BatchCustomerCustomValuesDialog(QDialog):
+    # Layout: ui/dialogs/batch_customer_custom_values_dialog.ui; one check box
+    # and box per custom field is added to customFieldsContainer here.
+    ui_file = "dialogs/batch_customer_custom_values_dialog.ui"
+    ui_object_names = ("titleLabel", "customFieldsContainer", "cancelButton", "applyButton")
+
     def __init__(self, fields, selected_count=0, parent=None):
         super().__init__(parent)
         self.fields = [dict(row) for row in fields]
         self.rows = {}
-        self.setWindowTitle("批量設定自訂欄位")
-        self.resize(560, 440)
-        layout = QVBoxLayout(self)
-        title = QLabel(
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        find_child(content, "titleLabel", QLabel).setText(
             f"將處理 {selected_count} 筆資料。只會修改已勾選的欄位；勾選後留空代表清除該欄位。"
         )
-        title.setWordWrap(True)
-        layout.addWidget(title)
-        form = QGridLayout()
+        fields_container = find_child(content, "customFieldsContainer", QWidget)
+        form = fields_container.layout()
         for row_number, field in enumerate(self.fields):
-            checkbox = QCheckBox(field.get("label") or field.get("field_key"))
-            edit = QLineEdit()
+            checkbox = FluentCheckBox(field.get("label") or field.get("field_key"))
+            edit = FluentLineEdit()
             edit.setEnabled(False)
             checkbox.toggled.connect(edit.setEnabled)
             field_id = field.get("id")
             self.rows[field_id] = (checkbox, edit)
             form.addWidget(checkbox, row_number, 0)
             form.addWidget(edit, row_number, 1)
-        form.setColumnStretch(1, 1)
-        layout.addLayout(form, 1)
-        buttons = QHBoxLayout()
-        cancel_button = QPushButton("取消")
+        cancel_button = find_child(content, "cancelButton", QPushButton)
         cancel_button.clicked.connect(self.reject)
-        apply_button = QPushButton("套用")
+        apply_button = find_child(content, "applyButton", QPushButton)
         apply_button.clicked.connect(self.request_apply)
-        buttons.addStretch(1)
-        buttons.addWidget(cancel_button)
-        buttons.addWidget(apply_button)
-        layout.addLayout(buttons)
+        chain_tab_order([
+            *(widget for pair in self.rows.values() for widget in pair),
+            cancel_button,
+            apply_button,
+        ], after=fields_container)
 
     def result_values(self):
         return {
@@ -727,51 +652,37 @@ class BatchCustomerCustomValuesDialog(QDialog):
 class TextTemplateDialog(QDialog):
     TEMPLATE_TYPES = (("note", "備註"), ("visit_log", "出訪記錄"))
 
+    # Layout: ui/dialogs/text_template_dialog.ui.
+    ui_file = "dialogs/text_template_dialog.ui"
+    ui_object_names = (
+        "templatesTable",
+        "typeCombo",
+        "titleEdit",
+        "contentEdit",
+        "clearButton",
+        "deleteButton",
+        "closeButton",
+        "saveButton",
+    )
+
     def __init__(self, templates, parent=None):
         super().__init__(parent)
         self.templates = [dict(row) for row in templates]
         self.action = None
-        self.setWindowTitle("快速範本管理")
-        self.resize(760, 520)
-        self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["ID", "用途", "名稱", "內容"])
-        self.table.verticalHeader().setVisible(False)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SingleSelection)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.table = find_child(content, "templatesTable", QTableWidget)
         self.table.itemSelectionChanged.connect(self.load_current_template)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
-        self.type_combo = QComboBox()
+        self.type_combo = find_child(content, "typeCombo", FluentComboBox)
         for value, label in self.TEMPLATE_TYPES:
-            self.type_combo.addItem(label, value)
-        self.title_edit = QLineEdit()
-        self.content_edit = QPlainTextEdit()
+            self.type_combo.addItem(label, userData=value)
+        self.title_edit = find_child(content, "titleEdit", QLineEdit)
+        self.content_edit = find_child(content, "contentEdit", QPlainTextEdit)
 
-        layout = QVBoxLayout(self)
-        layout.addWidget(self.table, 1)
-        form = QGridLayout()
-        form.addWidget(QLabel("用途"), 0, 0)
-        form.addWidget(self.type_combo, 0, 1)
-        form.addWidget(QLabel("名稱"), 1, 0)
-        form.addWidget(self.title_edit, 1, 1)
-        form.addWidget(QLabel("內容"), 2, 0)
-        form.addWidget(self.content_edit, 2, 1)
-        layout.addLayout(form)
-        buttons = QHBoxLayout()
-        clear_button = QPushButton("清空")
-        clear_button.clicked.connect(self.clear_form)
-        save_button = QPushButton("新增/更新")
-        save_button.clicked.connect(self.request_save)
-        delete_button = QPushButton("刪除選取範本")
-        delete_button.clicked.connect(self.request_delete)
-        close_button = QPushButton("關閉")
-        close_button.clicked.connect(self.reject)
-        buttons.addWidget(clear_button)
-        buttons.addStretch(1)
-        buttons.addWidget(delete_button)
-        buttons.addWidget(close_button)
-        buttons.addWidget(save_button)
-        layout.addLayout(buttons)
+        find_child(content, "clearButton", QPushButton).clicked.connect(self.clear_form)
+        find_child(content, "saveButton", QPushButton).clicked.connect(self.request_save)
+        find_child(content, "deleteButton", QPushButton).clicked.connect(self.request_delete)
+        find_child(content, "closeButton", QPushButton).clicked.connect(self.reject)
         self.load_rows()
 
     def load_rows(self):
@@ -834,35 +745,26 @@ class TextTemplateDialog(QDialog):
 
 
 class ApplyTemplateDialog(QDialog):
+    # Layout: ui/dialogs/apply_template_dialog.ui.
+    ui_file = "dialogs/apply_template_dialog.ui"
+    ui_object_names = ("targetCombo", "templateCombo", "cancelButton", "applyButton")
+
     def __init__(self, templates, parent=None):
         super().__init__(parent)
         self.templates = [dict(row) for row in templates]
-        self.setWindowTitle("套用快速範本")
-        self.resize(520, 200)
-        self.target_combo = QComboBox()
-        self.target_combo.addItem("備註", "note")
-        self.target_combo.addItem("出訪記錄", "visit_log")
-        self.template_combo = QComboBox()
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.target_combo = find_child(content, "targetCombo", FluentComboBox)
+        self.target_combo.addItem("備註", userData="note")
+        self.target_combo.addItem("出訪記錄", userData="visit_log")
+        self.template_combo = find_child(content, "templateCombo", FluentComboBox)
         for template in self.templates:
             target = "備註" if template.get("template_type") == "note" else "出訪記錄"
-            self.template_combo.addItem(f"[{target}] {template.get('title')}", template.get("id"))
+            self.template_combo.addItem(
+                f"[{target}] {template.get('title')}", userData=template.get("id")
+            )
 
-        layout = QVBoxLayout(self)
-        form = QGridLayout()
-        form.addWidget(QLabel("套用到"), 0, 0)
-        form.addWidget(self.target_combo, 0, 1)
-        form.addWidget(QLabel("範本"), 1, 0)
-        form.addWidget(self.template_combo, 1, 1)
-        layout.addLayout(form)
-        buttons = QHBoxLayout()
-        cancel_button = QPushButton("取消")
-        cancel_button.clicked.connect(self.reject)
-        apply_button = QPushButton("套用")
-        apply_button.clicked.connect(self.accept)
-        buttons.addStretch(1)
-        buttons.addWidget(cancel_button)
-        buttons.addWidget(apply_button)
-        layout.addLayout(buttons)
+        find_child(content, "cancelButton", QPushButton).clicked.connect(self.reject)
+        find_child(content, "applyButton", QPushButton).clicked.connect(self.accept)
 
     def selected_template(self):
         template_id = self.template_combo.currentData()
@@ -879,57 +781,39 @@ class ApplyTemplateDialog(QDialog):
 
 
 class ContactLogDialog(QDialog):
+    # Layout: ui/dialogs/contact_log_dialog.ui.
+    ui_file = "dialogs/contact_log_dialog.ui"
+    ui_object_names = (
+        "titleLabel",
+        "logsTable",
+        "dateEdit",
+        "methodEdit",
+        "resultEdit",
+        "nextEdit",
+        "noteEdit",
+        "deleteButton",
+        "closeButton",
+        "addButton",
+    )
+
     def __init__(self, logs, record_label="", parent=None):
         super().__init__(parent)
         self.logs = [dict(row) for row in logs]
         self.action = None
-        self.setWindowTitle("聯絡紀錄")
-        self.resize(820, 540)
-        self.table = QTableWidget(0, 6)
-        self.table.setHorizontalHeaderLabels(["ID", "日期", "方式", "結果", "下次追蹤", "內容"])
-        self.table.verticalHeader().setVisible(False)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SingleSelection)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.table = find_child(content, "logsTable", QTableWidget)
         self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Stretch)
-        self.date_edit = QLineEdit()
-        self.date_edit.setPlaceholderText("YYYY-MM-DD")
-        self.method_edit = QLineEdit()
-        self.result_edit = QLineEdit()
-        self.next_edit = QLineEdit()
-        self.next_edit.setPlaceholderText("YYYY-MM-DD，可空白")
-        self.note_edit = QPlainTextEdit()
-        self.note_edit.setMaximumHeight(90)
+        self.date_edit = find_child(content, "dateEdit", QLineEdit)
+        self.method_edit = find_child(content, "methodEdit", QLineEdit)
+        self.result_edit = find_child(content, "resultEdit", QLineEdit)
+        self.next_edit = find_child(content, "nextEdit", QLineEdit)
+        self.note_edit = find_child(content, "noteEdit", QPlainTextEdit)
 
-        layout = QVBoxLayout(self)
-        title = QLabel(record_label or "新增或查看此資料的聯絡紀錄。")
-        title.setWordWrap(True)
-        layout.addWidget(title)
-        layout.addWidget(self.table, 1)
-        form = QGridLayout()
-        form.addWidget(QLabel("日期"), 0, 0)
-        form.addWidget(self.date_edit, 0, 1)
-        form.addWidget(QLabel("方式"), 0, 2)
-        form.addWidget(self.method_edit, 0, 3)
-        form.addWidget(QLabel("結果"), 1, 0)
-        form.addWidget(self.result_edit, 1, 1)
-        form.addWidget(QLabel("下次追蹤"), 1, 2)
-        form.addWidget(self.next_edit, 1, 3)
-        form.addWidget(QLabel("內容"), 2, 0)
-        form.addWidget(self.note_edit, 2, 1, 1, 3)
-        layout.addLayout(form)
-        buttons = QHBoxLayout()
-        add_button = QPushButton("新增紀錄")
-        add_button.clicked.connect(self.request_add)
-        delete_button = QPushButton("刪除選取紀錄")
-        delete_button.clicked.connect(self.request_delete)
-        close_button = QPushButton("關閉")
-        close_button.clicked.connect(self.reject)
-        buttons.addStretch(1)
-        buttons.addWidget(delete_button)
-        buttons.addWidget(close_button)
-        buttons.addWidget(add_button)
-        layout.addLayout(buttons)
+        if record_label:
+            find_child(content, "titleLabel", QLabel).setText(record_label)
+        find_child(content, "addButton", QPushButton).clicked.connect(self.request_add)
+        find_child(content, "deleteButton", QPushButton).clicked.connect(self.request_delete)
+        find_child(content, "closeButton", QPushButton).clicked.connect(self.reject)
         self.load_rows()
 
     def load_rows(self):
@@ -1007,56 +891,45 @@ class ContactLogDialog(QDialog):
 
 
 class MergeRecordsDialog(QDialog):
+    # Layout: ui/dialogs/merge_records_dialog.ui.
+    ui_file = "dialogs/merge_records_dialog.ui"
+    ui_object_names = (
+        "primaryLabel",
+        "secondaryLabel",
+        "previewEdit",
+        "cancelButton",
+        "mergeButton",
+    )
+
     def __init__(self, primary_label, secondary_label, preview_lines, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("合併兩筆資料")
-        self.resize(720, 420)
-        layout = QVBoxLayout(self)
-        warning = QLabel(
-            "系統會保留第一筆勾選資料，將第二筆缺少的資訊、標籤、案件、附件、自訂欄位、聯絡紀錄與追蹤提醒合併過來，然後刪除第二筆。"
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        find_child(content, "primaryLabel", QLabel).setText(f"保留：{primary_label}")
+        find_child(content, "secondaryLabel", QLabel).setText(
+            f"合併後刪除：{secondary_label}"
         )
-        warning.setWordWrap(True)
-        layout.addWidget(warning)
-        layout.addWidget(QLabel(f"保留：{primary_label}"))
-        layout.addWidget(QLabel(f"合併後刪除：{secondary_label}"))
-        self.preview = QPlainTextEdit()
-        self.preview.setReadOnly(True)
+        self.preview = find_child(content, "previewEdit", QPlainTextEdit)
         self.preview.setPlainText("\n".join(preview_lines))
-        layout.addWidget(self.preview, 1)
-        buttons = QHBoxLayout()
-        cancel_button = QPushButton("取消")
-        cancel_button.clicked.connect(self.reject)
-        merge_button = QPushButton("確認合併")
-        merge_button.clicked.connect(self.accept)
-        buttons.addStretch(1)
-        buttons.addWidget(cancel_button)
-        buttons.addWidget(merge_button)
-        layout.addLayout(buttons)
+        find_child(content, "cancelButton", QPushButton).clicked.connect(self.reject)
+        find_child(content, "mergeButton", QPushButton).clicked.connect(self.accept)
 
 
 class HealthCheckDialog(QDialog):
+    # Layout: ui/dialogs/health_check_dialog.ui.
+    ui_file = "dialogs/health_check_dialog.ui"
+    ui_object_names = ("checksTable", "closeButton")
+
     def __init__(self, checks, parent=None):
         super().__init__(parent)
         self.checks = list(checks)
-        self.setWindowTitle("系統健康檢查")
-        self.resize(760, 480)
-        self.table = QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(["狀態", "項目", "說明"])
-        self.table.verticalHeader().setVisible(False)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.table = find_child(content, "checksTable", QTableWidget)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
 
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("這裡只做讀取檢查，不會修改資料。"))
-        layout.addWidget(self.table, 1)
-        close_button = QPushButton("關閉")
-        close_button.clicked.connect(self.accept)
-        buttons = QHBoxLayout()
-        buttons.addStretch(1)
-        buttons.addWidget(close_button)
-        layout.addLayout(buttons)
+        find_child(content, "closeButton", QPushButton).clicked.connect(self.accept)
+        size_like_unparented(self.table)
         self.load_rows()
 
     def load_rows(self):

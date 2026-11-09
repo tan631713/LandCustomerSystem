@@ -5,20 +5,16 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
-    QComboBox,
     QDialog,
-    QFrame,
-    QHBoxLayout,
     QLabel,
     QMenu,
     QPushButton,
-    QSizePolicy,
     QStackedWidget,
 )
 
+from qfluentwidgets import ComboBox as FluentComboBox
 from customer_land_details import LandDetailsDialog
 from customer_land_tree import group_land_records
-from customer_theme import muted_text_style, token
 from customer_urban_plan_dialogs import (
     DeleteUrbanPlanDialog,
     SetUrbanPlanDialog,
@@ -28,10 +24,12 @@ from customer_urban_plan_tree import (
     LEVEL_LABELS,
     UNASSIGNED_PLAN_ID,
     UNASSIGNED_PLAN_NAME,
+    all_expandable_keys,
     build_plan_tree,
     default_expanded_keys,
 )
 from customer_urban_plan_view import UrbanPlanTreeView
+from customer_ui_loader import find_child, load_ui
 
 VIEW_SETTING_KEY = "urban_plan_view"
 INPUT_SETTING_KEY = "urban_plan_input"
@@ -79,52 +77,42 @@ class UrbanPlanWorkflowMixin:
         self.plan_hint_label = None
         self._urban_plan_rows = None
         self._urban_plan_stale = True
+        # The search the plan tree last opened everything for (None = no
+        # search) and the user's expansion from before that search started.
+        self._urban_plan_search_key = None
+        self._urban_plan_pre_search_keys = None
+
+    URBAN_PLAN_ROW_UI_FILE = "main/plan_view_bar.ui"
 
     def build_urban_plan_row(self, parent_layout):
-        """Row 2 of the list: 檢視, 輸入到 and the expand/collapse buttons."""
+        """Row 2 of the list: 檢視, 輸入到 and the expand/collapse buttons.
 
-        bar = QFrame()
-        bar.setObjectName("planViewBar")
-        bar.setStyleSheet(
-            "QFrame#planViewBar { background: transparent; border: none;"
-            f" border-bottom: 1px solid {token('rule')}; }}"
+        Layout: ui/main/plan_view_bar.ui; colours: ui/theme.qss.
+        """
+
+        bar = load_ui(
+            self.URBAN_PLAN_ROW_UI_FILE,
+            required_names=(
+                "planViewLabel",
+                "planViewCombo",
+                "planInputLabel",
+                "planInputCombo",
+                "expandAllButton",
+                "collapseAllButton",
+                "planHintLabel",
+            ),
         )
-        row = QHBoxLayout(bar)
-        row.setContentsMargins(12, 10, 12, 10)
-        row.setSpacing(6)
-        self.plan_view_label = QLabel("檢視")
-        self.plan_view_combo = QComboBox()
-        self.plan_view_combo.setObjectName("planViewCombo")
-        self.plan_view_combo.setMinimumWidth(140)
-        self.plan_view_combo.setToolTip("選擇其中一個都市計畫時，清單只會顯示那個都市計畫。")
-        self.plan_input_label = QLabel("輸入到")
-        self.plan_input_combo = QComboBox()
-        self.plan_input_combo.setObjectName("planInputCombo")
-        self.plan_input_combo.setMinimumWidth(140)
-        self.plan_input_combo.setToolTip("新增資料與匯入 Excel 時，預設歸入這個都市計畫。")
-        self.expand_all_button = QPushButton("全部展開")
+        self.plan_view_label = find_child(bar, "planViewLabel", QLabel)
+        self.plan_view_combo = find_child(bar, "planViewCombo", FluentComboBox)
+        self.plan_input_label = find_child(bar, "planInputLabel", QLabel)
+        self.plan_input_combo = find_child(bar, "planInputCombo", FluentComboBox)
+        self.expand_all_button = find_child(bar, "expandAllButton", QPushButton)
         self.expand_all_button.clicked.connect(self.expand_all_land_groups)
-        self.collapse_all_button = QPushButton("全部收合")
+        self.collapse_all_button = find_child(bar, "collapseAllButton", QPushButton)
         self.collapse_all_button.clicked.connect(self.collapse_all_land_groups)
-        self.plan_hint_label = QLabel("")
-        self.plan_hint_label.setObjectName("planHintLabel")
-        self.plan_hint_label.setStyleSheet(muted_text_style(12))
         # The hint is a nicety: it must never make the row wider than the list
-        # pane (that squeezes the selectors); it clips instead.
-        self.plan_hint_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        self.plan_hint_label.setMinimumWidth(0)
-        for widget in (
-            self.plan_view_label,
-            self.plan_view_combo,
-            self.plan_input_label,
-            self.plan_input_combo,
-        ):
-            row.addWidget(widget)
-        row.addSpacing(6)
-        row.addWidget(self.expand_all_button)
-        row.addWidget(self.collapse_all_button)
-        row.addSpacing(8)
-        row.addWidget(self.plan_hint_label, 1)
+        # pane (that squeezes the selectors); the .ui lets it clip instead.
+        self.plan_hint_label = find_child(bar, "planHintLabel", QLabel)
         parent_layout.addWidget(bar)
         self.plan_view_combo.currentIndexChanged.connect(self.on_plan_view_combo_changed)
         self.plan_input_combo.currentIndexChanged.connect(self.on_plan_input_combo_changed)
@@ -224,31 +212,31 @@ class UrbanPlanWorkflowMixin:
         try:
             if self.plan_view_combo is not None:
                 self.plan_view_combo.clear()
-                self.plan_view_combo.addItem("依土地（舊）", LEGACY_VIEW)
-                self.plan_view_combo.addItem("全部都市計畫", ALL_VIEW)
+                self.plan_view_combo.addItem("依土地（舊）", userData=LEGACY_VIEW)
+                self.plan_view_combo.addItem("全部都市計畫", userData=ALL_VIEW)
                 for plan in self.urban_plans:
                     self.plan_view_combo.addItem(
-                        str(plan.get("name") or ""), f"plan:{int(plan['plan_id'])}"
+                        str(plan.get("name") or ""), userData=f"plan:{int(plan['plan_id'])}"
                     )
-                self.plan_view_combo.addItem(UNASSIGNED_PLAN_NAME, f"plan:{UNASSIGNED_PLAN_ID}")
+                self.plan_view_combo.addItem(UNASSIGNED_PLAN_NAME, userData=f"plan:{UNASSIGNED_PLAN_ID}")
                 index = self.plan_view_combo.findData(view_mode_text(self.urban_plan_mode))
                 self.plan_view_combo.setCurrentIndex(max(0, index))
             if self.plan_input_combo is not None:
                 self.plan_input_combo.clear()
-                self.plan_input_combo.addItem("不指定（未分類）", UNASSIGNED_PLAN_ID)
+                self.plan_input_combo.addItem("不指定（未分類）", userData=UNASSIGNED_PLAN_ID)
                 for plan in self.urban_plans:
                     self.plan_input_combo.addItem(
-                        str(plan.get("name") or ""), int(plan["plan_id"])
+                        str(plan.get("name") or ""), userData=int(plan["plan_id"])
                     )
                 index = self.plan_input_combo.findData(self.urban_plan_input_id)
                 self.plan_input_combo.setCurrentIndex(max(0, index))
             if self.urban_plan_form_combo is not None:
                 keep = self.urban_plan_form_value()
                 self.urban_plan_form_combo.clear()
-                self.urban_plan_form_combo.addItem(UNASSIGNED_PLAN_NAME, UNASSIGNED_PLAN_ID)
+                self.urban_plan_form_combo.addItem(UNASSIGNED_PLAN_NAME, userData=UNASSIGNED_PLAN_ID)
                 for plan in self.urban_plans:
                     self.urban_plan_form_combo.addItem(
-                        str(plan.get("name") or ""), int(plan["plan_id"])
+                        str(plan.get("name") or ""), userData=int(plan["plan_id"])
                     )
                 self.set_urban_plan_form_value(keep)
         finally:
@@ -300,6 +288,7 @@ class UrbanPlanWorkflowMixin:
                 self.plan_view_combo.blockSignals(False)
         if self.urban_plan_view is not None and mode != previous:
             self.urban_plan_view.expanded_keys = None  # back to the default opening
+            self._urban_plan_search_key = None  # an active search opens its matches again
         self.apply_plan_view_mode_to_widgets()
         if self.plan_view_active():
             self.refresh_urban_plan_view(force=True)
@@ -341,14 +330,51 @@ class UrbanPlanWorkflowMixin:
         self.urban_plan_view.empty_text = (
             "沒有符合搜尋條件的資料" if searching else "這裡還沒有資料"
         )
+        self._sync_plan_search_expansion(tree, searching=searching, has_rows=bool(source))
         if self.urban_plan_view.expanded_keys is None and self.plan_filter_value() is not None:
             self.urban_plan_view.expanded_keys = default_expanded_keys(tree, depth=2)
+        # Never expand_all here: this also runs after every save/reconcile,
+        # and a save must keep what the user had opened or closed.
         self.urban_plan_view.set_tree(
             tree,
-            expand_all=searching and bool(source),
             select_record_id=self.selected_record_id,
         )
         self.update_urban_plan_summary()
+
+    def _plan_search_signature(self):
+        criteria = getattr(self, "advanced_search_criteria", None) or {}
+        return (
+            self.search_input.text().strip(),
+            str(self.get_filter_field() or ""),
+            bool(getattr(self, "show_checked_only", False)),
+            tuple(sorted((str(k), str(v or "").strip()) for k, v in criteria.items())),
+        )
+
+    def _sync_plan_search_expansion(self, tree, *, searching, has_rows):
+        """Open every match once when a search starts or changes.
+
+        Later refreshes of the same search (a save, a background reconcile)
+        reuse the live expanded_keys, so nodes the user closed stay closed and
+        new lands stay collapsed.  Clearing the search brings back the
+        expansion from before it.
+        """
+
+        view = self.urban_plan_view
+        search_key = self._plan_search_signature() if searching else None
+        previous = self._urban_plan_search_key
+        if search_key == previous:
+            return
+        if search_key is not None:
+            if previous is None:
+                self._urban_plan_pre_search_keys = (
+                    None if view.expanded_keys is None else set(view.expanded_keys)
+                )
+            if has_rows:
+                view.expanded_keys = all_expandable_keys(tree)
+        else:
+            view.expanded_keys = self._urban_plan_pre_search_keys
+            self._urban_plan_pre_search_keys = None
+        self._urban_plan_search_key = search_key
 
     def update_urban_plan_summary(self):
         tree = self.urban_plan_tree
@@ -602,6 +628,6 @@ class UrbanPlanWorkflowMixin:
         index = combo.findData(plan_id)
         if index < 0 and plan_id:
             # A plan another user created since this window listed them.
-            combo.addItem(str(plan_name or f"都市計畫 {plan_id}"), plan_id)
+            combo.addItem(str(plan_name or f"都市計畫 {plan_id}"), userData=plan_id)
             index = combo.findData(plan_id)
         combo.setCurrentIndex(max(0, index))

@@ -1,0 +1,69 @@
+/* Fluent 元件的局部調整（Qt Style Sheet 樣板）
+ *
+ * Fluent 元件（PushButton、LineEdit、ComboBox…）自己帶樣式，而且會蓋過 theme.qss，
+ * 所以要改某幾個 Fluent 元件的樣子請寫在這裡：程式載入每個介面檔後，把這份樣式加在
+ * 其中每個 Fluent 元件的 Fluent 樣式之後。選擇器用 Fluent 類別名稱（不加 Q），
+ * 可用 objectName（#searchInput）或外層元件（QWidget#basicDataForm LineEdit）限定。
+ * 顏色寫法同 theme.qss（例如 $field、$green）；主色、字型請改 fluent_theme.json。
+ * 改壞時程式會改用內建的預設樣式，不會打不開。
+ */
+
+/* 工具列：搜尋框是一個外框（searchGroup）裡並排的欄位選單、輸入框、搜尋按鈕 */
+QFrame#searchGroup ComboBox, QFrame#searchGroup ComboBox:hover,
+QFrame#searchGroup ComboBox:pressed, QFrame#searchGroup ComboBox:focus {
+    background-color: $auto;
+    border: none;
+    border-radius: 0px;
+    min-height: 34px;
+}
+QFrame#searchGroup LineEdit, QFrame#searchGroup LineEdit:hover,
+QFrame#searchGroup LineEdit:focus {
+    background-color: transparent;
+    border: none;
+    border-radius: 0px;
+    min-height: 34px;
+}
+QFrame#searchGroup TransparentPushButton {
+    border-radius: 0px;
+    min-height: 34px;
+}
+
+/* 右側「基本資料」謄本格線：格子由 detail_form.qss 畫，欄位本身透明、無框 */
+QWidget#basicDataForm LineEdit, QWidget#basicDataForm LineEdit:hover,
+QWidget#basicDataForm LineEdit:focus, QWidget#basicDataForm LineEdit:disabled,
+QWidget#basicDataForm PlainTextEdit, QWidget#basicDataForm PlainTextEdit:hover,
+QWidget#basicDataForm PlainTextEdit:focus,
+QWidget#basicDataForm ComboBox, QWidget#basicDataForm ComboBox:hover,
+QWidget#basicDataForm ComboBox:pressed, QWidget#basicDataForm ComboBox:disabled {
+    background-color: transparent;
+    color: $ink;
+    border: none;
+    border-radius: 0px;
+    padding: 2px 0px 0px 0px;
+    min-height: 26px;
+}
+QWidget#basicDataForm LineEdit[readOnly="true"] {
+    color: $ink2;
+}
+
+/* 刪除類按鈕用朱紅 */
+TransparentPushButton#deleteRecordButton {
+    color: $seal;
+}
+TransparentPushButton#deleteRecordButton:hover {
+    background-color: $seal_hover;
+}
+PrimaryPushButton#deleteUrbanPlanConfirm {
+    background-color: $seal;
+    color: $seal_ink;
+    border: 1px solid $seal;
+}
+PrimaryPushButton#deleteUrbanPlanConfirm:hover {
+    background-color: $seal;
+    border-color: $seal_ink;
+}
+
+/* 主視窗批量列（勾選後出現）：按鈕文字用勾選列的藍色 */
+QFrame#batchBar PushButton, QFrame#batchBar TransparentPushButton {
+    color: $checked_ink;
+}

@@ -5,16 +5,15 @@ from __future__ import annotations
 from fractions import Fraction
 
 from customer_domain import parse_number
-from customer_theme import heading_font, qcolor, token
+from customer_theme import heading_font, qcolor
+from customer_ui_loader import find_child, install_ui, put_in_slot
 from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QFont, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import (
     QFrame,
-    QHBoxLayout,
     QLabel,
     QSizePolicy,
     QToolTip,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -283,56 +282,33 @@ class LandHeaderWidget(QFrame):
 
     METRICS = (("area", "面積"), ("value", "公告現值"), ("plan", "都市計畫"))
 
+    # Layout: ui/main/land_header.ui; colours: ui/theme.qss.  The share bar is
+    # drawn in code and takes the place of shareBarSlot.
+    ui_file = "main/land_header.ui"
+    ui_object_names = (
+        "landHeaderLocation",
+        "landHeaderNumber",
+        "shareBarSlot",
+        *(f"landHeaderMetric_{key}" for key, _caption in METRICS),
+        *(f"landHeaderValue_{key}" for key, _caption in METRICS),
+    )
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("landHeader")
-        self.setStyleSheet(
-            f"QFrame#landHeader {{ background: transparent; border: none;"
-            f" border-bottom: 1px solid {token('rule')}; }}"
-        )
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 12)
-        outer.setSpacing(10)
-
-        top = QHBoxLayout()
-        top.setSpacing(18)
-        left = QVBoxLayout()
-        left.setSpacing(0)
-        self.location_label = QLabel("")
-        self.location_label.setObjectName("landHeaderLocation")
-        self.location_label.setStyleSheet(f"color: {token('ink2')}; font-size: 12px;")
-        self.location_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        self.land_number_label = QLabel("尚未選取資料")
-        self.land_number_label.setObjectName("landHeaderNumber")
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.location_label = find_child(content, "landHeaderLocation", QLabel)
+        self.land_number_label = find_child(content, "landHeaderNumber", QLabel)
         self.land_number_label.setFont(heading_font(20))
-        self.land_number_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        left.addWidget(self.location_label)
-        left.addWidget(self.land_number_label)
-        top.addLayout(left, 1)
 
         self.metric_containers = {}
         self.metric_values = {}
-        for key, caption in self.METRICS:
-            container = QWidget()
-            container.setObjectName(f"landHeaderMetric_{key}")
-            column = QVBoxLayout(container)
-            column.setContentsMargins(0, 0, 0, 0)
-            column.setSpacing(0)
-            caption_label = QLabel(caption)
-            caption_label.setStyleSheet(f"color: {token('ink2')}; font-size: 12px;")
-            value_label = QLabel("—")
-            value_label.setObjectName(f"landHeaderValue_{key}")
-            value_label.setStyleSheet("font-size: 14px; font-weight: 600;")
-            column.addWidget(caption_label)
-            column.addWidget(value_label)
-            top.addWidget(container, 0, Qt.AlignBottom)
-            self.metric_containers[key] = container
-            self.metric_values[key] = value_label
-        outer.addLayout(top)
+        for key, _caption in self.METRICS:
+            self.metric_containers[key] = find_child(content, f"landHeaderMetric_{key}", QWidget)
+            self.metric_values[key] = find_child(content, f"landHeaderValue_{key}", QLabel)
 
-        self.share_bar = ShareBarWidget()
+        self.share_bar = put_in_slot(find_child(content, "shareBarSlot", QWidget), ShareBarWidget())
         self.share_bar.ownerClicked.connect(self.ownerClicked)
-        outer.addWidget(self.share_bar)
         self.share_bar.hide()
 
     def show_land(self, *, location, land_number, area, value, plan, show_plan):

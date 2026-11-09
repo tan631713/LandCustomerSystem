@@ -12,15 +12,17 @@ from customer_productivity import (
     export_report_with_template,
 )
 from customer_quality import inspect_customer_quality, quality_issue_signature
+from customer_fluent import set_custom_style
 from customer_security import encrypt_value
 from customer_theme import token
 from PySide6.QtCore import QThread, QTimer
-from PySide6.QtWidgets import QApplication, QDialog, QFileDialog, QPushButton
+from PySide6.QtWidgets import QApplication, QDialog, QFileDialog
+from qfluentwidgets import PushButton as FluentPushButton
 
 
 class ProductivityWorkflowMixin:
     def setup_notification_status(self):
-        self.notification_status_button = QPushButton("通知 0")
+        self.notification_status_button = FluentPushButton("通知 0")
         self.notification_status_button.setFlat(True)
         self.notification_status_button.setToolTip("開啟通知中心")
         self.notification_status_button.clicked.connect(self.show_notification_center)
@@ -41,7 +43,8 @@ class ProductivityWorkflowMixin:
         if getattr(self, "notification_status_button", None) is not None:
             self.notification_status_button.setText(f"通知 {count}")
             color = token("amber_ink") if count else token("success_ink")
-            self.notification_status_button.setStyleSheet(f"color: {color}; padding: 2px 8px;")
+            # A Fluent button keeps its own style sheet; add the colour to it.
+            set_custom_style(self.notification_status_button, f"PushButton {{ color: {color}; }}")
         return count
 
     def setup_offsite_backup(self):

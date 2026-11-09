@@ -1,0 +1,300 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>dataQualityDialogContent</class>
+ <widget class="QWidget" name="dataQualityDialogContent">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>900</width>
+    <height>520</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>資料品質檢查</string>
+  </property>
+  <property name="dialogSize" stdset="0">
+   <size>
+    <width>900</width>
+    <height>520</height>
+   </size>
+  </property>
+  <layout class="QVBoxLayout" name="dataQualityLayout" stretch="0,0,0,1,0,0">
+   <property name="spacing">
+    <number>10</number>
+   </property>
+   <property name="leftMargin">
+    <number>14</number>
+   </property>
+   <property name="topMargin">
+    <number>14</number>
+   </property>
+   <property name="rightMargin">
+    <number>14</number>
+   </property>
+   <property name="bottomMargin">
+    <number>14</number>
+   </property>
+   <item>
+    <widget class="QLabel" name="summaryLabel">
+     <property name="text">
+      <string />
+     </property>
+     <property name="wordWrap">
+      <bool>true</bool>
+     </property>
+     <property name="styleSheet">
+      <string>font-size: 15px; font-weight: 600;</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="filterRow" stretch="0,0,1">
+     <property name="spacing">
+      <number>10</number>
+     </property>
+     <property name="leftMargin">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <property name="rightMargin">
+      <number>0</number>
+     </property>
+     <property name="bottomMargin">
+      <number>0</number>
+     </property>
+     <item>
+      <widget class="QLabel" name="filterLabel">
+       <property name="text">
+        <string>顯示</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="ComboBox" name="filterCombo" />
+     </item>
+     <item>
+      <spacer name="filterRowSpacer">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>0</width>
+         <height>0</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="TableWidget" name="categorySummaryTable">
+     <property name="maximumSize">
+      <size>
+       <width>16777215</width>
+       <height>140</height>
+      </size>
+     </property>
+     <property name="selectionMode">
+      <enum>QAbstractItemView::SingleSelection</enum>
+     </property>
+     <property name="selectionBehavior">
+      <enum>QAbstractItemView::SelectRows</enum>
+     </property>
+     <attribute name="verticalHeaderVisible">
+      <bool>false</bool>
+     </attribute>
+     <column>
+      <property name="text">
+       <string>類型</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>重要</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>提醒</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>合計</string>
+      </property>
+     </column>
+    </widget>
+   </item>
+   <item>
+    <widget class="TableWidget" name="issuesTable">
+     <property name="selectionMode">
+      <enum>QAbstractItemView::SingleSelection</enum>
+     </property>
+     <property name="selectionBehavior">
+      <enum>QAbstractItemView::SelectRows</enum>
+     </property>
+     <column>
+      <property name="text">
+       <string>資料ID</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>程度</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>類型</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>問題</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>建議處理</string>
+      </property>
+     </column>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="hintLabel">
+     <property name="text">
+      <string>提示：雙擊問題列，或選取後按「前往選取資料」，可直接載入該筆資料進行修正。</string>
+     </property>
+     <property name="wordWrap">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="buttonRow" stretch="0,0,0,0,0,1,0,0,0,0,0">
+     <property name="spacing">
+      <number>10</number>
+     </property>
+     <property name="leftMargin">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <property name="rightMargin">
+      <number>0</number>
+     </property>
+     <property name="bottomMargin">
+      <number>0</number>
+     </property>
+     <item>
+      <widget class="PushButton" name="copySummaryButton">
+       <property name="text">
+        <string>複製摘要</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PushButton" name="exportSummaryButton">
+       <property name="text">
+        <string>匯出摘要 Excel</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PushButton" name="copyIssuesButton">
+       <property name="text">
+        <string>複製目前清單</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PushButton" name="exportIssuesButton">
+       <property name="text">
+        <string>匯出目前清單 Excel</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PushButton" name="clearIgnoredButton">
+       <property name="text">
+        <string>清除已忽略</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="buttonRowSpacer">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>0</width>
+         <height>0</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="PushButton" name="ignoreFilteredButton">
+       <property name="text">
+        <string>確認目前篩選</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PushButton" name="ignoreSameCategoryButton">
+       <property name="text">
+        <string>確認同類型</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PushButton" name="ignoreIssueButton">
+       <property name="text">
+        <string>確認忽略此問題</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PushButton" name="gotoIssueButton">
+       <property name="text">
+        <string>前往選取資料</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PushButton" name="closeButton">
+       <property name="text">
+        <string>關閉</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+ <customwidget>
+  <class>ComboBox</class>
+  <extends>QPushButton</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>PushButton</class>
+  <extends>QPushButton</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>TableWidget</class>
+  <extends>QTableWidget</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ </customwidgets>
+ <resources />
+ <connections />
+</ui>

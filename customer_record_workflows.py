@@ -523,6 +523,9 @@ class RecordWorkflowMixin:
         land_id = self._land_group_id(group)
         if land_id is not None:
             self.user_expanded_land_ids.discard(land_id)
+            # Otherwise the next refresh (e.g. after a save) re-opens a land
+            # the user closed while a search was active.
+            self.search_expanded_land_ids.discard(land_id)
 
     def restore_land_expansion_state(self, *, expand_matches=None):
         """Apply user and temporary search expansion without cross-contamination.

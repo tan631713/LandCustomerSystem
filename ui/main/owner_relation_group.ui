@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ownerRelationGroup</class>
+ <widget class="QGroupBox" name="ownerRelationGroup">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>648</width>
+    <height>282</height>
+   </rect>
+  </property>
+  <property name="title">
+   <string>與目前地主的關係</string>
+  </property>
+  <layout class="QFormLayout" name="ownerRelationForm">
+   <property name="horizontalSpacing">
+    <number>6</number>
+   </property>
+   <property name="verticalSpacing">
+    <number>6</number>
+   </property>
+   <property name="leftMargin">
+    <number>9</number>
+   </property>
+   <property name="topMargin">
+    <number>9</number>
+   </property>
+   <property name="rightMargin">
+    <number>9</number>
+   </property>
+   <property name="bottomMargin">
+    <number>9</number>
+   </property>
+   <item row="0" column="0">
+    <widget class="QLabel" name="relationshipLabel">
+     <property name="text">
+      <string>關係類型 *</string>
+     </property>
+    </widget>
+   </item>
+   <item row="0" column="1">
+    <widget class="ComboBox" name="relationshipCombo" />
+   </item>
+   <item row="1" column="0">
+    <widget class="QLabel" name="supplementLabel">
+     <property name="text">
+      <string>關係補充</string>
+     </property>
+    </widget>
+   </item>
+   <item row="1" column="1">
+    <widget class="LineEdit" name="supplementEdit">
+     <property name="placeholderText">
+      <string>選擇「其他」時必填</string>
+     </property>
+    </widget>
+   </item>
+   <item row="2" column="1">
+    <widget class="CheckBox" name="primaryCheckBox">
+     <property name="text">
+      <string>設為主要關係人</string>
+     </property>
+    </widget>
+   </item>
+   <item row="3" column="0">
+    <widget class="QLabel" name="sortOrderLabel">
+     <property name="text">
+      <string>排序</string>
+     </property>
+    </widget>
+   </item>
+   <item row="3" column="1">
+    <widget class="SpinBox" name="sortOrderSpin">
+     <property name="maximum">
+      <number>1000000</number>
+     </property>
+    </widget>
+   </item>
+   <item row="4" column="0">
+    <widget class="QLabel" name="relationNotesLabel">
+     <property name="text">
+      <string>關係備註</string>
+     </property>
+    </widget>
+   </item>
+   <item row="4" column="1">
+    <widget class="PlainTextEdit" name="relationNotesEdit">
+     <property name="minimumSize">
+      <size>
+       <width>0</width>
+       <height>80</height>
+      </size>
+     </property>
+     <property name="maximumSize">
+      <size>
+       <width>16777215</width>
+       <height>80</height>
+      </size>
+     </property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+ <customwidget>
+  <class>CheckBox</class>
+  <extends>QCheckBox</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>ComboBox</class>
+  <extends>QPushButton</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>LineEdit</class>
+  <extends>QLineEdit</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>PlainTextEdit</class>
+  <extends>QPlainTextEdit</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>SpinBox</class>
+  <extends>QSpinBox</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ </customwidgets>
+ <resources />
+ <connections />
+</ui>

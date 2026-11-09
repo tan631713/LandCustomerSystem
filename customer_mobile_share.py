@@ -9,10 +9,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QLabel, QPushButton
 
 from customer_responsive_dialog import ResponsiveDialog as QDialog
 from customer_theme import token
+from customer_ui_loader import find_child, install_ui
 
 
 def get_lan_ip_address():
@@ -116,41 +117,24 @@ class TemporaryShareServer:
 class MobileShareDialog(QDialog):
     SHARE_DURATION_MS = 10 * 60 * 1000
 
+    # Layout: ui/dialogs/mobile_share_dialog.ui; the QR code and address are set here.
+    ui_file = "dialogs/mobile_share_dialog.ui"
+    ui_object_names = ("titleLabel", "qrLabel", "urlLabel", "stopButton")
+    QR_CODE_SIZE = 320
+
     def __init__(self, rows, columns, parent=None):
         super().__init__(parent)
         self.share_server = TemporaryShareServer(build_mobile_share_html(rows, columns))
-        self.setWindowTitle("傳送到手機")
         self.setModal(True)
-        self.setMinimumWidth(420)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(12)
+        find_child(content, "titleLabel", QLabel).setText(f"已選取 {len(rows)} 筆資料")
+        find_child(content, "qrLabel", QLabel).setPixmap(
+            self.create_qr_pixmap(self.share_server.url, self.QR_CODE_SIZE)
+        )
+        find_child(content, "urlLabel", QLabel).setText(self.share_server.url)
 
-        title = QLabel(f"已選取 {len(rows)} 筆資料")
-        title.setStyleSheet("font-size: 17px; font-weight: 600;")
-        title.setAlignment(Qt.AlignCenter)
-        layout.addWidget(title)
-
-        qr_label = QLabel()
-        qr_label.setAlignment(Qt.AlignCenter)
-        qr_label.setPixmap(self.create_qr_pixmap(self.share_server.url, 320))
-        layout.addWidget(qr_label)
-
-        hint = QLabel("手機與電腦連接同一個 Wi-Fi 後掃描；關閉視窗即停止分享。")
-        hint.setAlignment(Qt.AlignCenter)
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
-
-        url_label = QLabel(self.share_server.url)
-        url_label.setAlignment(Qt.AlignCenter)
-        url_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        url_label.setStyleSheet(f"color: {token('info_ink')};")
-        layout.addWidget(url_label)
-
-        stop_button = QPushButton("停止分享")
-        stop_button.clicked.connect(self.reject)
-        layout.addWidget(stop_button)
+        find_child(content, "stopButton", QPushButton).clicked.connect(self.reject)
 
         self.expiry_timer = QTimer(self)
         self.expiry_timer.setSingleShot(True)

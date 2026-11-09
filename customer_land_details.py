@@ -1,7 +1,7 @@
 """Read-only parcel summary opened from a land parent node."""
 
 from customer_land_tree import ownership_area
-from customer_theme import token
+from customer_ui_loader import find_child, install_ui
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
@@ -9,17 +9,18 @@ from PySide6.QtWidgets import (
     QLabel,
     QTableWidget,
     QTableWidgetItem,
-    QVBoxLayout,
 )
 
 
 class LandDetailsDialog(QDialog):
+    # Layout: ui/dialogs/land_details_dialog.ui; the table rows are filled here.
+    ui_file = "dialogs/land_details_dialog.ui"
+    ui_object_names = ("headingLabel", "detailsTable", "buttonBox")
+
     def __init__(self, group, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("土地詳細資料")
-        self.resize(980, 520)
-        layout = QVBoxLayout(self)
-        heading = QLabel(
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        find_child(content, "headingLabel", QLabel).setText(
             f"{group.full_land_number}\n"
             f"土地總面積：{group.area or '未設定'} ㎡　"
             f"地主：{group.owner_count} 位　"
@@ -27,11 +28,6 @@ class LandDetailsDialog(QDialog):
             f"地目／使用分區：{group.land_use or '未設定'}　"
             f"狀態：{group.status_summary or '無'}"
         )
-        heading.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        heading.setStyleSheet(
-            f"background:{token('auto')};color:{token('ink')};border-radius:6px;padding:12px;"
-        )
-        layout.addWidget(heading)
 
         columns = (
             ("owner_name", "地主姓名"),
@@ -42,11 +38,10 @@ class LandDetailsDialog(QDialog):
             ("customer_status", "客戶狀態"),
             ("note_summary", "備註摘要"),
         )
-        table = QTableWidget(len(group.records), len(columns), self)
+        table = find_child(content, "detailsTable", QTableWidget)
+        table.setRowCount(len(group.records))
+        table.setColumnCount(len(columns))
         table.setHorizontalHeaderLabels([label for _key, label in columns])
-        table.setEditTriggers(QTableWidget.NoEditTriggers)
-        table.setSelectionBehavior(QTableWidget.SelectRows)
-        table.setAlternatingRowColors(True)
         for row_number, record in enumerate(group.records):
             raw = record.get("raw") or {}
             numerator = str(raw.get("numerator") or "")
@@ -80,8 +75,6 @@ class LandDetailsDialog(QDialog):
                 table.setItem(row_number, column_number, item)
         table.resizeColumnsToContents()
         table.horizontalHeader().setStretchLastSection(True)
-        layout.addWidget(table, 1)
-        buttons = QDialogButtonBox(QDialogButtonBox.Close, parent=self)
+        buttons = find_child(content, "buttonBox", QDialogButtonBox)
         buttons.rejected.connect(self.reject)
         buttons.accepted.connect(self.accept)
-        layout.addWidget(buttons)

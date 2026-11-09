@@ -1261,6 +1261,34 @@ class LandTreeGroupingTests(unittest.TestCase):
         self.assertNotIn(1701, harness.user_expanded_land_ids)
         self.assertNotIn(1701, harness.search_expanded_land_ids)
 
+    def test_land_closed_during_search_stays_closed_after_save(self):
+        harness = _WorkflowHarness(
+            [
+                record(221, land_id=1801, owner_id=181, owner_name="王甲"),
+                record(222, land_id=1802, owner_id=182, owner_name="王乙"),
+            ]
+        )
+        harness.search_input.setText("王")
+        harness.restore_land_tree_view_state({}, search_auto_expand=True)
+        second = harness.table_model.index_for_group_state_id(1802)
+        harness.table_view.setExpanded(harness.proxy_table_index(second), False)
+        state = harness.capture_land_tree_view_state()
+
+        changed = [
+            record(221, land_id=1801, owner_id=181, owner_name="王甲已修改"),
+            record(222, land_id=1802, owner_id=182, owner_name="王乙"),
+        ]
+        harness.apply_record_rows(changed, 221, state)
+
+        first = harness.table_model.index_for_group_state_id(1801)
+        second = harness.table_model.index_for_group_state_id(1802)
+        self.assertTrue(
+            harness.table_view.isExpanded(harness.proxy_table_index(first))
+        )
+        self.assertFalse(
+            harness.table_view.isExpanded(harness.proxy_table_index(second))
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

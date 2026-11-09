@@ -1,0 +1,278 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>userManagementDialogContent</class>
+ <widget class="QWidget" name="userManagementDialogContent">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>780</width>
+    <height>540</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>使用者與權限管理</string>
+  </property>
+  <property name="dialogSize" stdset="0">
+   <size>
+    <width>780</width>
+    <height>540</height>
+   </size>
+  </property>
+  <layout class="QVBoxLayout" name="userManagementLayout">
+   <property name="spacing">
+    <number>6</number>
+   </property>
+   <property name="leftMargin">
+    <number>11</number>
+   </property>
+   <property name="topMargin">
+    <number>11</number>
+   </property>
+   <property name="rightMargin">
+    <number>11</number>
+   </property>
+   <property name="bottomMargin">
+    <number>11</number>
+   </property>
+   <item>
+    <widget class="QLabel" name="introLabel">
+     <property name="text">
+      <string>管理員可管理帳號；編輯者可修改資料；唯讀人員只能查詢與匯出。</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="TableWidget" name="usersTable">
+     <property name="selectionMode">
+      <enum>QAbstractItemView::SingleSelection</enum>
+     </property>
+     <property name="selectionBehavior">
+      <enum>QAbstractItemView::SelectRows</enum>
+     </property>
+     <column>
+      <property name="text">
+       <string>ID</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>帳號</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>顯示名稱</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>角色</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>啟用</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>建立時間</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>最後登入</string>
+      </property>
+     </column>
+    </widget>
+   </item>
+   <item>
+    <layout class="QFormLayout" name="userForm">
+     <property name="horizontalSpacing">
+      <number>6</number>
+     </property>
+     <property name="verticalSpacing">
+      <number>6</number>
+     </property>
+     <property name="leftMargin">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <property name="rightMargin">
+      <number>0</number>
+     </property>
+     <property name="bottomMargin">
+      <number>0</number>
+     </property>
+     <item row="0" column="0">
+      <widget class="QLabel" name="usernameLabel">
+       <property name="text">
+        <string>帳號</string>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="1">
+      <widget class="LineEdit" name="usernameEdit" />
+     </item>
+     <item row="1" column="0">
+      <widget class="QLabel" name="displayNameLabel">
+       <property name="text">
+        <string>顯示名稱</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="1">
+      <widget class="LineEdit" name="displayNameEdit" />
+     </item>
+     <item row="2" column="0">
+      <widget class="QLabel" name="passwordLabel">
+       <property name="text">
+        <string>新密碼</string>
+       </property>
+      </widget>
+     </item>
+     <item row="2" column="1">
+      <widget class="PasswordLineEdit" name="passwordEdit">
+      </widget>
+     </item>
+     <item row="3" column="0">
+      <widget class="QLabel" name="roleLabel">
+       <property name="text">
+        <string>角色</string>
+       </property>
+      </widget>
+     </item>
+     <item row="3" column="1">
+      <widget class="ComboBox" name="roleCombo" />
+     </item>
+     <item row="4" column="0">
+      <widget class="QLabel" name="activeLabel">
+       <property name="text">
+        <string>狀態</string>
+       </property>
+      </widget>
+     </item>
+     <item row="4" column="1">
+      <widget class="CheckBox" name="activeCheckBox">
+       <property name="text">
+        <string>啟用帳號</string>
+       </property>
+       <property name="checked">
+        <bool>true</bool>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="buttonRow" stretch="0,0,0,0,1,0">
+     <property name="spacing">
+      <number>6</number>
+     </property>
+     <property name="leftMargin">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <property name="rightMargin">
+      <number>0</number>
+     </property>
+     <property name="bottomMargin">
+      <number>0</number>
+     </property>
+     <item>
+      <widget class="PushButton" name="newModeButton">
+       <property name="text">
+        <string>新增模式</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PrimaryPushButton" name="createButton">
+       <property name="text">
+        <string>新增帳號</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PushButton" name="updateButton">
+       <property name="text">
+        <string>更新角色/狀態</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PushButton" name="resetPasswordButton">
+       <property name="text">
+        <string>重設選取帳號密碼</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="buttonRowSpacer">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>0</width>
+         <height>0</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="PushButton" name="closeButton">
+       <property name="text">
+        <string>關閉</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+ <customwidget>
+  <class>CheckBox</class>
+  <extends>QCheckBox</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>ComboBox</class>
+  <extends>QPushButton</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>LineEdit</class>
+  <extends>QLineEdit</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>PasswordLineEdit</class>
+  <extends>QLineEdit</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>PrimaryPushButton</class>
+  <extends>QPushButton</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>PushButton</class>
+  <extends>QPushButton</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>TableWidget</class>
+  <extends>QTableWidget</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ </customwidgets>
+ <resources />
+ <connections />
+</ui>

@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>batchBar</class>
+ <widget class="QFrame" name="batchBar">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>750</width>
+    <height>46</height>
+   </rect>
+  </property>
+  <widget class="QLabel" name="batchBarCount">
+   <property name="geometry">
+    <rect>
+     <x>12</x>
+     <y>8</y>
+     <width>90</width>
+     <height>30</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>已勾選 0 筆</string>
+   </property>
+  </widget>
+  <widget class="PushButton" name="batchBar_field_visit_action">
+   <property name="geometry">
+    <rect>
+     <x>108</x>
+     <y>8</y>
+     <width>110</width>
+     <height>30</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>加入今日行程</string>
+   </property>
+  </widget>
+  <widget class="PushButton" name="batchBar_assign_case_action">
+   <property name="geometry">
+    <rect>
+     <x>224</x>
+     <y>8</y>
+     <width>90</width>
+     <height>30</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>加入案件</string>
+   </property>
+  </widget>
+  <widget class="PushButton" name="batchBar_batch_tags_action">
+   <property name="geometry">
+    <rect>
+     <x>320</x>
+     <y>8</y>
+     <width>110</width>
+     <height>30</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>批量設定標籤</string>
+   </property>
+  </widget>
+  <widget class="PushButton" name="batchBar_batch_edit_action">
+   <property name="geometry">
+    <rect>
+     <x>436</x>
+     <y>8</y>
+     <width>90</width>
+     <height>30</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>批次修改</string>
+   </property>
+  </widget>
+  <widget class="PushButton" name="batchBar_export_selected_action">
+   <property name="geometry">
+    <rect>
+     <x>532</x>
+     <y>8</y>
+     <width>90</width>
+     <height>30</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>匯出選取</string>
+   </property>
+  </widget>
+  <widget class="TransparentPushButton" name="batchBar_clear_checked_action">
+   <property name="geometry">
+    <rect>
+     <x>628</x>
+     <y>8</y>
+     <width>110</width>
+     <height>30</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>取消全部勾選</string>
+   </property>
+  </widget>
+ </widget>
+ <customwidgets>
+ <customwidget>
+  <class>PushButton</class>
+  <extends>QPushButton</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>TransparentPushButton</class>
+  <extends>QPushButton</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ </customwidgets>
+ <resources />
+ <connections />
+</ui>

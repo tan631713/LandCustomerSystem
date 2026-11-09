@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>urbanPlanManagementDialogContent</class>
+ <widget class="QWidget" name="urbanPlanManagementDialogContent">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>560</width>
+    <height>460</height>
+   </rect>
+  </property>
+  <property name="minimumSize">
+   <size>
+    <width>560</width>
+    <height>460</height>
+   </size>
+  </property>
+  <property name="windowTitle">
+   <string>都市計畫管理</string>
+  </property>
+  <layout class="QVBoxLayout" name="urbanPlanManagementLayout" stretch="0,1,0,0,0">
+   <property name="spacing">
+    <number>10</number>
+   </property>
+   <property name="leftMargin">
+    <number>11</number>
+   </property>
+   <property name="topMargin">
+    <number>11</number>
+   </property>
+   <property name="rightMargin">
+    <number>11</number>
+   </property>
+   <property name="bottomMargin">
+    <number>11</number>
+   </property>
+   <item>
+    <widget class="QLabel" name="urbanPlanIntro">
+     <property name="text">
+      <string>先在這裡建立都市計畫，之後新增或匯入資料時選擇「輸入到」哪一個，資料就會歸入該計畫。</string>
+     </property>
+     <property name="wordWrap">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="TableWidget" name="urbanPlanTable">
+     <property name="editTriggers">
+      <set>QAbstractItemView::NoEditTriggers</set>
+     </property>
+     <property name="selectionMode">
+      <enum>QAbstractItemView::SingleSelection</enum>
+     </property>
+     <property name="selectionBehavior">
+      <enum>QAbstractItemView::SelectRows</enum>
+     </property>
+     <attribute name="verticalHeaderVisible">
+      <bool>false</bool>
+     </attribute>
+     <column>
+      <property name="text">
+       <string>名稱</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>土地</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>地主</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>持分</string>
+      </property>
+     </column>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="urbanPlanAddRow" stretch="1,0">
+     <property name="spacing">
+      <number>10</number>
+     </property>
+     <property name="leftMargin">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <property name="rightMargin">
+      <number>0</number>
+     </property>
+     <property name="bottomMargin">
+      <number>0</number>
+     </property>
+     <item>
+      <widget class="LineEdit" name="urbanPlanNameInput">
+       <property name="maxLength">
+        <number>100</number>
+       </property>
+       <property name="placeholderText">
+        <string>新都市計畫名稱，例如 龍岡都市計畫</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PushButton" name="urbanPlanAddButton">
+       <property name="text">
+        <string>新增</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QLabel" name="urbanPlanNote">
+     <property name="text">
+      <string>刪除都市計畫不會刪除任何土地或地主，該計畫的土地會回到「未分類」。</string>
+     </property>
+     <property name="wordWrap">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="buttonRow" stretch="0,0,1,0">
+     <property name="spacing">
+      <number>10</number>
+     </property>
+     <property name="leftMargin">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <property name="rightMargin">
+      <number>0</number>
+     </property>
+     <property name="bottomMargin">
+      <number>0</number>
+     </property>
+     <item>
+      <widget class="PushButton" name="urbanPlanRenameButton">
+       <property name="text">
+        <string>重新命名</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PushButton" name="urbanPlanDeleteButton">
+       <property name="text">
+        <string>刪除</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="buttonRowSpacer">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>0</width>
+         <height>0</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="PushButton" name="urbanPlanCloseButton">
+       <property name="text">
+        <string>關閉</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+ <customwidget>
+  <class>LineEdit</class>
+  <extends>QLineEdit</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>PushButton</class>
+  <extends>QPushButton</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>TableWidget</class>
+  <extends>QTableWidget</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ </customwidgets>
+ <resources />
+ <connections />
+</ui>

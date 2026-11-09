@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -18,11 +17,11 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
-    QVBoxLayout,
     QWidget,
 )
 
-from customer_theme import muted_text_style, token
+from qfluentwidgets import ComboBox as FluentComboBox
+from customer_ui_loader import find_child, install_ui
 from customer_urban_plan_tree import UNASSIGNED_PLAN_ID, UNASSIGNED_PLAN_NAME
 
 PLAN_ID_ROLE = Qt.UserRole + 31
@@ -45,6 +44,19 @@ class UrbanPlanManagementDialog(QDialog):
     it did). Errors raised by those callbacks are shown here.
     """
 
+    # Layout: ui/dialogs/urban_plan_management_dialog.ui.
+    ui_file = "dialogs/urban_plan_management_dialog.ui"
+    ui_object_names = (
+        "urbanPlanTable",
+        "urbanPlanAddRow",
+        "urbanPlanNameInput",
+        "urbanPlanAddButton",
+        "urbanPlanNote",
+        "urbanPlanRenameButton",
+        "urbanPlanDeleteButton",
+        "urbanPlanCloseButton",
+    )
+
     def __init__(
         self,
         load_plans,
@@ -56,29 +68,16 @@ class UrbanPlanManagementDialog(QDialog):
         can_edit=True,
     ):
         super().__init__(parent)
-        self.setWindowTitle("都市計畫管理")
         self.setObjectName("urbanPlanManagementDialog")
-        self.setMinimumSize(560, 460)
         self.load_plans = load_plans
         self.create_plan = create_plan
         self.rename_plan = rename_plan
         self.delete_plan = delete_plan
         self.can_edit = bool(can_edit)
         self.changed = False
+        content = install_ui(self, self.ui_file, self.ui_object_names)
 
-        layout = QVBoxLayout(self)
-        layout.setSpacing(10)
-        intro = QLabel("先在這裡建立都市計畫，之後新增或匯入資料時選擇「輸入到」哪一個，資料就會歸入該計畫。")
-        intro.setWordWrap(True)
-        layout.addWidget(intro)
-
-        self.table = QTableWidget(0, 4)
-        self.table.setObjectName("urbanPlanTable")
-        self.table.setHorizontalHeaderLabels(["名稱", "土地", "地主", "持分"])
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.verticalHeader().setVisible(False)
+        self.table = find_child(content, "urbanPlanTable", QTableWidget)
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Stretch)
         for column in (1, 2, 3):
@@ -86,40 +85,20 @@ class UrbanPlanManagementDialog(QDialog):
             header.resizeSection(column, 80)
         self.table.itemSelectionChanged.connect(self.update_buttons)
         self.table.itemDoubleClicked.connect(lambda _item: self.rename_selected())
-        layout.addWidget(self.table, 1)
 
-        self.add_row = QHBoxLayout()
-        self.name_input = QLineEdit()
-        self.name_input.setObjectName("urbanPlanNameInput")
-        self.name_input.setPlaceholderText("新都市計畫名稱，例如 龍岡都市計畫")
-        self.name_input.setMaxLength(100)
+        self.add_row = find_child(content, "urbanPlanAddRow", QHBoxLayout)
+        self.name_input = find_child(content, "urbanPlanNameInput", QLineEdit)
         self.name_input.returnPressed.connect(self.add_plan)
-        self.add_button = QPushButton("新增")
-        self.add_button.setObjectName("urbanPlanAddButton")
+        self.add_button = find_child(content, "urbanPlanAddButton", QPushButton)
         self.add_button.clicked.connect(self.add_plan)
-        self.add_row.addWidget(self.name_input, 1)
-        self.add_row.addWidget(self.add_button)
-        layout.addLayout(self.add_row)
 
-        self.note = QLabel("刪除都市計畫不會刪除任何土地或地主，該計畫的土地會回到「未分類」。")
-        self.note.setWordWrap(True)
-        self.note.setStyleSheet(muted_text_style(12))
-        layout.addWidget(self.note)
+        self.note = find_child(content, "urbanPlanNote", QLabel)
 
-        buttons = QHBoxLayout()
-        self.rename_button = QPushButton("重新命名")
-        self.rename_button.setObjectName("urbanPlanRenameButton")
+        self.rename_button = find_child(content, "urbanPlanRenameButton", QPushButton)
         self.rename_button.clicked.connect(self.rename_selected)
-        self.delete_button = QPushButton("刪除")
-        self.delete_button.setObjectName("urbanPlanDeleteButton")
+        self.delete_button = find_child(content, "urbanPlanDeleteButton", QPushButton)
         self.delete_button.clicked.connect(self.delete_selected)
-        close_button = QPushButton("關閉")
-        close_button.clicked.connect(self.accept)
-        buttons.addWidget(self.rename_button)
-        buttons.addWidget(self.delete_button)
-        buttons.addStretch(1)
-        buttons.addWidget(close_button)
-        layout.addLayout(buttons)
+        find_child(content, "urbanPlanCloseButton", QPushButton).clicked.connect(self.accept)
 
         if not self.can_edit:
             for widget in (self.name_input, self.add_button):
@@ -232,24 +211,19 @@ class UrbanPlanManagementDialog(QDialog):
 class ImportPlanChoice(QWidget):
     """「這批資料屬於」: the plan an import (or batch add) files its lands under."""
 
+    # Layout: ui/main/import_plan_choice.ui; colours: ui/theme.qss.
+    ui_file = "main/import_plan_choice.ui"
+    ui_object_names = ("importPlanCombo", "importPlanNote")
+
     def __init__(self, plans, default_plan_id=0, parent=None):
         super().__init__(parent)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(QLabel("這批資料屬於："))
-        self.combo = QComboBox()
-        self.combo.setObjectName("importPlanCombo")
-        self.combo.setMinimumWidth(200)
-        self.combo.addItem("不指定（未分類）", UNASSIGNED_PLAN_ID)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.combo = find_child(content, "importPlanCombo", FluentComboBox)
+        self.combo.addItem("不指定（未分類）", userData=UNASSIGNED_PLAN_ID)
         for plan in plans:
-            self.combo.addItem(str(plan.get("name") or ""), _plan_id(plan))
+            self.combo.addItem(str(plan.get("name") or ""), userData=_plan_id(plan))
         index = self.combo.findData(int(default_plan_id or 0))
         self.combo.setCurrentIndex(max(0, index))
-        layout.addWidget(self.combo)
-        note = QLabel("已經屬於其他都市計畫的土地不會被改動，匯入後會列出清單。")
-        note.setStyleSheet(muted_text_style(12))
-        note.setWordWrap(True)
-        layout.addWidget(note, 1)
 
     def plan_id(self):
         return int(self.combo.currentData() or UNASSIGNED_PLAN_ID)
@@ -263,54 +237,52 @@ class ImportPlanResultSection(QWidget):
     land_number/urban_plan_name, possibly fewer than kept_land_count).
     """
 
+    # Layout: ui/main/import_plan_result_section.ui; the kept-lands part is
+    # hidden when every land was filed.  Colours: ui/theme.qss.
+    ui_file = "main/import_plan_result_section.ui"
+    ui_object_names = (
+        "importPlanHeader",
+        "importPlanKeptLabel",
+        "importPlanKeptTable",
+        "importPlanMoreLabel",
+        "importPlanExportButton",
+    )
+
     def __init__(self, summary, parent=None):
         super().__init__(parent)
         self.summary = dict(summary or {})
         self.kept_lands = [dict(item) for item in self.summary.get("kept_lands") or []]
         kept_count = int(self.summary.get("kept_land_count") or len(self.kept_lands))
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
         name = str(self.summary.get("name") or "")
         assigned = int(self.summary.get("assigned_land_count") or 0)
-        self.header_label = QLabel(f"都市計畫「{name}」：{assigned:,} 筆土地新歸入這個都市計畫。")
-        self.header_label.setObjectName("importPlanHeader")
-        self.header_label.setWordWrap(True)
-        layout.addWidget(self.header_label)
+        self.header_label = find_child(content, "importPlanHeader", QLabel)
+        self.header_label.setText(f"都市計畫「{name}」：{assigned:,} 筆土地新歸入這個都市計畫。")
+        self.kept_label = find_child(content, "importPlanKeptLabel", QLabel)
+        table = find_child(content, "importPlanKeptTable", QTableWidget)
+        more = find_child(content, "importPlanMoreLabel", QLabel)
+        export_button = find_child(content, "importPlanExportButton", QPushButton)
         self.table = None
         self.export_button = None
         if not kept_count:
+            for widget in (self.kept_label, table, more, export_button):
+                widget.hide()
             return
-        self.kept_label = QLabel(
+        self.kept_label.setText(
             f"另有 {kept_count:,} 筆土地原本已屬於其他都市計畫，沒有變更歸屬："
         )
-        self.kept_label.setObjectName("importPlanKeptLabel")
-        self.kept_label.setStyleSheet(f"color: {token('amber_ink')};")
-        self.kept_label.setWordWrap(True)
-        layout.addWidget(self.kept_label)
-        self.table = QTableWidget(len(self.kept_lands), 3)
-        self.table.setObjectName("importPlanKeptTable")
-        self.table.setHorizontalHeaderLabels(["地段", "地號", "目前所屬"])
-        self.table.verticalHeader().setVisible(False)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table = table
+        self.table.setRowCount(len(self.kept_lands))
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.table.setMinimumHeight(140)
         for row, land in enumerate(self.kept_lands):
             for column, text in enumerate(self._row_texts(land)):
                 self.table.setItem(row, column, QTableWidgetItem(text))
-        layout.addWidget(self.table, 1)
         if kept_count > len(self.kept_lands):
-            more = QLabel(f"…其餘 {kept_count - len(self.kept_lands):,} 筆未列出。")
-            more.setStyleSheet(muted_text_style(12))
-            layout.addWidget(more)
-        buttons = QHBoxLayout()
-        self.export_button = QPushButton("匯出這份清單")
-        self.export_button.setObjectName("importPlanExportButton")
+            more.setText(f"…其餘 {kept_count - len(self.kept_lands):,} 筆未列出。")
+        else:
+            more.hide()
+        self.export_button = export_button
         self.export_button.clicked.connect(self.export_kept_lands)
-        buttons.addWidget(self.export_button)
-        buttons.addStretch(1)
-        layout.addLayout(buttons)
 
     @staticmethod
     def _row_texts(land):
@@ -362,21 +334,23 @@ class ImportPlanResultSection(QWidget):
 class DeleteUrbanPlanDialog(QDialog):
     """「刪除確認」: says what will (and will not) happen before a plan is deleted."""
 
+    # Layout: ui/dialogs/delete_urban_plan_dialog.ui.
+    ui_file = "dialogs/delete_urban_plan_dialog.ui"
+    ui_object_names = (
+        "deleteUrbanPlanTitle",
+        "deleteUrbanPlanDetail",
+        "deleteUrbanPlanCancel",
+        "deleteUrbanPlanConfirm",
+    )
+
     def __init__(self, plan, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("刪除確認")
         self.setObjectName("deleteUrbanPlanDialog")
-        self.setMinimumWidth(420)
         name = str(plan.get("name") or "")
         lands = int(plan.get("land_count") or 0)
         owners = int(plan.get("owner_count") or 0)
-        layout = QVBoxLayout(self)
-        layout.setSpacing(10)
-        title = QLabel(f"確定要刪除「{name}」？")
-        title.setObjectName("deleteUrbanPlanTitle")
-        title.setStyleSheet("font-size: 16px; font-weight: 600;")
-        title.setWordWrap(True)
-        layout.addWidget(title)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        find_child(content, "deleteUrbanPlanTitle", QLabel).setText(f"確定要刪除「{name}」？")
         if lands:
             detail = (
                 f"這個都市計畫目前有 {lands:,} 筆土地、{owners:,} 位地主。\n"
@@ -384,27 +358,11 @@ class DeleteUrbanPlanDialog(QDialog):
             )
         else:
             detail = "這個都市計畫目前沒有任何土地，刪除不會影響其他資料。"
-        self.detail_label = QLabel(detail)
-        self.detail_label.setObjectName("deleteUrbanPlanDetail")
-        self.detail_label.setWordWrap(True)
-        layout.addWidget(self.detail_label)
-        buttons = QHBoxLayout()
-        buttons.addStretch(1)
-        cancel = QPushButton("取消")
-        cancel.setObjectName("deleteUrbanPlanCancel")
-        cancel.clicked.connect(self.reject)
-        self.confirm_button = QPushButton("刪除")
-        self.confirm_button.setObjectName("deleteUrbanPlanConfirm")
-        self.confirm_button.setStyleSheet(
-            f"QPushButton {{ background-color: {token('seal')}; border-color: {token('seal')};"
-            f" color: {token('seal_ink')}; }}"
-            f"QPushButton:hover {{ border-color: {token('ink')}; }}"
-        )
+        self.detail_label = find_child(content, "deleteUrbanPlanDetail", QLabel)
+        self.detail_label.setText(detail)
+        find_child(content, "deleteUrbanPlanCancel", QPushButton).clicked.connect(self.reject)
+        self.confirm_button = find_child(content, "deleteUrbanPlanConfirm", QPushButton)
         self.confirm_button.clicked.connect(self.accept)
-        cancel.setDefault(True)
-        buttons.addWidget(cancel)
-        buttons.addWidget(self.confirm_button)
-        layout.addLayout(buttons)
 
 
 class SetUrbanPlanDialog(QDialog):
@@ -415,59 +373,46 @@ class SetUrbanPlanDialog(QDialog):
     the user clears the safety checkbox.
     """
 
+    # Layout: ui/dialogs/set_urban_plan_dialog.ui.
+    ui_file = "dialogs/set_urban_plan_dialog.ui"
+    ui_object_names = (
+        "setUrbanPlanHeader",
+        "setUrbanPlanCombo",
+        "setUrbanPlanOnlyUnassigned",
+        "setUrbanPlanSummary",
+        "setUrbanPlanCancel",
+        "setUrbanPlanApply",
+    )
+
     def __init__(self, plans, land_plans, record_count, parent=None, *, default_plan_id=None):
         super().__init__(parent)
-        self.setWindowTitle("設定都市計畫")
         self.setObjectName("setUrbanPlanDialog")
-        self.setMinimumWidth(460)
         self.land_plans = {int(land): int(plan or 0) for land, plan in dict(land_plans).items()}
         self.plan_names = {_plan_id(plan): str(plan.get("name") or "") for plan in plans}
+        content = install_ui(self, self.ui_file, self.ui_object_names)
 
-        layout = QVBoxLayout(self)
-        layout.setSpacing(10)
-        self.header_label = QLabel(
+        self.header_label = find_child(content, "setUrbanPlanHeader", QLabel)
+        self.header_label.setText(
             f"已選取 {int(record_count):,} 筆資料，涵蓋 {len(self.land_plans):,} 筆土地。"
         )
-        self.header_label.setObjectName("setUrbanPlanHeader")
-        self.header_label.setWordWrap(True)
-        layout.addWidget(self.header_label)
-
-        layout.addWidget(QLabel("設定為："))
-        self.plan_combo = QComboBox()
-        self.plan_combo.setObjectName("setUrbanPlanCombo")
+        self.plan_combo = find_child(content, "setUrbanPlanCombo", FluentComboBox)
         for plan in plans:
-            self.plan_combo.addItem(str(plan.get("name") or ""), _plan_id(plan))
-        self.plan_combo.addItem("未分類（移出目前的都市計畫）", UNASSIGNED_PLAN_ID)
+            self.plan_combo.addItem(str(plan.get("name") or ""), userData=_plan_id(plan))
+        self.plan_combo.addItem("未分類（移出目前的都市計畫）", userData=UNASSIGNED_PLAN_ID)
         if default_plan_id:
             index = self.plan_combo.findData(int(default_plan_id))
             if index >= 0:
                 self.plan_combo.setCurrentIndex(index)
         self.plan_combo.currentIndexChanged.connect(self.update_summary)
-        layout.addWidget(self.plan_combo)
 
-        self.only_unassigned_check = QCheckBox("只設定目前「未分類」的土地（已屬於其他都市計畫的不變更）")
-        self.only_unassigned_check.setObjectName("setUrbanPlanOnlyUnassigned")
-        self.only_unassigned_check.setChecked(True)
+        self.only_unassigned_check = find_child(content, "setUrbanPlanOnlyUnassigned", QCheckBox)
         self.only_unassigned_check.toggled.connect(self.update_summary)
-        layout.addWidget(self.only_unassigned_check)
 
-        self.summary_label = QLabel()
-        self.summary_label.setObjectName("setUrbanPlanSummary")
-        self.summary_label.setWordWrap(True)
-        self.summary_label.setStyleSheet(muted_text_style(12))
-        layout.addWidget(self.summary_label)
+        self.summary_label = find_child(content, "setUrbanPlanSummary", QLabel)
 
-        buttons = QHBoxLayout()
-        buttons.addStretch(1)
-        cancel = QPushButton("取消")
-        cancel.clicked.connect(self.reject)
-        self.apply_button = QPushButton("套用")
-        self.apply_button.setObjectName("setUrbanPlanApply")
+        find_child(content, "setUrbanPlanCancel", QPushButton).clicked.connect(self.reject)
+        self.apply_button = find_child(content, "setUrbanPlanApply", QPushButton)
         self.apply_button.clicked.connect(self.accept)
-        self.apply_button.setDefault(True)
-        buttons.addWidget(cancel)
-        buttons.addWidget(self.apply_button)
-        layout.addLayout(buttons)
         self.update_summary()
 
     def plan_id(self):

@@ -9,7 +9,8 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QEventLoop, QTimer, Qt
+from PySide6.QtCore import QEventLoop, QPoint, QTimer, Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 import customer_import_controller as import_controller
@@ -418,6 +419,52 @@ class UrbanPlanWindowTests(unittest.TestCase):
         self.settle(window)
         self.assertEqual(window.urban_plan_form_value(), 0)
 
+    def test_mouse_click_on_an_owner_highlights_that_owner_not_a_row_above(self):
+        # v1.9.86 regression: clicking an owner low in a scrolled list centred
+        # it from inside the mouse-press handler, and Qt then selected the row
+        # that had moved under the cursor (about 5 rows away).
+        base = make_rows()[0]
+
+        def many_rows():
+            rows = []
+            for record_id in range(1, 81):
+                row = dict(base)
+                row.update(
+                    id=record_id, ownership_id=record_id, owner_id=record_id,
+                    land_id=100 + (record_id - 1) // 2,
+                    land_number=f"{100 + (record_id - 1) // 2}-0000",
+                    owner_name=f"地主{record_id}", name=f"地主{record_id}",
+                    registration_order=f"{record_id:04d}",
+                )
+                rows.append(row)
+            return rows
+
+        with patch(f"{__name__}.make_rows", many_rows):
+            _server, _repository, window = self.open_window()
+        self.show_plan_view(window)
+        window.resize(1300, 800)
+        window.show()
+        view = window.urban_plan_view
+        view.expandAll()
+        self.application.processEvents()
+        scroll = view.verticalScrollBar()
+        scroll.setValue(scroll.maximum() // 2)
+        self.application.processEvents()
+        for y in (20, view.viewport().height() // 2, view.viewport().height() - 30):
+            position = QPoint(200, y)
+            clicked = view.itemAt(position)
+            if clicked.node.kind != "owner":
+                position = QPoint(200, y + view.visualItemRect(clicked).height())
+                clicked = view.itemAt(position)
+            self.assertEqual(clicked.node.kind, "owner")
+            before = scroll.value()
+            QTest.mouseClick(view.viewport(), Qt.LeftButton, Qt.NoModifier, position)
+            self.settle(window)
+            self.assertIs(view.currentItem(), clicked)
+            self.assertEqual(view.selectedItems(), [clicked])
+            self.assertEqual(scroll.value(), before)
+            self.assertEqual(window.get_field_text("owner_name"), clicked.text(0))
+
     # -- checkboxes -------------------------------------------------------------------------------
 
     def test_checking_a_plan_checks_every_ownership_below_it_and_back(self):
@@ -473,6 +520,60 @@ class UrbanPlanWindowTests(unittest.TestCase):
         window.refresh_records_for_search()
         self.settle(window)
         self.assertEqual(len(self.titles(window)), 4)
+
+    @staticmethod
+    def expanded_keys_now(window):
+        view = window.urban_plan_view
+        return {key for key, item in view._items.items() if item.childCount() and item.isExpanded()}
+
+    @staticmethod
+    def expandable_keys(window):
+        view = window.urban_plan_view
+        return {key for key, item in view._items.items() if item.childCount()}
+
+    def test_saving_keeps_the_plan_tree_expansion(self):
+        server, _repository, window = self.open_window()
+        self.show_plan_view(window)
+        window.load_record(4)
+        self.settle(window)
+        before = self.expanded_keys_now(window)
+        self.assertLess(len(before), len(self.expandable_keys(window)))
+        window.set_field_text("note", "存檔不展開")
+        self.save(window, server)
+        self.assertEqual(self.expanded_keys_now(window), before)
+
+    def test_saving_during_a_search_does_not_expand_everything_again(self):
+        # v1.9.88 regression: every refresh after a save rebuilt the plan tree
+        # with expand_all whenever the search box had text, so lands the user
+        # had closed all popped open again.
+        server, _repository, window = self.open_window()
+        self.show_plan_view(window)
+        before_search = self.expanded_keys_now(window)
+        window.search_input.setText("中壢")
+        window.refresh_records_for_search()
+        self.settle(window)
+        self.assertEqual(self.expanded_keys_now(window), self.expandable_keys(window))
+        view = window.urban_plan_view
+        for item in view._items.values():
+            if item.childCount() and item.node.kind != "plan":
+                item.setExpanded(False)
+        window.load_record(4)
+        self.settle(window)
+        closed = self.expanded_keys_now(window)
+        self.assertLess(len(closed), len(self.expandable_keys(window)))
+        window.set_field_text("note", "搜尋中存檔")
+        self.save(window, server)
+        self.assertEqual(self.expanded_keys_now(window), closed)
+        window.search_input.setText("")
+        window.refresh_records_for_search()
+        self.settle(window)
+        # Back to the pre-search expansion, plus the path to the selected owner.
+        selected_path = set()
+        parent = window.urban_plan_view._record_items[4].parent()
+        while parent is not None:
+            selected_path.add(parent.node.key)
+            parent = parent.parent()
+        self.assertEqual(self.expanded_keys_now(window), before_search | selected_path)
 
     # -- saving --------------------------------------------------------------------------------------
 

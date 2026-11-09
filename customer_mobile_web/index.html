@@ -245,7 +245,7 @@
             <div><h2 id="owners-heading">地主搜尋</h2></div>
           </div>
           <form id="owner-search-form" class="search-panel search-row" role="search">
-            <label class="search-field" for="owner-query"><span class="sr-only">搜尋地主</span><input id="owner-query" type="search" placeholder="姓名、身分證或地址" maxlength="200" enterkeyhint="search"></label>
+            <label class="search-field" for="owner-query"><span class="sr-only">搜尋地主</span><input id="owner-query" name="owner_q" type="search" placeholder="姓&#8288;名、身分證或地&#8288;址" aria-label="姓名、身分證或地址" maxlength="200" enterkeyhint="search" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></label>
             <button type="submit">搜尋</button>
           </form>
           <div class="result-summary"><p id="owner-count" class="result-count" aria-live="polite"></p></div>
@@ -257,10 +257,10 @@
             <div><h2 id="lands-heading">土地搜尋</h2></div>
           </div>
           <form id="land-search-form" class="search-panel stack-form compact-form" role="search">
-            <label for="land-query">地號或地主姓名<input id="land-query" type="search" placeholder="例如：221-0000 或 王大明" maxlength="200"></label>
+            <label for="land-query">地號或地主姓名<input id="land-query" name="land_q" type="search" placeholder="例如：221-0000 或 王大明" aria-label="地號或地主姓名" maxlength="200" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></label>
             <div class="field-pair">
-              <label for="land-district">地區<input id="land-district" placeholder="例如：北屯區" maxlength="100"></label>
-              <label for="land-section">地段<input id="land-section" placeholder="例如：仁美段" maxlength="100"></label>
+              <label for="land-district">地區<input id="land-district" name="land_district_q" placeholder="例如：北屯區" aria-label="地區" maxlength="100" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></label>
+              <label for="land-section">地段<input id="land-section" name="land_section_q" placeholder="例如：仁美段" aria-label="地段" maxlength="100" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></label>
             </div>
             <button type="submit">搜尋土地</button>
           </form>
@@ -506,7 +506,7 @@
         </div>
         <form id="field-plan-search-form" class="field-plan-search">
           <label for="field-plan-query">搜尋地主或土地
-            <input id="field-plan-query" type="search" maxlength="200" enterkeyhint="search" placeholder="姓名、地區、地段、地號或地址">
+            <input id="field-plan-query" name="field_plan_q" type="search" maxlength="200" enterkeyhint="search" placeholder="姓&#8288;名、地區、地段、地號或地&#8288;址" aria-label="姓名、地區、地段、地號或地址" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
           </label>
           <button id="field-plan-search-button" type="submit">搜尋</button>
         </form>

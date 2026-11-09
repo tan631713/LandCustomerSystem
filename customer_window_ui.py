@@ -2,11 +2,12 @@
 
 from customer_table_ui import build_customer_table_ui
 from customer_owner_contacts import OwnerContactsWidget
+from customer_ui_loader import find_child, load_ui, put_in_slot, render_qss
 from customer_theme import (
     heading_font,
     line_icon,
-    set_button_variant,
     set_widget_property,
+    theme_tokens,
     token,
 )
 from customer_version import full_version_text
@@ -23,12 +24,12 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
-    QSizePolicy,
     QSplitter,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
+from qfluentwidgets import ComboBox as FluentComboBox
 
 MAIN_SPLITTER_SETTINGS_KEY = "desktop/main_splitter_sizes"
 LAND_LIST_MINIMUM_WIDTH = 540
@@ -43,24 +44,55 @@ SAVE_STATE_DIRTY_TEXT = "有未儲存的修改"
 SAVE_STATE_SAVED_TEXT = "已儲存"
 SAVE_STATE_CLEAR_MS = 3000
 FORM_COLUMN_COUNT = 6
-LAND_FORM_ROWS = (
-    (("urban_plan", 0, 6),),
-    (("district", 0, 3), ("section", 3, 3)),
-    (("subsection", 0, 3), ("land_number", 3, 3)),
-    (
-        ("registration_order", 0, 2),
-        ("numerator", 2, 2),
-        ("denominator", 4, 2),
-    ),
-    (("area", 0, 2), ("declared_value", 2, 2), ("ping", 4, 2)),
-    (("total_declared_value", 0, 6),),
-)
-OWNER_FORM_ROWS = (
-    (("owner_name", 0, 3), ("external_id", 3, 3)),
-    (("birth_year", 0, 3), ("age", 3, 3)),
-    (("address", 0, 6),),
-    (("registration_reason", 0, 3), ("visit_log", 3, 3)),
-    (("note", 0, 6),),
+# The main window's fixed layout -- toolbar, splitter, and the 基本資料 grid with
+# one fieldCell_<key> / fieldLabel_<key> / field_<key> trio per form field -- is
+# ui/main_window.ui (edit it in pyside6-designer).  Where each cell sits is read
+# back from that grid, so moving cells in Designer needs no code change.
+MAIN_WINDOW_UI_FILE = "main_window.ui"
+DETAIL_FORM_STYLESHEET_FILE = "detail_form.qss"
+MAIN_WINDOW_STATIC_OBJECT_NAMES = (
+    "appGround",
+    "toolbarFrame",
+    "searchGroup",
+    "searchFilterCombo",
+    "searchDivider",
+    "searchDivider_2",
+    "searchInput",
+    "searchButton",
+    "toolbarSortLabel",
+    "sortFieldCombo",
+    "sortOrderCombo",
+    "clearSearchButton",
+    "dataButton",
+    "toolsButton",
+    "settingsButton",
+    "newRecordButton",
+    "contentGround",
+    "mainSplitter",
+    "listFrame",
+    "listLayout",
+    "formFrame",
+    "formLayout",
+    "landHeaderSlot",
+    "detailTabs",
+    "basicPage",
+    "basicDataScrollArea",
+    "basicDataForm",
+    "basicDataFormLayout",
+    "landSectionHeaderRow",
+    "landSectionHeader",
+    "landSectionNote",
+    "ownerSectionHeaderRow",
+    "ownerSectionHeader",
+    "ownerSectionNote",
+    "autoCalculationBadge",
+    "autoCalculationBadge_age",
+    "managementSummaryHeader",
+    "managementSummaryLabel",
+    "deleteRecordButton",
+    "saveStateLabel",
+    "clearFormButton",
+    "saveRecordButton",
 )
 # birth_year/age deliberately live outside LAND_FIELDS (see
 # customer_repository.customer_data_columns): they only need to show up in
@@ -75,6 +107,95 @@ EXTRA_OWNER_FORM_FIELD_LABELS = {
     # server has no plans -- see UrbanPlanWorkflowMixin.
     "urban_plan": "都市計畫",
 }
+AUTO_CALCULATED_FORM_KEYS = ("total_declared_value", "age")
+
+
+def form_field_keys(land_fields):
+    """Every key that has a cell in the 基本資料 grid."""
+
+    return tuple(dict(land_fields)) + tuple(
+        key for key in EXTRA_OWNER_FORM_FIELD_LABELS if key not in dict(land_fields)
+    )
+
+
+def main_window_object_names(land_fields):
+    """The objectNames create_layout() needs to find in ui/main_window.ui."""
+
+    names = list(MAIN_WINDOW_STATIC_OBJECT_NAMES)
+    for key in form_field_keys(land_fields):
+        names.extend((f"fieldCell_{key}", f"fieldLabel_{key}", f"field_{key}"))
+    return names
+
+
+# Built-in copy of ui/detail_form.qss, used when that file is missing or broken.
+DETAIL_FORM_STYLESHEET = """
+QWidget#basicDataForm {
+    background-color: transparent;
+    border: none;
+}
+QWidget#basicDataForm QWidget[formField="true"] {
+    background-color: $field;
+    border: none;
+    border-right: 1px solid $rule;
+    border-bottom: 1px solid $rule;
+}
+QWidget#basicDataForm QWidget[formField="true"][firstRow="true"] {
+    border-top: 1px solid $rule_strong;
+}
+QWidget#basicDataForm QWidget[formField="true"][firstCol="true"] {
+    border-left: 1px solid $rule_strong;
+}
+QWidget#basicDataForm QWidget[formField="true"][lastCol="true"] {
+    border-right: 1px solid $rule_strong;
+}
+QWidget#basicDataForm QWidget[formField="true"][lastRow="true"] {
+    border-bottom: 1px solid $rule_strong;
+}
+QWidget#basicDataForm QWidget[formField="true"][autoCell="true"] {
+    background-color: $auto;
+}
+QWidget#basicDataForm QWidget[formField="true"][focused="true"] {
+    border: 2px solid $green;
+}
+QWidget#basicDataForm QLabel {
+    background-color: transparent;
+    border: none;
+    color: $ink2;
+}
+QWidget#basicDataForm QLabel#landSectionHeader,
+QWidget#basicDataForm QLabel#ownerSectionHeader {
+    color: $ink;
+}
+QWidget#basicDataForm QLabel#landSectionNote,
+QWidget#basicDataForm QLabel#ownerSectionNote,
+QWidget#basicDataForm QLabel#autoCalculationBadge,
+QWidget#basicDataForm QLabel#autoCalculationBadge_age {
+    font-size: 12px;
+}
+QWidget#basicDataForm QLineEdit,
+QWidget#basicDataForm QPlainTextEdit,
+QWidget#basicDataForm QComboBox {
+    background-color: transparent;
+    color: $ink;
+    border: none;
+    border-radius: 0px;
+    padding: 2px 0px 0px 0px;
+    min-height: 26px;
+}
+QWidget#basicDataForm QLineEdit:focus,
+QWidget#basicDataForm QPlainTextEdit:focus,
+QWidget#basicDataForm QComboBox:focus {
+    border: none;
+    padding: 2px 0px 0px 0px;
+}
+QWidget#basicDataForm QLineEdit:disabled,
+QWidget#basicDataForm QPlainTextEdit:disabled,
+QWidget#basicDataForm QComboBox:disabled,
+QWidget#basicDataForm QLineEdit[readOnly="true"] {
+    background-color: transparent;
+    color: $ink2;
+}
+"""
 
 
 class _FocusStateFilter(QObject):
@@ -94,133 +215,73 @@ class _FocusStateFilter(QObject):
 
 class DesktopWindowMixin:
     def create_layout(self):
-        central = QWidget()
-        central.setObjectName("appGround")
+        land_fields = getattr(self, "land_fields", ())
+        central = load_ui(
+            MAIN_WINDOW_UI_FILE,
+            required_names=main_window_object_names(land_fields),
+        )
+        self.main_window_ui = central
         self.setCentralWidget(central)
 
-        root = QVBoxLayout(central)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
+        def ui(name, cls=None):
+            return find_child(central, name, cls)
 
-        toolbar_frame = QFrame()
-        toolbar_frame.setObjectName("toolbarFrame")
-        toolbar = QHBoxLayout(toolbar_frame)
-        toolbar.setContentsMargins(16, 10, 16, 10)
-        toolbar.setSpacing(8)
-        root.addWidget(toolbar_frame)
-
-        search_group = QFrame()
-        search_group.setObjectName("searchGroup")
-        search_group.setMaximumWidth(600)
-        search_group.setFixedHeight(38)
+        search_group = ui("searchGroup", QFrame)
         self.search_group = search_group
-        group_layout = QHBoxLayout(search_group)
-        group_layout.setContentsMargins(0, 0, 0, 0)
-        group_layout.setSpacing(0)
 
-        self.filter_field_combo = QComboBox()
-        self.filter_field_combo.setObjectName("searchFilterCombo")
+        self.filter_field_combo = ui("searchFilterCombo", FluentComboBox)
         for key, label in self.filterable_fields:
-            self.filter_field_combo.addItem(label, key)
+            self.filter_field_combo.addItem(label, userData=key)
         self.filter_field_combo.setCurrentIndex(0)
         self.filter_field_combo.currentIndexChanged.connect(
             lambda _index: self.refresh_records_for_search()
         )
-        group_layout.addWidget(self.filter_field_combo)
-        group_layout.addWidget(self._search_divider())
-
-        self.search_input = QLineEdit()
-        self.search_input.setObjectName("searchInput")
-        self.search_input.setPlaceholderText("地號、姓名、地址或電話")
+        self.search_input = ui("searchInput", QLineEdit)
         self.search_input.returnPressed.connect(self.refresh_records_for_search)
-        self.search_input.setMinimumWidth(120)
         self.search_input.installEventFilter(_FocusStateFilter(search_group, search_group))
-        group_layout.addWidget(self.search_input, 1)
-        group_layout.addWidget(self._search_divider())
 
-        search_button = QPushButton("搜尋")
-        search_button.setObjectName("searchButton")
+        search_button = ui("searchButton", QPushButton)
         search_button.setIcon(line_icon("search", "ink2", 16))
         search_button.clicked.connect(
             lambda _checked=False: self.refresh_records_for_search()
         )
-        group_layout.addWidget(search_button)
-        toolbar.addWidget(search_group, 100)
 
-        sort_label = QLabel("排序")
-        sort_label.setObjectName("toolbarSortLabel")
-        sort_label.setStyleSheet(f"color: {token('ink2')};")
-        toolbar.addWidget(sort_label)
-        self.sort_field_combo = QComboBox()
+        self.sort_field_combo = ui("sortFieldCombo", FluentComboBox)
         for key, label in self.sortable_fields:
-            self.sort_field_combo.addItem(label, key)
+            self.sort_field_combo.addItem(label, userData=key)
         self.sort_field_combo.currentIndexChanged.connect(lambda _index: self.refresh_records())
-        toolbar.addWidget(self.sort_field_combo)
 
-        self.sort_order_combo = QComboBox()
-        self.sort_order_combo.addItem("新到舊", "desc")
-        self.sort_order_combo.addItem("舊到新", "asc")
+        self.sort_order_combo = ui("sortOrderCombo", FluentComboBox)
+        self.sort_order_combo.addItem("新到舊", userData="desc")
+        self.sort_order_combo.addItem("舊到新", userData="asc")
         self.sort_order_combo.currentIndexChanged.connect(lambda _index: self.refresh_records())
-        toolbar.addWidget(self.sort_order_combo)
 
-        clear_button = QPushButton("清除")
-        set_button_variant(clear_button, "ghost")
+        clear_button = ui("clearSearchButton", QPushButton)
         clear_button.clicked.connect(self.clear_search)
-        toolbar.addWidget(clear_button)
 
-        toolbar.addStretch(1)
-
-        self.data_button = QPushButton("資料")
+        self.data_button = ui("dataButton", QPushButton)
         self.data_button.clicked.connect(self.show_data_menu)
-        self.tools_button = QPushButton("工具")
+        self.tools_button = ui("toolsButton", QPushButton)
         self.tools_button.clicked.connect(self.show_tools_menu)
-        self.settings_button = QPushButton("設定")
+        self.settings_button = ui("settingsButton", QPushButton)
         self.settings_button.clicked.connect(self.show_settings_menu)
         for button in (self.data_button, self.tools_button, self.settings_button):
-            set_button_variant(button, "ghost")
-            button.setLayoutDirection(Qt.RightToLeft)
             button.setIcon(line_icon("chevron", "ink2", 14))
-            toolbar.addWidget(button)
 
-        new_button = QPushButton("新增資料")
-        new_button.setObjectName("newRecordButton")
-        set_button_variant(new_button, "primary")
+        new_button = ui("newRecordButton", QPushButton)
         new_button.setIcon(line_icon("plus", "green_ink", 16))
         new_button.clicked.connect(self.new_record)
-        toolbar.addWidget(new_button)
         self.new_record_button = new_button
 
-        content = QWidget()
-        content.setObjectName("appGround")
-        content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(16, 12, 16, 12)
-        content_layout.setSpacing(8)
-        root.addWidget(content, 1)
+        # The theme paints QWidget#appGround; Designer needs unique names, so
+        # the content area is called contentGround in the .ui file.
+        ui("contentGround", QWidget).setObjectName("appGround")
 
-        self.main_splitter = QSplitter(Qt.Horizontal)
-        self.main_splitter.setChildrenCollapsible(False)
-        self.main_splitter.setHandleWidth(8)
-        content_layout.addWidget(self.main_splitter, 1)
-
-        self.list_frame = QFrame()
-        self.list_frame.setObjectName("listFrame")
-        self.list_frame.setMinimumWidth(LAND_LIST_MINIMUM_WIDTH)
-        self.list_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        list_layout = QVBoxLayout(self.list_frame)
-        list_layout.setContentsMargins(0, 0, 0, 0)
-        list_layout.setSpacing(0)
-        self.main_splitter.addWidget(self.list_frame)
-
-        self.form_frame = QFrame()
-        self.form_frame.setObjectName("formFrame")
-        self.form_frame.setMinimumWidth(DETAIL_PANEL_MINIMUM_WIDTH)
-        self.form_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        form_layout = QVBoxLayout(self.form_frame)
-        form_layout.setContentsMargins(18, 14, 18, 14)
-        form_layout.setSpacing(10)
-        self.main_splitter.addWidget(self.form_frame)
-        self.main_splitter.setStretchFactor(0, 3)
-        self.main_splitter.setStretchFactor(1, 2)
+        self.main_splitter = ui("mainSplitter", QSplitter)
+        self.list_frame = ui("listFrame", QFrame)
+        list_layout = ui("listLayout", QVBoxLayout)
+        self.form_frame = ui("formFrame", QFrame)
+        form_layout = ui("formLayout", QVBoxLayout)
         self.main_splitter.setSizes(list(DEFAULT_SPLITTER_SIZES))
 
         self.layout_settings = getattr(self, "layout_settings", None) or QSettings(
@@ -237,16 +298,52 @@ class DesktopWindowMixin:
 
         self.create_table(list_layout)
         self.create_land_header(form_layout)
+        self._put_in_slot(form_layout, ui("landHeaderSlot", QWidget), self.land_header)
         self.create_form(form_layout)
+        self._restore_main_tab_order()
         QTimer.singleShot(0, self.restore_main_splitter_sizes)
 
     @staticmethod
-    def _search_divider():
-        divider = QFrame()
-        divider.setObjectName("searchDivider")
-        divider.setFixedWidth(1)
-        divider.setStyleSheet(f"background-color: {token('rule')}; border: none;")
-        return divider
+    def _put_in_slot(layout, slot, widget):
+        """Move ``widget`` (already added to ``layout``) to where ``slot`` sits."""
+
+        layout.removeWidget(widget)
+        put_in_slot(slot, widget)
+
+    def _restore_main_tab_order(self):
+        """Tab moves toolbar -> list -> land header -> detail tabs, as before.
+
+        Widgets built in code after the .ui file was loaded join the end of the
+        focus chain; chain each area's widgets back after the toolbar.
+        """
+
+        blocks = [
+            block
+            for block in (
+                self.list_frame,
+                getattr(self, "land_header", None),
+                getattr(self, "detail_tabs", None),
+            )
+            if block is not None
+        ]
+        ordered = {id(block): [] for block in blocks}
+        current = self.nextInFocusChain()
+        guard = 0
+        while current is not self and guard < 10000:
+            guard += 1
+            # setTabOrder() ignores NoFocus widgets, so only chain focusable ones.
+            for block in blocks:
+                if current.focusPolicy() != Qt.NoFocus and (
+                    current is block or block.isAncestorOf(current)
+                ):
+                    ordered[id(block)].append(current)
+                    break
+            current = current.nextInFocusChain()
+        previous = self.new_record_button
+        for block in blocks:
+            for widget in ordered[id(block)]:
+                QWidget.setTabOrder(previous, widget)
+                previous = widget
 
     @staticmethod
     def _valid_splitter_sizes(value):
@@ -331,117 +428,24 @@ class DesktopWindowMixin:
 
 
     def create_form(self, parent_layout):
-        self.detail_tabs = QTabWidget()
-        self.detail_tabs.setMinimumWidth(0)
-        self.detail_tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        basic_page = QWidget()
-        basic_page.setMinimumWidth(0)
-        basic_page.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        basic_layout = QVBoxLayout(basic_page)
-        basic_layout.setContentsMargins(0, 0, 0, 0)
-        basic_layout.setSpacing(12)
+        central = self.main_window_ui
 
-        self.basic_data_scroll_area = QScrollArea(basic_page)
-        self.basic_data_scroll_area.setObjectName("basicDataScrollArea")
-        self.basic_data_scroll_area.setWidgetResizable(True)
-        self.basic_data_scroll_area.setFrameShape(QFrame.NoFrame)
-        self.basic_data_scroll_area.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarAlwaysOff
-        )
-        self.basic_data_scroll_area.setVerticalScrollBarPolicy(
-            Qt.ScrollBarAsNeeded
-        )
-        self.basic_data_scroll_area.setStyleSheet(
-            "QScrollArea#basicDataScrollArea { background: transparent; border: none; }"
-            "QScrollArea#basicDataScrollArea > QWidget > QWidget { background: transparent; }"
-        )
+        def ui(name, cls=None):
+            return find_child(central, name, cls)
 
-        self.management_summary_header = self._section_title_label(
-            "管理摘要", "managementSummaryHeader"
-        )
-        self.management_summary_label = QLabel("尚未選取資料")
-        self.management_summary_label.setObjectName("managementSummaryLabel")
-        self.management_summary_label.setWordWrap(True)
-        self.management_summary_label.setSizePolicy(
-            QSizePolicy.Ignored,
-            QSizePolicy.Preferred,
-        )
-        self.management_summary_label.setStyleSheet(
-            f"background-color: {token('ground')}; color: {token('ink')}; border: none; "
-            "border-radius: 6px; padding: 10px 14px; font-size: 13px;"
-        )
-        self.management_summary_label.setToolTip(
-            "顯示案件、標籤、附件、自訂欄位、最近聯絡與追蹤狀態。"
-        )
-        form_widget = QWidget()
-        form_widget.setObjectName("basicDataForm")
+        self.detail_tabs = ui("detailTabs", QTabWidget)
+        self.basic_data_scroll_area = ui("basicDataScrollArea", QScrollArea)
+        self.management_summary_header = ui("managementSummaryHeader", QLabel)
+        self._style_section_title(self.management_summary_header)
+        self.management_summary_label = ui("managementSummaryLabel", QLabel)
+        form_widget = ui("basicDataForm", QWidget)
         form_widget.setAttribute(Qt.WA_StyledBackground, True)
-        form_widget.setMinimumWidth(0)
-        form_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         form_widget.setStyleSheet(
-            f"""
-            QWidget#basicDataForm {{
-                background-color: transparent;
-                border: none;
-            }}
-            QWidget#basicDataForm QWidget[formField="true"] {{
-                background-color: {token('field')};
-                border: none;
-                border-right: 1px solid {token('rule')};
-                border-bottom: 1px solid {token('rule')};
-            }}
-            QWidget#basicDataForm QWidget[formField="true"][firstRow="true"] {{
-                border-top: 1px solid {token('rule_strong')};
-            }}
-            QWidget#basicDataForm QWidget[formField="true"][firstCol="true"] {{
-                border-left: 1px solid {token('rule_strong')};
-            }}
-            QWidget#basicDataForm QWidget[formField="true"][lastCol="true"] {{
-                border-right: 1px solid {token('rule_strong')};
-            }}
-            QWidget#basicDataForm QWidget[formField="true"][lastRow="true"] {{
-                border-bottom: 1px solid {token('rule_strong')};
-            }}
-            QWidget#basicDataForm QWidget[formField="true"][autoCell="true"] {{
-                background-color: {token('auto')};
-            }}
-            QWidget#basicDataForm QWidget[formField="true"][focused="true"] {{
-                border: 2px solid {token('green')};
-            }}
-            QWidget#basicDataForm QLabel {{
-                background-color: transparent;
-                border: none;
-            }}
-            QWidget#basicDataForm QLineEdit,
-            QWidget#basicDataForm QPlainTextEdit,
-            QWidget#basicDataForm QComboBox {{
-                background-color: transparent;
-                color: {token('ink')};
-                border: none;
-                border-radius: 0px;
-                padding: 2px 0px 0px 0px;
-                min-height: 26px;
-            }}
-            QWidget#basicDataForm QLineEdit:focus,
-            QWidget#basicDataForm QPlainTextEdit:focus,
-            QWidget#basicDataForm QComboBox:focus {{
-                border: none;
-                padding: 2px 0px 0px 0px;
-            }}
-            QWidget#basicDataForm QLineEdit:disabled,
-            QWidget#basicDataForm QPlainTextEdit:disabled,
-            QWidget#basicDataForm QComboBox:disabled,
-            QWidget#basicDataForm QLineEdit[readOnly="true"] {{
-                background-color: transparent;
-                color: {token('ink2')};
-            }}
-            """
+            render_qss(
+                DETAIL_FORM_STYLESHEET_FILE, DETAIL_FORM_STYLESHEET, theme_tokens()
+            )
         )
-        form_layout = QGridLayout(form_widget)
-        form_layout.setSizeConstraint(QLayout.SetMinimumSize)
-        form_layout.setContentsMargins(0, 0, 0, 0)
-        form_layout.setHorizontalSpacing(0)
-        form_layout.setVerticalSpacing(0)
+        form_layout = ui("basicDataFormLayout", QGridLayout)
         self.basic_data_form_layout = form_layout
         self.form_field_containers = {}
         self.form_cell_positions = {}
@@ -449,80 +453,39 @@ class DesktopWindowMixin:
         field_labels = dict(self.land_fields)
         field_labels.update(EXTRA_OWNER_FORM_FIELD_LABELS)
 
-        def build_field_container(key):
-            label = field_labels.get(key, key)
-            container = QWidget(form_widget)
-            container.setObjectName(f"fieldCell_{key}")
+        def setup_field(key):
+            container = ui(f"fieldCell_{key}", QWidget)
             container.setAttribute(Qt.WA_StyledBackground, True)
-            container.setProperty("formField", True)
-            container.setProperty("autoCell", key in ("total_declared_value", "age"))
-            container.setMinimumWidth(0)
-            container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-            cell_layout = QVBoxLayout(container)
-            # QSS padding does not move a plain QWidget's layout, so the
-            # cell's inner padding is set here (the focus frame changes only
-            # the painted border, never the content position).
-            cell_layout.setContentsMargins(10, 7, 10, 6)
-            cell_layout.setSpacing(2)
-
-            label_row = QHBoxLayout()
-            label_row.setContentsMargins(0, 0, 0, 0)
-            label_row.setSpacing(8)
-            label_widget = QLabel(label)
-            label_widget.setObjectName(f"fieldLabel_{key}")
-            # Point size is set in apply_form_field_fonts() so it follows the
-            # font-size setting.
-            label_widget.setStyleSheet(f"color: {token('ink2')};")
-            label_widget.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
-            label_row.addWidget(label_widget)
-            label_row.addStretch(1)
-
-            if key in ("total_declared_value", "age"):
-                auto_badge = QLabel("自動計算")
-                auto_badge.setObjectName("autoCalculationBadge")
-                auto_badge.setStyleSheet(
-                    f"color: {token('ink2')}; font-size: 12px;"
+            label_widget = ui(f"fieldLabel_{key}", QLabel)
+            label_widget.setText(field_labels.get(key, key))
+            # Colour: ui/detail_form.qss.  Point size is set in
+            # apply_form_field_fonts() so it follows the font-size setting.
+            if key in AUTO_CALCULATED_FORM_KEYS:
+                badge_name = (
+                    "autoCalculationBadge"
+                    if key == "total_declared_value"
+                    else f"autoCalculationBadge_{key}"
                 )
-                label_row.addWidget(auto_badge)
+                auto_badge = ui(badge_name, QLabel)
                 if key == "total_declared_value":
                     self.auto_calculation_badge = auto_badge
-            cell_layout.addLayout(label_row)
 
             if key == "urban_plan":
-                widget = QComboBox()
-                widget.setObjectName("urbanPlanFormCombo")
-                widget.setMinimumWidth(0)
-                widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-                widget.setToolTip("這塊土地屬於哪個都市計畫；同一塊土地的所有地主資料會一起更動。")
+                widget = ui(f"field_{key}", FluentComboBox)
                 widget.activated.connect(lambda _index: self.mark_form_dirty())
                 self.urban_plan_form_combo = widget
             elif key == "note":
-                widget = QPlainTextEdit()
-                widget.setPlaceholderText("尚未填寫")
-                widget.setMinimumWidth(0)
-                widget.setFixedHeight(92)
-                widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                widget = ui(f"field_{key}", QPlainTextEdit)
                 widget.textChanged.connect(self._on_form_text_changed)
                 self.fields[key] = widget
             elif key == "age":
                 # Purely a live display of birth_year -> age: never part of
                 # self.fields, so it never gets read by get_form_data() or
                 # written to the database. See update_age_field().
-                widget = QLineEdit()
-                widget.setMinimumWidth(0)
-                widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-                widget.setReadOnly(True)
-                widget.setPlaceholderText("由出生西元年計算")
+                widget = ui(f"field_{key}", QLineEdit)
                 self.age_display_widget = widget
             else:
-                widget = QLineEdit()
-                widget.setMinimumWidth(0)
-                widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-                if key == "total_declared_value":
-                    widget.setReadOnly(True)
-                if key == "birth_year":
-                    widget.setPlaceholderText("例如 1965")
-                    widget.setMaxLength(4)
+                widget = ui(f"field_{key}", QLineEdit)
                 widget.textEdited.connect(self._on_form_text_edited)
                 self.fields[key] = widget
                 self.field_widgets[key] = widget
@@ -534,116 +497,89 @@ class DesktopWindowMixin:
                 if key == "birth_year":
                     widget.textChanged.connect(self.update_age_field)
             widget.installEventFilter(_FocusStateFilter(container, container))
-            cell_layout.addWidget(widget)
             self.form_field_containers[key] = container
-            return container
 
-        def add_section_header(row, section_key, note_text, *, spacer_before=False):
-            if spacer_before:
-                form_layout.setRowMinimumHeight(row, 18)
-                row += 1
-            header = QWidget(form_widget)
-            header.setObjectName(f"{section_key}SectionHeaderRow")
-            header_layout = QHBoxLayout(header)
-            header_layout.setContentsMargins(0, 0, 0, 6)
-            header_layout.setSpacing(10)
-            section_label = self._section_title_label(
-                LAND_SECTION_HEADERS[section_key], f"{section_key}SectionHeader"
-            )
-            header_layout.addWidget(section_label)
-            note_label = QLabel(note_text)
-            note_label.setObjectName(f"{section_key}SectionNote")
-            note_label.setStyleSheet(f"color: {token('ink2')}; font-size: 12px;")
-            note_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-            header_layout.addWidget(note_label, 1)
+        for section_key in LAND_SECTION_HEADERS:
+            self._style_section_title(ui(f"{section_key}SectionHeader", QLabel))
+            note_label = ui(f"{section_key}SectionNote", QLabel)
             setattr(self, f"{section_key}_section_note_label", note_label)
-            form_layout.addWidget(header, row, 0, 1, FORM_COLUMN_COUNT)
-            return row + 1
 
-        def add_field_rows(row, rows, section_key):
-            for row_fields in rows:
-                for key, column, column_span in row_fields:
-                    if key not in field_labels:
-                        continue
-                    form_layout.addWidget(
-                        build_field_container(key),
-                        row,
-                        column,
-                        1,
-                        column_span,
-                    )
-                    self.form_cell_positions[key] = (section_key, column, column_span)
-                row += 1
-            return row
+        # Row by row, as the cells sit in the grid, so self.fields keeps the
+        # on-screen order.
+        for key, section_key, _row, column, column_span in self._form_grid_cells(
+            central, form_field_keys(self.land_fields)
+        ):
+            setup_field(key)
+            self.form_cell_positions[key] = (section_key, column, column_span)
 
-        row = add_section_header(0, "land", "同一筆土地的所有地主一起更動")
-        row = add_field_rows(row, LAND_FORM_ROWS, "land")
-        row = add_section_header(
-            row, "owner", "新增一位地主／一筆持分", spacer_before=True
-        )
-        add_field_rows(row, OWNER_FORM_ROWS, "owner")
-
-        for column in range(FORM_COLUMN_COUNT):
-            form_layout.setColumnStretch(column, 1)
-        self.basic_data_scroll_area.setWidget(form_widget)
-        basic_layout.addWidget(self.basic_data_scroll_area, 1)
-        basic_layout.addWidget(self.management_summary_header)
-        basic_layout.addWidget(self.management_summary_label)
         self.bind_total_formula()
         self.refresh_form_cell_borders()
         self.apply_form_field_fonts()
 
-        button_row = QHBoxLayout()
-        button_row.setSpacing(8)
-        delete_button = QPushButton("刪除")
-        delete_button.setObjectName("deleteRecordButton")
-        set_button_variant(delete_button, "danger-text")
+        delete_button = ui("deleteRecordButton", QPushButton)
         delete_button.setIcon(line_icon("trash", "seal", 16))
         delete_button.clicked.connect(self.delete_record)
-        button_row.addWidget(delete_button)
-        button_row.addStretch(1)
 
-        self.save_state_label = QLabel("")
-        self.save_state_label.setObjectName("saveStateLabel")
-        self.save_state_label.setStyleSheet(
-            f"color: {token('ink2')}; font-size: 13px;"
-        )
-        button_row.addWidget(self.save_state_label)
+        self.save_state_label = ui("saveStateLabel", QLabel)
 
-        clear_button = QPushButton("清空")
-        clear_button.clicked.connect(self.new_record)
-        button_row.addWidget(clear_button)
+        ui("clearFormButton", QPushButton).clicked.connect(self.new_record)
+        ui("saveRecordButton", QPushButton).clicked.connect(self.save_record)
 
-        save_button = QPushButton("儲存")
-        save_button.setObjectName("saveRecordButton")
-        set_button_variant(save_button, "primary")
-        save_button.setMinimumWidth(88)
-        save_button.clicked.connect(self.save_record)
-        button_row.addWidget(save_button)
-
-        basic_layout.addLayout(button_row)
-
-        self.detail_tabs.addTab(basic_page, "基本資料")
         self.owner_contacts_widget = OwnerContactsWidget(
             self.active_record_repository,
             current_role=self.current_user.get("role", "viewer"),
             parent=self.detail_tabs,
         )
         self.detail_tabs.addTab(self.owner_contacts_widget, "關係人")
-        parent_layout.addWidget(self.detail_tabs, 1)
         self.refresh_land_header()
 
     # -- form helpers -------------------------------------------------------------
 
+    def _form_grid_cells(self, root=None, keys=None):
+        """(key, section, row, column, column span) for each cell, in grid order.
+
+        The section is "owner" for cells below the 土地所有權部 header row and
+        "land" otherwise.
+        """
+
+        layout = self.basic_data_form_layout
+        root = root or self.main_window_ui
+        if keys is None:
+            containers = self.form_field_containers
+        else:
+            containers = {
+                key: find_child(root, f"fieldCell_{key}", QWidget) for key in keys
+            }
+        owner_header = root.findChild(QWidget, "ownerSectionHeaderRow")
+        owner_index = layout.indexOf(owner_header) if owner_header is not None else -1
+        owner_row = layout.getItemPosition(owner_index)[0] if owner_index >= 0 else None
+        cells = []
+        for key, container in containers.items():
+            index = layout.indexOf(container)
+            if index < 0:
+                continue
+            row, column, _row_span, column_span = layout.getItemPosition(index)
+            section_key = (
+                "owner" if owner_row is not None and row > owner_row else "land"
+            )
+            cells.append((key, section_key, row, column, column_span))
+        cells.sort(key=lambda cell: (cell[2], cell[3]))
+        return cells
+
     @staticmethod
-    def _section_title_label(text, object_name):
-        label = QLabel(text)
-        label.setObjectName(object_name)
+    def _style_section_title(label):
+        # Colour: ui/theme.qss / ui/detail_form.qss; the heading font stays
+        # here because QSS cannot set its letter spacing.
         font = heading_font(13)
         font.setLetterSpacing(QFont.PercentageSpacing, 108)
         label.setFont(font)
-        label.setStyleSheet(f"color: {token('ink')};")
         return label
+
+    @classmethod
+    def _section_title_label(cls, text, object_name):
+        label = QLabel(text)
+        label.setObjectName(object_name)
+        return cls._style_section_title(label)
 
     def apply_form_field_fonts(self):
         """Grid inputs are one point above the base font, their labels one below."""
@@ -652,7 +588,7 @@ class DesktopWindowMixin:
         if base <= 0:
             return
         for key, container in getattr(self, "form_field_containers", {}).items():
-            for widget_type in (QLineEdit, QPlainTextEdit, QComboBox):
+            for widget_type in (QLineEdit, QPlainTextEdit, QComboBox, FluentComboBox):
                 for widget in container.findChildren(widget_type):
                     font = QFont(widget.font())
                     font.setPointSize(base + 1)
@@ -667,29 +603,30 @@ class DesktopWindowMixin:
         """Mark the outer cells of each section so QSS can draw the 謄本 frame."""
 
         containers = getattr(self, "form_field_containers", {})
-        for section_key, rows in (("land", LAND_FORM_ROWS), ("owner", OWNER_FORM_ROWS)):
-            visible_rows = [
-                index
-                for index, row_fields in enumerate(rows)
-                if any(
-                    key in containers and not containers[key].isHidden()
-                    for key, _column, _span in row_fields
-                )
-            ]
+        if not containers:
+            return
+        cells = self._form_grid_cells()
+        column_count = self.basic_data_form_layout.columnCount() or FORM_COLUMN_COUNT
+        for section_key in LAND_SECTION_HEADERS:
+            section_cells = [cell for cell in cells if cell[1] == section_key]
+            visible_rows = sorted(
+                {
+                    row
+                    for key, _section, row, _column, _span in section_cells
+                    if not containers[key].isHidden()
+                }
+            )
             if not visible_rows:
                 continue
             first_row, last_row = visible_rows[0], visible_rows[-1]
-            for index, row_fields in enumerate(rows):
-                for key, column, span in row_fields:
-                    container = containers.get(key)
-                    if container is None:
-                        continue
-                    set_widget_property(container, "firstRow", index == first_row)
-                    set_widget_property(container, "lastRow", index == last_row)
-                    set_widget_property(container, "firstCol", column == 0)
-                    set_widget_property(
-                        container, "lastCol", column + span >= FORM_COLUMN_COUNT
-                    )
+            for key, _section, row, column, span in section_cells:
+                container = containers[key]
+                set_widget_property(container, "firstRow", row == first_row)
+                set_widget_property(container, "lastRow", row == last_row)
+                set_widget_property(container, "firstCol", column == 0)
+                set_widget_property(
+                    container, "lastCol", column + span >= column_count
+                )
 
     # -- save state ---------------------------------------------------------------
 

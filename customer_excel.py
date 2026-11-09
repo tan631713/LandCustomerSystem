@@ -21,6 +21,17 @@ HEADER_MAP = {
     "身分證": "external_id", "身份證": "external_id", "地址": "address",
     "登記原因": "registration_reason", "原因": "registration_reason",
     "備註": "note", "出訪記錄": "visit_log",
+    # The system's own export puts the record id first; reading it back lets a
+    # corrected export update exactly the row it came from.
+    "系統ID": "record_id",
+}
+
+# Columns of the system's own export whose names merely contain a field name
+# ("完整地號" contains "地號", "持分筆數" contains "持分", ...). Matching them by
+# substring used to read the wrong column -- 完整地號 came first, so every
+# re-imported row got "桃園區 一段 100" as its 地號 and matched nothing.
+IGNORED_EXPORT_HEADERS = {
+    "完整地號", "地主數", "持分筆數", "權利範圍面積", "備註摘要", "狀態摘要",
 }
 
 HEADER_CONTAINS_MAP = [
@@ -69,6 +80,8 @@ def map_header(value):
         return None
     if header in HEADER_MAP:
         return HEADER_MAP[header]
+    if header in IGNORED_EXPORT_HEADERS:
+        return None
     folded = header.casefold()
     if folded == "id":
         return "external_id"
@@ -142,6 +155,9 @@ class ExcelService:
 
     def validate_import_record(self, data):
         errors = []
+        record_id = str(data.get("record_id") or "").strip()
+        if record_id and not (record_id.isdigit() and int(record_id) > 0):
+            errors.append("系統ID 不是有效編號")
         for key, label in NUMERIC_IMPORT_FIELDS.items():
             text = str(data.get(key) or "").strip()
             if text and self.parse_number(text) is None:
@@ -165,13 +181,17 @@ class ExcelService:
 
     def prepare_import_records(self, sheet, header_row, column_map, merged_values):
         records, error_rows, last_values = [], [], {}
+        # A sheet carrying 系統ID is a (corrected) export: one complete row per
+        # record, so a blank cell means blank -- filling it down from the row
+        # above would hand one owner the previous owner's 身分證 or 地址.
+        forward_fill = "record_id" not in column_map.values()
         for row_number in range(header_row + 1, sheet.max_row + 1):
             data = {key: None for key, _label in self.land_fields}
             for column, key in column_map.items():
                 data[key] = cell_to_text(read_cell_value(sheet, row_number, column, merged_values))
             if not any(data.values()):
                 continue
-            for key in FORWARD_FILL_FIELDS:
+            for key in FORWARD_FILL_FIELDS if forward_fill else ():
                 if data.get(key):
                     last_values[key] = data[key]
                 elif key in last_values:

@@ -29,6 +29,8 @@ from PySide6.QtGui import (
     QPolygonF,
 )
 
+from customer_ui_loader import render_qss
+
 LOGGER = logging.getLogger(__name__)
 
 THEME_SETTING_KEY = "ui_theme"
@@ -43,6 +45,7 @@ LIGHT = {
     "ink2": "#56625C",        # 次要文字、欄位標籤（在 paper 上對比約 6:1）
     "rule": "#D3DBD5",        # 細格線
     "rule_strong": "#A7B5AB", # 表單外框、表頭底線、按鈕框
+    "row_rule": "#E5EAE6",    # 清單／樹狀列之間的分隔線（淡，和 Fluent 表格一致）
     "green": "#2F6B4F",       # 主色：主要按鈕、焦點框、選取
     "green_ink": "#FFFFFF",   # 綠底上的字
     "green_tint": "#DFECE3",  # 選單 hover、土地列被選到時
@@ -65,7 +68,7 @@ LIGHT = {
 }
 DARK = {
     "ground": "#141917", "paper": "#1C2220", "field": "#232A27",
-    "ink": "#E5ECE7", "ink2": "#A3B0A9", "rule": "#323C37", "rule_strong": "#4D5A53",
+    "ink": "#E5ECE7", "ink2": "#A3B0A9", "rule": "#323C37", "rule_strong": "#4D5A53", "row_rule": "#29312D",
     "green": "#6DBE93", "green_ink": "#0F1A14", "green_tint": "#20352A", "sel": "#24402F",
     "checked": "#1F3044", "checked_ink": "#A9C9EA", "watch": "#432520", "overdue": "#3E3218",
     "note": "#2F2E24", "mark": "#7A6420", "seal": "#EE8F82", "seal_ink": "#1C2221", "amber_ink": "#E8C47A",
@@ -364,6 +367,9 @@ def line_icon(kind, color_name="ink2", size=16):
 
 # -- application stylesheet -----------------------------------------------------
 
+# The stylesheet itself lives in ui/theme.qss (editable without touching code);
+# this copy is the built-in fallback used when that file is missing or broken.
+APP_STYLESHEET_FILE = "theme.qss"
 _STYLESHEET = Template(
     """
 QWidget {
@@ -396,30 +402,6 @@ QFrame#searchGroup {
 QFrame#searchGroup[focused="true"] {
     border: 2px solid $green;
 }
-QFrame#searchGroup QComboBox {
-    background-color: $auto;
-    border: none;
-    border-radius: 0px;
-    padding: 0px 10px;
-    min-height: 34px;
-}
-QFrame#searchGroup QLineEdit, QFrame#searchGroup QLineEdit:focus {
-    background-color: transparent;
-    border: none;
-    border-radius: 0px;
-    padding: 0px 10px;
-    min-height: 34px;
-}
-QFrame#searchGroup QPushButton {
-    background-color: transparent;
-    border: none;
-    border-radius: 0px;
-    padding: 0px 14px;
-    min-height: 34px;
-}
-QFrame#searchGroup QPushButton:hover {
-    background-color: $ink_hover;
-}
 QLabel {
     background-color: transparent;
     color: $ink;
@@ -430,7 +412,7 @@ QToolTip {
     border: 1px solid $rule_strong;
     padding: 4px 6px;
 }
-QLineEdit, QPlainTextEdit, QTextEdit, QComboBox, QAbstractSpinBox {
+.QLineEdit, .QPlainTextEdit, .QTextEdit, .QTextBrowser, .QComboBox, .QSpinBox, .QDoubleSpinBox, .QDateEdit, .QTimeEdit, .QDateTimeEdit {
     background-color: $field;
     color: $ink;
     border: 1px solid $rule_strong;
@@ -439,16 +421,16 @@ QLineEdit, QPlainTextEdit, QTextEdit, QComboBox, QAbstractSpinBox {
     selection-background-color: $sel;
     selection-color: $ink;
 }
-QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QComboBox:focus, QAbstractSpinBox:focus {
+.QLineEdit:focus, .QPlainTextEdit:focus, .QTextEdit:focus, .QTextBrowser:focus, .QComboBox:focus, .QSpinBox:focus, .QDoubleSpinBox:focus, .QDateEdit:focus, .QTimeEdit:focus, .QDateTimeEdit:focus {
     border: 2px solid $green;
     padding: 5px 9px;
 }
-QLineEdit:disabled, QComboBox:disabled, QAbstractSpinBox:disabled,
-QLineEdit[readOnly="true"], QPlainTextEdit[readOnly="true"] {
+.QLineEdit:disabled, .QComboBox:disabled, .QSpinBox:disabled, .QDoubleSpinBox:disabled, .QDateEdit:disabled, .QTimeEdit:disabled, .QDateTimeEdit:disabled,
+.QLineEdit[readOnly="true"], .QPlainTextEdit[readOnly="true"] {
     background-color: $auto;
     color: $ink2;
 }
-QComboBox::drop-down {
+.QComboBox::drop-down {
     border: none;
     width: 22px;
     subcontrol-origin: padding;
@@ -480,7 +462,7 @@ QTableWidget::indicator:indeterminate {
     border-color: $green;
     $dash_image
 }
-QComboBox QAbstractItemView {
+.QComboBox QAbstractItemView {
     background-color: $field;
     color: $ink;
     border: 1px solid $rule_strong;
@@ -488,7 +470,7 @@ QComboBox QAbstractItemView {
     selection-color: $ink;
     outline: none;
 }
-QPushButton {
+.QPushButton {
     background-color: $paper;
     color: $ink;
     border: 1px solid $rule_strong;
@@ -496,70 +478,36 @@ QPushButton {
     min-height: 30px;
     padding: 0 12px;
 }
-QPushButton:hover {
+.QPushButton:hover {
     border-color: $ink2;
 }
-QPushButton:pressed {
+.QPushButton:pressed {
     background-color: $auto;
 }
-QPushButton:disabled {
+.QPushButton:disabled {
     background-color: $auto;
     color: $ink2;
     border-color: $rule;
 }
-QPushButton[variant="primary"] {
-    background-color: $green;
-    color: $green_ink;
-    border: 1px solid $green;
-    font-weight: 600;
-}
-QPushButton[variant="primary"]:hover {
-    border-color: $green_ink;
-}
-QPushButton[variant="primary"]:disabled {
-    background-color: $rule_strong;
-    color: $paper;
-    border-color: $rule_strong;
-}
-QPushButton[variant="ghost"] {
-    background-color: transparent;
-    border: 1px solid transparent;
-}
-QPushButton[variant="ghost"]:hover {
-    background-color: $ink_hover;
-    border-color: transparent;
-}
-QPushButton[variant="danger-text"] {
-    background-color: transparent;
-    border: 1px solid transparent;
-    color: $seal;
-}
-QPushButton[variant="danger-text"]:hover {
-    background-color: $seal_hover;
-    border-color: transparent;
-}
-QPushButton[variant="danger-text"]:disabled {
-    color: $ink2;
-}
-QMenu {
+.QMenu {
     background-color: $paper;
     color: $ink;
     border: 1px solid $rule;
     border-radius: 8px;
     padding: 6px;
 }
-QMenu::item {
+.QMenu::item {
     padding: 6px 22px;
     border-radius: 6px;
 }
-QMenu::item:selected {
+.QMenu::item:selected {
     background-color: $green_tint;
     color: $ink;
 }
-QMenu::item:disabled {
+.QMenu::item:disabled {
     color: $ink2;
 }
-QMenu::separator {
+.QMenu::separator {
     height: 1px;
     background: $rule;
     margin: 4px 8px;
@@ -656,8 +604,165 @@ QStatusBar {
     color: $ink2;
     border-top: 1px solid $rule;
 }
-QStatusBar QLabel, QStatusBar QPushButton {
+QStatusBar QLabel {
     color: $ink2;
+}
+/* 主視窗：工具列「排序」、搜尋框分隔線、管理摘要、儲存狀態 */
+QLabel#toolbarSortLabel {
+    color: $ink2;
+}
+QFrame#searchDivider, QFrame#searchDivider_2 {
+    background-color: $rule;
+    border: none;
+}
+QLabel#managementSummaryHeader {
+    color: $ink;
+}
+QLabel#managementSummaryLabel {
+    background-color: $ground;
+    color: $ink;
+    border: none;
+    border-radius: 6px;
+    padding: 10px 14px;
+    font-size: 13px;
+}
+QLabel#saveStateLabel {
+    color: $ink2;
+    font-size: 13px;
+}
+/* 對話框：備份管理提示字、手機分享網址、刪除都市計畫按鈕、都市計畫摘要與說明、土地詳細資料摘要 */
+QWidget#backupManagementDialogContent QLabel#hintLabel {
+    color: $ink2;
+}
+QWidget#mobileShareDialogContent QLabel#urlLabel {
+    color: $info_ink;
+}
+QLabel#setUrbanPlanSummary, QLabel#urbanPlanNote {
+    color: $ink2;
+    font-size: 12px;
+}
+QWidget#landDetailsDialogContent QLabel#headingLabel {
+    background: $auto;
+    color: $ink;
+    border-radius: 6px;
+    padding: 12px;
+}
+/* 主視窗清單區：「檢視／輸入到」列、勾選後的批量列、下方圖例與分頁 */
+QFrame#planViewBar {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid $rule;
+}
+QLabel#planHintLabel {
+    color: $ink2;
+    font-size: 12px;
+}
+QFrame#batchBar {
+    background-color: $checked;
+    border: none;
+    border-bottom: 1px solid $rule;
+}
+QFrame#batchBar QLabel {
+    color: $checked_ink;
+    background: transparent;
+}
+QFrame#listFooter {
+    background: transparent;
+    border: none;
+    border-top: 1px solid $rule;
+}
+QLabel#legendChecked, QLabel#legendWatchlist, QLabel#legendOverdue, QLabel#legendNote {
+    border: 1px solid $rule_strong;
+    border-radius: 2px;
+}
+QLabel#legendChecked {
+    background-color: $checked;
+}
+QLabel#legendWatchlist {
+    background-color: $watch;
+}
+QLabel#legendOverdue {
+    background-color: $overdue;
+}
+QLabel#legendNote {
+    background-color: $note;
+}
+QLabel#legendCheckedText, QLabel#legendWatchlistText, QLabel#legendOverdueText, QLabel#legendNoteText {
+    color: $ink2;
+    font-size: 12px;
+}
+QLabel#landCountLabel {
+    color: $ink2;
+}
+/* 右上角土地標題、「關係人」分頁 */
+QFrame#landHeader {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid $rule;
+}
+QLabel#landHeaderLocation,
+QLabel#landHeaderCaption_area, QLabel#landHeaderCaption_value, QLabel#landHeaderCaption_plan {
+    color: $ink2;
+    font-size: 12px;
+}
+QLabel#landHeaderValue_area, QLabel#landHeaderValue_value, QLabel#landHeaderValue_plan {
+    font-size: 14px;
+    font-weight: 600;
+}
+QLabel#ownerContactsOwnerLabel {
+    color: $ink;
+    font-weight: 600;
+}
+QLabel#ownerContactsStatusLabel {
+    color: $ink2;
+}
+/* 大型對話框：行程月曆圖例、關係人編輯提示、都市計畫匯入選單與結果 */
+QLabel#calendarLegend_scheduled, QLabel#calendarLegend_overdue,
+QLabel#calendarLegend_completed, QLabel#calendarLegend_skipped {
+    font-size: 11px;
+}
+QLabel#calendarLegend_scheduled {
+    color: $info_ink;
+}
+QLabel#calendarLegend_overdue {
+    color: $seal;
+}
+QLabel#calendarLegend_completed {
+    color: $success_ink;
+}
+QLabel#calendarLegend_skipped {
+    color: $muted_ink;
+}
+QLabel#matchHint {
+    color: $ink2;
+}
+QLabel#linkBanner {
+    background: $info_bg;
+    color: $info_ink;
+    border-radius: 5px;
+    padding: 6px 8px;
+}
+QLabel#ownerContactSharedNotice {
+    background: $overdue;
+    color: $ink;
+    border: 1px solid $amber_ink;
+    border-radius: 5px;
+    padding: 8px;
+}
+QLabel#ownerContactOwnerCount {
+    color: $amber_ink;
+    font-weight: 600;
+}
+QLabel#ownerContactRelationNotice {
+    color: $info_ink;
+    padding-top: 4px;
+}
+QLabel#importPlanNote, QLabel#importPlanMoreLabel {
+    color: $ink2;
+    font-size: 12px;
+}
+QLabel#importPlanKeptLabel {
+    color: $amber_ink;
 }
 """
 )
@@ -669,10 +774,10 @@ def build_app_stylesheet(tokens=None):
     values["seal_hover"] = rgba("seal", 8, values)
     urls = style_image_urls(values)
     values["arrow_rule"] = (
-        f'QComboBox::down-arrow {{ image: url("{urls["arrow"]}"); width: 10px; height: 10px; }}'
+        f'.QComboBox::down-arrow {{ image: url("{urls["arrow"]}"); width: 10px; height: 10px; }}'
         if "arrow" in urls
         else ""
     )
     values["tick_image"] = f'image: url("{urls["tick"]}");' if "tick" in urls else ""
     values["dash_image"] = f'image: url("{urls["dash"]}");' if "dash" in urls else ""
-    return _STYLESHEET.substitute(values)
+    return render_qss(APP_STYLESHEET_FILE, _STYLESHEET.template, values)

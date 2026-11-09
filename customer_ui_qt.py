@@ -143,7 +143,9 @@ from customer_version import (
     full_version_text,
     version_label,
 )
+import customer_fluent
 from customer_theme import (
+    active_theme_key,
     activate_theme,
     build_app_stylesheet,
     configure_storage as configure_theme_storage,
@@ -579,11 +581,13 @@ def apply_font_size(app, font_size_key):
     font = QFont(app.font())
     font.setPointSize(point_size)
     app.setFont(font)
+    customer_fluent.set_font_point_size(point_size)
     return font
 
 
 def apply_app_style(app):
     app.setStyleSheet(build_app_stylesheet(theme_tokens()))
+    customer_fluent.apply_fluent_theme(active_theme_key(), app.font().pointSize())
 
 
 def init_watchlist_db(conn):

@@ -52,7 +52,7 @@ def plan_tree_style(row_height=34):
         f" alternate-background-color: {token('paper')}; }}"
         "QTreeWidget::item {"
         f" min-height: {row_height}px;"
-        f" border-bottom: 1px solid {token('rule')};"
+        f" border-bottom: 1px solid {token('row_rule')};"
         " }"
         f"QTreeWidget::item:selected {{ background-color: {token('sel')};"
         f" color: {token('ink')}; }}"
@@ -326,6 +326,13 @@ class UrbanPlanTreeView(QTreeWidget):
         item = self._record_items.get(int(record_id))
         if item is None:
             return False
+        if self.currentItem() is item:
+            # The user's own click made this row current and Qt's mouse-press
+            # handler selects the row under the cursor only after this returns.
+            # Clearing or scrolling here (it used to centre the row) moved a
+            # different row under the cursor, so the highlight landed several
+            # rows away from the owner that was clicked.
+            return True
         self._syncing = True
         try:
             self._reveal(item)

@@ -1280,6 +1280,228 @@ class UiWorkflowTests(unittest.TestCase):
         finally:
             window.close()
 
+    def _run_excel_import(self, window, result, import_mode):
+        captured = {}
+
+        class FakePreviewDialog:
+            def __init__(self, records, columns, duplicates, parent):
+                self.import_mode = import_mode
+                captured["preview_records"] = records
+                captured["preview_columns"] = columns
+
+            def exec(self):
+                return QDialog.Accepted
+
+            finished = _AutoFinishedSignal()
+
+            def show(self):
+                pass
+
+            def raise_(self):
+                pass
+
+            def activateWindow(self):
+                pass
+
+            def result(self):
+                return QDialog.Accepted
+
+        class FakeImportResultDialog:
+            def __init__(self, summary_lines, detail_lines=None, error_rows=None, parent=None):
+                captured["summary_lines"] = summary_lines
+
+            def exec(self):
+                return QDialog.Accepted
+
+            finished = _AutoFinishedSignal()
+
+            def show(self):
+                pass
+
+            def raise_(self):
+                pass
+
+            def activateWindow(self):
+                pass
+
+            def result(self):
+                return QDialog.Accepted
+
+        with (
+            patch.object(import_controller, "ImportPreviewDialog", FakePreviewDialog),
+            patch.object(import_controller, "ImportResultDialog", FakeImportResultDialog),
+            patch.object(app.QMessageBox, "question", return_value=QMessageBox.Yes),
+            patch.object(app.QMessageBox, "critical", return_value=QMessageBox.Ok) as critical,
+        ):
+            window.handle_excel_import_ready(result)
+        critical.assert_not_called()
+        return captured
+
+    def test_reimporting_a_corrected_masked_export_updates_records_by_system_id(self):
+        """Real user workflow: export everything (privacy mask on), fill in
+        missing 身分證／地址 in Excel, import it back. Every row must update
+        the record it came from -- the 完整地號 column used to be read as 地號,
+        so all rows were inserted again -- and the masked 姓名／身分證 the
+        export wrote must never overwrite the real ones."""
+        from customer_domain import mask_identity_to_four_digits, mask_owner_display_name
+
+        app.REPOSITORY.create_admin_user("test-password")
+        encryption_key = app.REPOSITORY.authenticate_user("admin", "test-password")
+        window = app.LandApp(encryption_key)
+        try:
+            ids = []
+            for land_number, owner, external_id, address, note in (
+                ("129-1", "謝大明", "S221234569", "", "舊備註"),
+                ("129-2", "謝小華", "", "桃園市中壢區西園路6號", ""),
+                ("129-3", "林一", "", "", ""),
+            ):
+                data = window.normalize_record_data(
+                    {
+                        "district": "中壢區",
+                        "section": "西園段",
+                        "subsection": "一小段",
+                        "registration_order": "0001",
+                        "land_number": land_number,
+                        "area": "100",
+                        "declared_value": "126313",
+                        "numerator": "1",
+                        "denominator": "20",
+                        "owner_name": owner,
+                        "external_id": external_id,
+                        "address": address,
+                        "note": note,
+                    }
+                )
+                ids.append(app.REPOSITORY.save_customer(app.encrypt_record(window.fernet, data)))
+            window.refresh_records()
+
+            raw_rows = [dict(record["raw"]) for record in window.table_model.all_rows]
+            raw_rows.sort(key=lambda row: int(row["rowid"] if "rowid" in row else row["id"]))
+            for raw_row in raw_rows:
+                raw_row["owner_name"] = mask_owner_display_name(raw_row.get("owner_name"))
+                raw_row["external_id"] = mask_identity_to_four_digits(raw_row.get("external_id"))
+            by_number = {row["land_number"]: row for row in raw_rows}
+            by_number["129-1"]["address"] = "桃園市中壢區西園路6之10號6樓"  # filled in
+            by_number["129-1"]["note"] = ""  # blank must not erase 舊備註
+            by_number["129-2"]["external_id"] = "H123456789"  # full ID added
+            by_number["129-2"]["owner_name"] = "謝小華"  # unmasked name: unchanged
+            by_number["129-3"]["external_id"] = "S2219"  # partial ID from 謄本: written
+            raw_rows.append(dict(by_number["129-3"], rowid=str(ids[2] + 100)))  # gone
+
+            file_path = Path(self.temp_context.name) / "corrected-export.xlsx"
+            app.EXCEL_SERVICE.write_rows(file_path, raw_rows, window.get_export_columns())
+            result = app.EXCEL_SERVICE.read_import_file(file_path)
+            self.assertIn("record_id", result["column_map"].values())
+            self.assertEqual(result["error_rows"], [])
+            self.assertEqual(
+                sorted(record["land_number"] for record in result["records"]),
+                ["129-1", "129-2", "129-3", "129-3"],
+            )
+
+            captured = self._run_excel_import(window, result, "all")
+
+            self.assertEqual(captured["preview_columns"][0], ("_change_summary", "變更內容"))
+            self.assertIn("成功新增：0", captured["summary_lines"])
+            self.assertIn("成功更新：3", captured["summary_lines"])
+            self.assertIn("重複略過：1", captured["summary_lines"])
+            with app.connect() as conn:
+                rows = conn.execute(
+                    "SELECT id, owner_name, external_id, address, note FROM customers ORDER BY id"
+                ).fetchall()
+            self.assertEqual([row["id"] for row in rows], ids)
+            plain = [
+                {key: decrypt_value(window.fernet, row[key] or "") for key in
+                 ("owner_name", "external_id", "address", "note")}
+                for row in rows
+            ]
+            self.assertEqual(plain[0]["owner_name"], "謝大明")
+            self.assertEqual(plain[0]["external_id"], "S221234569")
+            self.assertEqual(plain[0]["address"], "桃園市中壢區西園路6之10號6樓")
+            self.assertEqual(plain[0]["note"], "舊備註")
+            self.assertEqual(plain[1]["external_id"], "H123456789")
+            self.assertEqual(plain[1]["address"], "桃園市中壢區西園路6號")
+            self.assertEqual(plain[1]["owner_name"], "謝小華")
+            self.assertEqual(plain[2]["external_id"], "S2219")
+            self.assertEqual(len(rows), 3)
+
+            window.refresh_records()
+            raw_rows = [dict(record["raw"]) for record in window.table_model.all_rows]
+            for raw_row in raw_rows:
+                raw_row["external_id"] = "S22****19"
+            file_path = Path(self.temp_context.name) / "masked-again.xlsx"
+            app.EXCEL_SERVICE.write_rows(file_path, raw_rows, window.get_export_columns())
+            captured = self._run_excel_import(
+                window, app.EXCEL_SERVICE.read_import_file(file_path), "update_duplicates"
+            )
+            warned = [
+                record for record in captured["preview_records"]
+                if record.get("_import_warnings")
+            ]
+            self.assertEqual(len(warned), 3)
+            self.assertIn("成功更新：0", captured["summary_lines"])
+        finally:
+            window.close()
+
+    def test_reimport_never_inserts_a_row_whose_system_id_is_gone(self):
+        app.REPOSITORY.create_admin_user("test-password")
+        encryption_key = app.REPOSITORY.authenticate_user("admin", "test-password")
+        window = app.LandApp(encryption_key)
+        try:
+            result = {
+                "column_map": {1: "record_id", 2: "district", 3: "section", 4: "land_number"},
+                "records": [
+                    {
+                        "record_id": "999",
+                        "district": "桃園區",
+                        "section": "一段",
+                        "subsection": None,
+                        "land_number": "100",
+                        "owner_name": "王小明",
+                        "name": "王小明",
+                    }
+                ],
+                "error_rows": [],
+            }
+            captured = self._run_excel_import(window, result, "all")
+            self.assertIn("成功新增：0", captured["summary_lines"])
+            self.assertIn("重複略過：1", captured["summary_lines"])
+            with app.connect() as conn:
+                count = conn.execute("SELECT COUNT(*) FROM customers").fetchone()[0]
+            self.assertEqual(count, 0)
+        finally:
+            window.close()
+
+    def test_signature_duplicate_check_includes_subsection(self):
+        app.REPOSITORY.create_admin_user("test-password")
+        encryption_key = app.REPOSITORY.authenticate_user("admin", "test-password")
+        window = app.LandApp(encryption_key)
+        try:
+            data = window.normalize_record_data(
+                {
+                    "district": "桃園區",
+                    "section": "一段",
+                    "subsection": "二小段",
+                    "land_number": "100",
+                    "owner_name": "王小明",
+                }
+            )
+            app.REPOSITORY.save_customer(app.encrypt_record(window.fernet, data))
+            records = [dict(data)]
+            duplicates, _watch = window.annotate_import_duplicates(records)
+            self.assertEqual(duplicates, {0})
+            self.assertIn("資料庫已存在", records[0]["_duplicate_reason"])
+        finally:
+            window.close()
+
+    def test_export_headers_map_back_to_the_right_import_fields(self):
+        import customer_excel
+
+        self.assertEqual(customer_excel.map_header("系統ID"), "record_id")
+        for header in ("完整地號", "持分筆數", "權利範圍面積", "備註摘要"):
+            self.assertIsNone(customer_excel.map_header(header), header)
+        self.assertEqual(customer_excel.map_header("地號"), "land_number")
+        self.assertEqual(customer_excel.map_header("ID"), "external_id")
+
     def test_postgresql_preview_excel_import_uses_api_batch_without_sqlite_backup(self):
         app.REPOSITORY.create_admin_user("test-password")
         encryption_key = app.REPOSITORY.authenticate_user("admin", "test-password")
