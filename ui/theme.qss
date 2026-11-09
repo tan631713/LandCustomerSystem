@@ -400,3 +400,24 @@ QLabel#importPlanNote, QLabel#importPlanMoreLabel {
 QLabel#importPlanKeptLabel {
     color: $amber_ink;
 }
+/* 手動新增資料：「可能是同一位地主」候選清單（ui/main/owner_match_panel.ui） */
+QFrame#ownerMatchPanel {
+    background-color: $watch;
+    border: 1px solid $rule_strong;
+    border-radius: 4px;
+}
+QFrame#ownerMatchPanel QLabel {
+    background: transparent;
+}
+QLabel#ownerMatchTitle {
+    color: $seal;
+    font-weight: bold;
+}
+QLabel#ownerMatchHint {
+    color: $ink2;
+    font-size: 12px;
+}
+QLabel#ownerMatchChosenLabel {
+    color: $ink;
+    font-weight: bold;
+}

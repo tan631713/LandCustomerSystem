@@ -962,6 +962,9 @@ class RecordWorkflowMixin:
             return
         record_repository = self.active_record_repository()
         is_new_record = self.selected_record_id is None
+        if is_new_record and not self.confirm_owner_match_before_save():
+            return
+        owner_match_kwargs = self.owner_match_save_kwargs(is_new_record)
         tree_state = (
             None if is_new_record else self.capture_land_tree_view_state()
         )
@@ -996,6 +999,7 @@ class RecordWorkflowMixin:
                 self.selected_record_id = record_repository.save_customer(
                     data,
                     self.selected_record_id,
+                    **owner_match_kwargs,
                 )
         except (sqlite3.IntegrityError, DesktopApiError) as exc:
             self._app_component("QMessageBox").critical(self, "儲存失敗", database_save_failure_message(exc))
@@ -1025,6 +1029,7 @@ class RecordWorkflowMixin:
             # which is the standard Qt idiom for this exact class of
             # problem.
             new_record_id = self.selected_record_id
+            self.after_owner_match_saved(new_record_id)
             QTimer.singleShot(0, lambda: self.refresh_records(new_record_id))
         else:
             # Existing owner/land/ownership edits must preserve the live tree.

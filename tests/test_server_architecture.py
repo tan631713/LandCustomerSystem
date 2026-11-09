@@ -22,6 +22,7 @@ class ServerRouteInventoryTests(unittest.TestCase):
             ("GET", "/api/v1/records"),
             ("GET", "/api/v1/records/{record_id}"),
             ("POST", "/api/v1/records"),
+            ("GET", "/api/v1/owner-candidates"),
             ("PUT", "/api/v1/records/{record_id}"),
             ("PUT", "/api/v1/records/{record_id}/with-history"),
             ("DELETE", "/api/v1/records/{record_id}"),

@@ -6,6 +6,7 @@ from customer_api.postgres_collaboration import PostgreSQLCollaborationMixin
 from customer_api.postgres_desktop_features import PostgreSQLDesktopFeatureMixin
 from customer_api.postgres_field_visits import PostgreSQLFieldVisitMixin
 from customer_api.postgres_owner_contacts import PostgreSQLOwnerContactMixin
+from customer_api.postgres_owner_match import PostgreSQLOwnerMatchMixin
 from customer_api.postgres_projects import PostgreSQLProjectMixin
 from customer_api.postgres_records import PostgreSQLRecordMixin
 from customer_api.postgres_remote_operations import PostgreSQLRemoteOperationMixin
@@ -26,6 +27,7 @@ class PostgreSQLCustomerDataSource(
     PostgreSQLDesktopFeatureMixin,
     PostgreSQLFieldVisitMixin,
     PostgreSQLOwnerContactMixin,
+    PostgreSQLOwnerMatchMixin,
     PostgreSQLRemoteOperationMixin,
 ):
     backend_name = "postgresql"

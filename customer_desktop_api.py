@@ -363,6 +363,31 @@ class DesktopApiClient:
         result = self._request("POST", "/api/v1/records", payload=dict(values))
         return int(result["id"])
 
+    def owner_candidates(self, query, *, rejected_record_ids=(), limit=10):
+        """Existing owners a hand-typed new record may belong to.
+
+        An older home server without the endpoint answers 404; that is
+        reported as ``supported: False`` so the desktop just saves as before.
+        """
+
+        params = {
+            "owner_name": str(query.get("owner_name") or "").strip(),
+            "external_id": str(query.get("external_id") or "").strip(),
+            "address": str(query.get("address") or "").strip(),
+            "phone": str(query.get("phone") or "").strip(),
+            "limit": int(limit),
+        }
+        rejected = [int(value) for value in rejected_record_ids or ()]
+        if rejected:
+            params["rejected_record_id"] = rejected
+        try:
+            result = self._request("GET", "/api/v1/owner-candidates", params=params)
+        except DesktopApiResponseError as exc:
+            if exc.status_code in {404, 405}:
+                return {"supported": False, "items": [], "exact_owner_id": None}
+            raise
+        return dict(result or {})
+
     def replace_record(self, record_id, values):
         result = self._request(
             "PUT", f"/api/v1/records/{int(record_id)}", payload=dict(values)
@@ -1512,9 +1537,18 @@ class DesktopApiRecordRepository:
             plain["urban_plan_id"] = wanted
         return plain
 
-    def save_customer(self, values, record_id=None):
+    def find_owner_candidates(self, query, *, rejected_record_ids=()):
+        return self.client.owner_candidates(
+            query, rejected_record_ids=rejected_record_ids
+        )
+
+    def save_customer(self, values, record_id=None, *, owner_id=None):
         plain = self._record_save_values(values, record_id)
         if record_id is None:
+            if owner_id is not None:
+                # Only sent when the user picked an existing owner, so an
+                # older home server keeps accepting every other save.
+                plain["owner_id"] = int(owner_id)
             saved_id = int(self.client.create_record(plain))
             self._record_created(saved_id)
             return saved_id

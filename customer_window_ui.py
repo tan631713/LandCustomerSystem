@@ -531,6 +531,12 @@ class DesktopWindowMixin:
             parent=self.detail_tabs,
         )
         self.detail_tabs.addTab(self.owner_contacts_widget, "關係人")
+        # 「可能是同一位地主」 sits right under the scrolling form so it stays
+        # in view while the owner fields are being typed.
+        basic_layout = ui("basicLayout", QVBoxLayout)
+        self.setup_owner_match_panel(
+            basic_layout, basic_layout.indexOf(self.basic_data_scroll_area) + 1
+        )
         self.refresh_land_header()
 
     # -- form helpers -------------------------------------------------------------
@@ -686,6 +692,7 @@ class DesktopWindowMixin:
             label.setText(f"目前地主：{name}")
 
     def after_record_loaded(self):
+        self.reset_owner_match_state()
         self.clear_save_state(keep_saved_for=self.selected_record_id)
         self.refresh_owner_section_note()
         self.refresh_land_header()
@@ -694,6 +701,7 @@ class DesktopWindowMixin:
             self.table_view.viewport().update()
 
     def after_new_record(self):
+        self.reset_owner_match_state()
         self.clear_save_state()
         self.refresh_owner_section_note()
         self.refresh_land_header(new_record=True)

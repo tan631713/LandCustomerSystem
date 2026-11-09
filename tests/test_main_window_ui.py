@@ -146,6 +146,7 @@ class MainWindowUiFileTests(unittest.TestCase):
     def test_main_window_part_files_load_and_survive_a_designer_save(self):
         from customer_land_header import LandHeaderWidget
         from customer_owner_contacts import OwnerContactDialog, OwnerContactsWidget
+        from customer_owner_match_ui import OWNER_MATCH_REQUIRED_NAMES, OWNER_MATCH_UI_FILE
         from customer_urban_plan_dialogs import ImportPlanChoice, ImportPlanResultSection
 
         required = {
@@ -161,6 +162,7 @@ class MainWindowUiFileTests(unittest.TestCase):
             OwnerContactDialog.RELATION_GROUP_UI_FILE: OwnerContactDialog.RELATION_GROUP_OBJECT_NAMES,
             ImportPlanChoice.ui_file: ImportPlanChoice.ui_object_names,
             ImportPlanResultSection.ui_file: ImportPlanResultSection.ui_object_names,
+            OWNER_MATCH_UI_FILE: OWNER_MATCH_REQUIRED_NAMES,
         }
         on_disk = {f"main/{path.name}" for path in (ROOT / "ui" / "main").glob("*.ui")}
         self.assertEqual(set(required), on_disk)

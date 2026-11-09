@@ -232,7 +232,12 @@ class DesktopSaveLatencyTests(unittest.TestCase):
                 window.set_field_text(key, value)
 
             waited_for = self.save_with_message_snapshot(window, server)
-            self.assertEqual(waited_for, ["create record", "get one record"])
+            # The form was filled without leaving the 姓名 field, so the save
+            # asks once for existing owners with that name (「可能是同一位地主」)
+            # before creating; normally that answer is already there.
+            self.assertEqual(
+                waited_for, ["owner_candidates", "create record", "get one record"]
+            )
 
             self.settle(window)
             self.assertEqual(server.count("list all records"), 0)

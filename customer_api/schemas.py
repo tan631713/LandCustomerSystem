@@ -285,11 +285,15 @@ class RecordWrite(BaseModel):
     birth_year: str | None = Field(default=None, max_length=4)
     # None keeps the land's urban plan, 0 clears it, an id moves the land there.
     urban_plan_id: int | None = Field(default=None, ge=0)
+    # New records only: the existing owner picked in the desktop's
+    # "可能是同一位地主" list.  The ownership is attached to that owner
+    # instead of resolving one from name/ID/address (edits ignore it).
+    owner_id: int | None = Field(default=None, ge=1)
 
     @field_validator("*", mode="before")
     @classmethod
     def normalize_text_values(cls, value, info: ValidationInfo):
-        if info.field_name == "urban_plan_id":
+        if info.field_name in {"urban_plan_id", "owner_id"}:
             return None if value in (None, "") else value
         if value is None:
             if info.field_name == "owner_name":
