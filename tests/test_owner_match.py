@@ -119,21 +119,27 @@ class CandidateScoringTests(unittest.TestCase):
         ranked = rank_owner_candidates(
             {
                 "owner_name": "張三",
-                "external_id": "H12****789",
+                "external_id": "H123*****9",
                 "address": "桃園市中壢區中正路一號",
                 "phone": "0912-345-678",
             },
             owners,
         )
         self.assertEqual([item["owner_id"] for item in ranked[:3]], [3, 2, 1])
-        self.assertIn("身分證前3碼與後3碼相同", ranked[0]["reasons"])
+        self.assertIn("身分證前4碼與末碼相同", ranked[0]["reasons"])
 
     def test_partial_stored_identity_from_transcript(self):
+        # 謄本 keeps 前4碼＋末碼: S221912345 is stored as S2215.
+        score, reasons = score_owner_candidate(
+            {"owner_name": "李四", "external_id": "S221912345"}, owner(5, "李四", "S2215")
+        )
+        self.assertEqual(score, 80)
+        self.assertIn("身分證前4碼與末碼相同", reasons)
+        # The old "前段相符" reading (S2219 as the first five) no longer matches.
         score, reasons = score_owner_candidate(
             {"owner_name": "李四", "external_id": "S221912345"}, owner(5, "李四", "S2219")
         )
-        self.assertEqual(score, 75)
-        self.assertIn("身分證前段相符", reasons)
+        self.assertEqual(score, 20)
 
     def test_rejected_owners_are_left_out_and_response_is_masked(self):
         owners = [owner(1, "王五", "A123456789", phones=["0912345678"])]
@@ -146,6 +152,63 @@ class CandidateScoringTests(unittest.TestCase):
         self.assertEqual(item["phones_masked"], ["09*****678"])
         self.assertNotIn("external_id", item)
         self.assertNotIn("A123456789", repr(item))
+
+
+class IdentityKeyTests(unittest.TestCase):
+    def test_match_key(self):
+        from customer_owner_match import identity_match_key
+
+        self.assertEqual(identity_match_key("H221345671"), "H2211")
+        self.assertEqual(identity_match_key("h2211"), "H2211")
+        self.assertEqual(identity_match_key("H221*****1"), "H2211")
+        self.assertEqual(identity_match_key("Ｈ２２１１"), "H2211")
+        self.assertIsNone(identity_match_key("H22*1"))
+        self.assertIsNone(identity_match_key("H2211X"))  # other lengths
+        self.assertIsNone(identity_match_key("H221"))
+        self.assertIsNone(identity_match_key(""))
+
+    def test_full_number_against_stored_five_characters(self):
+        score, reasons = score_owner_candidate(
+            {"owner_name": "邱小姐", "external_id": "H221345671"},
+            owner(1, "邱小姐", "H2211"),
+        )
+        self.assertEqual(score, 80)
+        self.assertGreaterEqual(score, HIGH_MATCH_SCORE)
+        self.assertIn("身分證前4碼與末碼相同", reasons)
+
+    def test_five_against_five_and_masked(self):
+        for typed in ("H2211", "H221*****1"):
+            with self.subTest(typed=typed):
+                score, reasons = score_owner_candidate(
+                    {"owner_name": "邱小姐", "external_id": typed},
+                    owner(1, "邱小姐", "H2211"),
+                )
+                self.assertEqual(score, 80)
+        score, _reasons = score_owner_candidate(
+            {"owner_name": "邱小姐", "external_id": "H2212"},
+            owner(1, "邱小姐", "H2211"),
+        )
+        self.assertEqual(score, 20)
+
+    def test_same_five_characters_under_another_name_is_not_offered(self):
+        owners = [owner(1, "邱小姐", "H2211"), owner(2, "陳先生", "H221987651")]
+        self.assertEqual(
+            rank_owner_candidates({"owner_name": "林先生", "external_id": "H2211"}, owners),
+            [],
+        )
+        self.assertEqual(
+            rank_owner_candidates(
+                {"owner_name": "林先生", "external_id": "H221345671"}, owners
+            ),
+            [],
+        )
+
+    def test_two_identical_complete_numbers_match_whatever_the_name(self):
+        ranked = rank_owner_candidates(
+            {"owner_name": "陳大文", "external_id": "H221987651"},
+            [owner(2, "陳先生", "H221987651")],
+        )
+        self.assertEqual(ranked[0]["score"], 100)
 
 
 class _Result:

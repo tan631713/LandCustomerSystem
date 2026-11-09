@@ -6,16 +6,18 @@ here touches the database or Qt.
 
 Scores, highest first:
 
-* 100 身分證相同
-*  80 姓名相同＋身分證前3碼與後3碼相同（打的是遮蔽或不完整的身分證）
-*  75 姓名相同＋身分證前段相符（資料庫只存了謄本上的部分身分證）
+* 100 身分證相同（兩邊都是完整 10 碼且完全一樣）
+*  80 姓名相同＋身分證前4碼與末碼相同（多數資料只存 5 碼，例如 H2211 =
+      H221＋末碼 1；完整 10 碼取第 1-4 與第 10 碼，遮蔽格式 H221*****1 也取
+      前 4 與末碼）
 *  70 姓名相同＋電話相同
 *  60 姓名相同＋地址相同（台/臺、全半形、三段/3段、之1/-1、樓/F、空白都不計）
 *  50 姓名相同＋地址相似
 *  20 只有姓名相同
 
 Same name but two complete, different identity numbers is a different
-person and is never offered.
+person and is never offered.  A matching 5-character key under a different
+name is not offered either: about 50 000 combinations collide too easily.
 """
 
 from __future__ import annotations
@@ -33,7 +35,7 @@ ADDRESS_CONTAINMENT_MIN_LENGTH = 8
 
 SCORE_IDENTITY = 100
 SCORE_IDENTITY_PARTIAL = 80
-SCORE_IDENTITY_PREFIX = 75
+IDENTITY_KEY_LENGTH = 5
 SCORE_PHONE = 70
 SCORE_ADDRESS_SAME = 60
 SCORE_ADDRESS_SIMILAR = 50
@@ -183,15 +185,22 @@ def addresses_similar(left, right):
     return SequenceMatcher(None, left, right).ratio() >= ADDRESS_SIMILARITY_RATIO
 
 
-def _identity_partial_match(typed, stored):
-    """前3碼與後3碼 match when the typed number is masked or incomplete."""
+def identity_match_key(value):
+    """前4碼＋末碼, the part of an identity number the owner's data keeps.
 
-    if len(typed) < 6 or len(stored) < 6:
-        return False
-    head, tail = typed[:3], typed[-3:]
-    if "*" in head or "*" in tail:
-        return False
-    return stored[:3] == head and stored[-3:] == tail
+    A complete 10-character number gives characters 1-4 and 10; a 5-character
+    value (the usual stored form, e.g. H2211) is its own key; a masked form
+    such as H221*****1 also gives its first four and last characters.  Any
+    other length, or a ``*`` inside those five characters, gives None.
+    """
+
+    text = normalize_identity(value)
+    if "*" not in text and len(text) not in (IDENTITY_KEY_LENGTH, 10):
+        return None
+    if len(text) < IDENTITY_KEY_LENGTH:
+        return None
+    key = text[:4] + text[-1]
+    return None if "*" in key else key
 
 
 def score_owner_candidate(query, owner):
@@ -207,7 +216,11 @@ def score_owner_candidate(query, owner):
     stored_id = normalize_identity(owner.get("external_id"))
     same_name = bool(typed_name) and typed_name == owner_name
 
-    if typed_id and stored_id and "*" not in typed_id and typed_id == stored_id:
+    if (
+        is_full_identity(typed_id)
+        and is_full_identity(stored_id)
+        and typed_id == stored_id
+    ):
         reasons = ["身分證相同"]
         if same_name:
             reasons.append("姓名相同")
@@ -226,15 +239,10 @@ def score_owner_candidate(query, owner):
 
     score = SCORE_NAME_ONLY
     reasons = ["姓名相同"]
-    if typed_id and stored_id:
-        if _identity_partial_match(typed_id, stored_id):
-            score = max(score, SCORE_IDENTITY_PARTIAL)
-            reasons.append("身分證前3碼與後3碼相同")
-        elif "*" not in typed_id and len(stored_id) >= 4 and (
-            typed_id.startswith(stored_id) or stored_id.startswith(typed_id)
-        ) and min(len(typed_id), len(stored_id)) >= 4:
-            score = max(score, SCORE_IDENTITY_PREFIX)
-            reasons.append("身分證前段相符")
+    typed_key = identity_match_key(typed_id)
+    if typed_key is not None and typed_key == identity_match_key(stored_id):
+        score = max(score, SCORE_IDENTITY_PARTIAL)
+        reasons.append("身分證前4碼與末碼相同")
 
     typed_phone = normalize_phone(query.get("phone"))
     if len(typed_phone) >= 6:
