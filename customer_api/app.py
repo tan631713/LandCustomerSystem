@@ -23,6 +23,7 @@ from customer_api.routes_projects import register_project_routes
 from customer_api.routes_records import register_record_routes
 from customer_api.routes_remote_operations import register_remote_operation_routes
 from customer_api.routes_tags import register_tag_routes
+from customer_api.routes_urban_plans import register_urban_plan_routes
 from customer_api.routes_views import register_view_routes
 from customer_version import APP_VERSION
 
@@ -76,6 +77,7 @@ def create_app(
         register_followup_routes,
         register_project_routes,
         register_tag_routes,
+        register_urban_plan_routes,
         register_desktop_feature_routes,
         register_field_visit_routes,
         register_owner_contact_routes,

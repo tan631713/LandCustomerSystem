@@ -95,7 +95,14 @@ class OwnerContactSchemaTests(unittest.TestCase):
         )
 
     def test_migration_does_not_alter_existing_business_tables(self):
-        phase = self.schema[self.schema.index("-- Version 9:") :]
+        # Versions 9-11 are the owner-contacts phase covered by the numbered
+        # rollback scripts in postgres/migrations/. Version 12 (birth year)
+        # is a separate, later addition with no rollback script of its own
+        # -- it deliberately does touch owners (see schema.sql's Version 12
+        # comment), so it sits outside this phase's boundary.
+        phase = self.schema[
+            self.schema.index("-- Version 9:") : self.schema.index("-- Version 12:")
+        ]
         for table_name in ("owners", "lands", "ownerships"):
             self.assertNotIn(f"ALTER TABLE {table_name}", phase)
             self.assertNotIn(f"DROP TABLE {table_name}", phase)

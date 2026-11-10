@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from customer_desktop_support import DesktopSupportMixin
+from customer_fluent import dialog_button_box_class
+from PySide6.QtCore import QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import QBrush, QColor, QFont, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -11,9 +13,11 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
-    QFormLayout,
-    QGridLayout,
-    QGroupBox,
+    QGraphicsLineItem,
+    QGraphicsRectItem,
+    QGraphicsScene,
+    QGraphicsSimpleTextItem,
+    QGraphicsView,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -24,15 +28,23 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSpinBox,
-    QTabWidget,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
+from qfluentwidgets import TableWidget as FluentTableWidget
+from qfluentwidgets import ComboBox as FluentComboBox
 
-from customer_domain import mask_identity_text, normalize_taiwan_identity
+from customer_domain import (
+    calculate_age_from_birth_year,
+    mask_identity_text,
+    normalize_taiwan_identity,
+)
 from customer_owner_contact_types import RELATIONSHIP_TYPES
+from customer_theme import qcolor
+from customer_ui_loader import chain_tab_order, find_child, install_ui, load_ui, put_in_slot
 
 
 def _text(value):
@@ -66,7 +78,7 @@ def address_choices(row):
     return choices
 
 
-class ContactChoiceTable(QTableWidget):
+class ContactChoiceTable(FluentTableWidget):
     """Search-result table shared by linking and duplicate selection."""
 
     HEADERS = (
@@ -79,7 +91,8 @@ class ContactChoiceTable(QTableWidget):
     )
 
     def __init__(self, parent=None):
-        super().__init__(0, len(self.HEADERS), parent)
+        super().__init__(parent)
+        self.setColumnCount(len(self.HEADERS))
         self.setHorizontalHeaderLabels(self.HEADERS)
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -119,28 +132,28 @@ class ContactChoiceTable(QTableWidget):
 
 
 class ExistingContactPickerDialog(QDialog):
+    # Layout: ui/dialogs/existing_contact_picker_dialog.ui; the table is a
+    # ContactChoiceTable put in place of contactTableSlot.
+    ui_file = "dialogs/existing_contact_picker_dialog.ui"
+    ui_object_names = ("contactTableSlot", "buttonBox")
+
     def __init__(self, contacts, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("選擇既有關係人")
-        self.resize(760, 360)
-        layout = QVBoxLayout(self)
-        layout.addWidget(
-            QLabel("請選擇要沿用的既有關係人；系統不會自動合併資料。")
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.table = put_in_slot(
+            find_child(content, "contactTableSlot", QWidget), ContactChoiceTable(self)
         )
-        self.table = ContactChoiceTable(self)
         self.table.set_contacts(contacts)
         if self.table.rowCount():
             self.table.selectRow(0)
         self.table.doubleClicked.connect(lambda _index: self.accept())
-        layout.addWidget(self.table, 1)
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=self
-        )
+        # The table is built after the .ui buttons; it still gets focus first.
+        self.table.setFocus()
+        buttons = find_child(content, "buttonBox", QDialogButtonBox)
         buttons.button(QDialogButtonBox.Ok).setText("使用選取資料")
         buttons.button(QDialogButtonBox.Cancel).setText("取消")
         buttons.accepted.connect(self._accept_selected)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
 
     def _accept_selected(self):
         if self.table.selected_contact() is None:
@@ -153,35 +166,23 @@ class ExistingContactPickerDialog(QDialog):
 
 
 class DeactivateRelationDialog(QDialog):
+    # Layout: ui/dialogs/deactivate_relation_dialog.ui.
+    ui_file = "dialogs/deactivate_relation_dialog.ui"
+    ui_object_names = ("messageLabel", "reasonEdit", "buttonBox")
+
     def __init__(self, contact_name, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("確認停用關係")
-        self.resize(500, 300)
-        layout = QVBoxLayout(self)
-        message = QLabel(
-            (
-                f"確定要停用「{_text(contact_name)}」與目前地主的關係嗎？\n\n"
-                "資料不會刪除，也不會影響此人與其他地主的關係。"
-            ),
-            self,
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        find_child(content, "messageLabel", QLabel).setText(
+            f"確定要停用「{_text(contact_name)}」與目前地主的關係嗎？\n\n"
+            "資料不會刪除，也不會影響此人與其他地主的關係。"
         )
-        message.setWordWrap(True)
-        layout.addWidget(message)
-        layout.addWidget(QLabel("停用說明（可留空）", self))
-        self.reason_input = QPlainTextEdit(self)
-        self.reason_input.setPlaceholderText(
-            "例如：資料重複、不再協助地主、電話與地址皆無效"
-        )
-        self.reason_input.setMaximumHeight(100)
-        layout.addWidget(self.reason_input)
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=self
-        )
+        self.reason_input = find_child(content, "reasonEdit", QPlainTextEdit)
+        buttons = find_child(content, "buttonBox", QDialogButtonBox)
         buttons.button(QDialogButtonBox.Ok).setText("確認停用")
         buttons.button(QDialogButtonBox.Cancel).setText("取消")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
 
     def reason(self):
         return self.reason_input.toPlainText().strip()
@@ -189,6 +190,43 @@ class DeactivateRelationDialog(QDialog):
 
 class OwnerContactDialog(QDialog):
     """Create/link/edit/read-only dialog with contact and relation separation."""
+
+    # The two group boxes are ui/main/owner_contact_group.ui and
+    # ui/main/owner_relation_group.ui; this dialog stacks them (new or edit
+    # mode) and the notices around them.  Colours: ui/theme.qss.
+    CONTACT_GROUP_UI_FILE = "main/owner_contact_group.ui"
+    CONTACT_GROUP_OBJECT_NAMES = (
+        "nameEdit",
+        "matchHint",
+        "matchTableSlot",
+        "matchActionsRow",
+        "useMatchButton",
+        "linkBannerRow",
+        "linkBanner",
+        "unlinkButton",
+        "externalIdEdit",
+        "identityButton",
+        "mobileEdit",
+        "homeEdit",
+        "registeredAddressEdit",
+        "contactAddressEdit",
+        "workAddressEdit",
+        "birthYearEdit",
+        "ageEdit",
+        "identityNoteEdit",
+        "notesEdit",
+        "ownerAddressButton",
+        "contactSameButton",
+        "workSameButton",
+    )
+    RELATION_GROUP_UI_FILE = "main/owner_relation_group.ui"
+    RELATION_GROUP_OBJECT_NAMES = (
+        "relationshipCombo",
+        "supplementEdit",
+        "primaryCheckBox",
+        "sortOrderSpin",
+        "relationNotesEdit",
+    )
 
     def __init__(
         self,
@@ -210,10 +248,14 @@ class OwnerContactDialog(QDialog):
         self.allow_edit = bool(allow_edit)
         self.owner_address = _text(owner_address)
         self.is_edit = bool(existing)
-        self._selected_contact = None
+        self._linked_contact = None
         self.edit_requested = False
         self._address_helper_buttons = []
         self._identity_state = {}
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(300)
+        self._search_timer.timeout.connect(self._search_for_matching_contacts)
         self.setWindowTitle(
             "查看關係人"
             if self.readonly
@@ -231,12 +273,9 @@ class OwnerContactDialog(QDialog):
             scroll.setWidget(content)
             layout.addWidget(scroll, 1)
         else:
-            self.mode_tabs = QTabWidget(self)
-            self.mode_tabs.addTab(self._build_new_contact_page(), "建立新關係人")
-            self.mode_tabs.addTab(self._build_existing_contact_page(), "選擇既有關係人")
-            layout.addWidget(self.mode_tabs, 1)
+            layout.addWidget(self._build_new_contact_page(), 1)
 
-        buttons = QDialogButtonBox(parent=self)
+        buttons = dialog_button_box_class()(parent=self)
         if self.readonly:
             if self.allow_edit:
                 edit_button = buttons.addButton(
@@ -256,7 +295,6 @@ class OwnerContactDialog(QDialog):
             self._fill_existing(self.existing)
         else:
             self.new_sort_order.setValue(int(next_sort_order))
-            self.link_sort_order.setValue(int(next_sort_order))
         if self.readonly:
             self._set_readonly()
 
@@ -264,58 +302,89 @@ class OwnerContactDialog(QDialog):
         self.edit_requested = True
         self.accept()
 
-    def _contact_group(self, prefix, *, title="關係人共用資料"):
-        group = QGroupBox(title, self)
-        form = QFormLayout(group)
-        name = QLineEdit(group)
-        external_id = QLineEdit(group)
-        external_id.setMaxLength(100)
-        mobile = QLineEdit(group)
-        home = QLineEdit(group)
-        registered_address = QLineEdit(group)
-        contact_address = QLineEdit(group)
-        work_address = QLineEdit(group)
-        identity_note = QLineEdit(group)
-        notes = QPlainTextEdit(group)
-        notes.setFixedHeight(80)
-        form.addRow("姓名 *", name)
-        identity_row = QHBoxLayout()
-        identity_row.addWidget(external_id, 1)
-        identity_button = QPushButton(
-            "👁 顯示" if prefix == "edit" else "👁 隱藏", group
+    def _contact_group(self, prefix, *, title=None):
+        group = load_ui(self.CONTACT_GROUP_UI_FILE, required_names=self.CONTACT_GROUP_OBJECT_NAMES)
+        if title:
+            group.setTitle(title)
+
+        def ui(object_name, cls):
+            return find_child(group, object_name, cls)
+
+        name = ui("nameEdit", QLineEdit)
+        external_id = ui("externalIdEdit", QLineEdit)
+        mobile = ui("mobileEdit", QLineEdit)
+        home = ui("homeEdit", QLineEdit)
+        registered_address = ui("registeredAddressEdit", QLineEdit)
+        contact_address = ui("contactAddressEdit", QLineEdit)
+        work_address = ui("workAddressEdit", QLineEdit)
+        birth_year = ui("birthYearEdit", QLineEdit)
+        age = ui("ageEdit", QLineEdit)
+        identity_note = ui("identityNoteEdit", QLineEdit)
+        notes = ui("notesEdit", QPlainTextEdit)
+        match_rows = (
+            ui("matchHint", QLabel),
+            ui("matchTableSlot", QWidget),
+            ui("matchActionsRow", QHBoxLayout),
+            ui("linkBannerRow", QHBoxLayout),
         )
-        identity_row.addWidget(identity_button)
-        form.addRow("身分證字號", identity_row)
-        form.addRow("手機", mobile)
-        form.addRow("市話", home)
-        form.addRow("戶籍地址", registered_address)
-        form.addRow("聯絡地址", contact_address)
-        form.addRow("工作地址", work_address)
-        form.addRow("身分補充", identity_note)
-        form.addRow("人員備註", notes)
-        helpers = QHBoxLayout()
-        owner_address_button = QPushButton("戶籍地址同地主", group)
+        if prefix == "new":
+            self._match_hint = match_rows[0]
+            self._match_hint.hide()
+
+            self._match_table = put_in_slot(match_rows[1], ContactChoiceTable(group))
+            self._match_table.setMaximumHeight(140)
+            self._match_table.doubleClicked.connect(
+                lambda _index: self._apply_contact_link(
+                    self._match_table.selected_contact()
+                )
+            )
+            self._match_table.hide()
+
+            self._use_match_button = ui("useMatchButton", QPushButton)
+            self._use_match_button.clicked.connect(
+                lambda: self._apply_contact_link(
+                    self._match_table.selected_contact()
+                )
+            )
+            self._use_match_button.hide()
+            # Tab order as the code-built group had it: 人員備註, then the
+            # search result table, then the buttons under it.
+            chain_tab_order([notes, self._match_table, self._use_match_button])
+
+            self._link_banner = ui("linkBanner", QLabel)
+            self._unlink_button = ui("unlinkButton", QPushButton)
+            self._unlink_button.clicked.connect(self._clear_contact_link)
+            self._unlink_button.hide()
+
+            name.textEdited.connect(self._on_name_edited)
+        else:
+            # The search / link rows only exist when adding a new contact.
+            form = group.layout()
+            for item in match_rows:
+                if isinstance(item, QWidget):
+                    row, _role = form.getWidgetPosition(item)
+                else:
+                    row, _role = form.getLayoutPosition(item)
+                if row >= 0:
+                    form.setRowVisible(row, False)
+        identity_button = ui("identityButton", QPushButton)
+        identity_button.setText("👁 顯示" if prefix == "edit" else "👁 隱藏")
+        owner_address_button = ui("ownerAddressButton", QPushButton)
         owner_address_button.setEnabled(bool(self.owner_address))
         owner_address_button.clicked.connect(
             lambda: registered_address.setText(self.owner_address)
         )
-        contact_same_button = QPushButton("聯絡地址同戶籍地址", group)
+        contact_same_button = ui("contactSameButton", QPushButton)
         contact_same_button.clicked.connect(
             lambda: contact_address.setText(registered_address.text().strip())
         )
-        work_same_button = QPushButton("工作地址同聯絡地址", group)
+        work_same_button = ui("workSameButton", QPushButton)
         work_same_button.clicked.connect(
             lambda: work_address.setText(contact_address.text().strip())
         )
-        for button in (
-            owner_address_button,
-            contact_same_button,
-            work_same_button,
-        ):
-            helpers.addWidget(button)
-            self._address_helper_buttons.append(button)
-        helpers.addStretch(1)
-        form.addRow("快速填入", helpers)
+        self._address_helper_buttons.extend(
+            (owner_address_button, contact_same_button, work_same_button)
+        )
         setattr(self, f"{prefix}_name", name)
         setattr(self, f"{prefix}_external_id", external_id)
         setattr(self, f"{prefix}_external_id_button", identity_button)
@@ -324,6 +393,15 @@ class OwnerContactDialog(QDialog):
         setattr(self, f"{prefix}_registered_address", registered_address)
         setattr(self, f"{prefix}_contact_address", contact_address)
         setattr(self, f"{prefix}_work_address", work_address)
+        setattr(self, f"{prefix}_birth_year", birth_year)
+        # age is a pure live display of birth_year, never read when
+        # collecting values to save -- see _contact_values().
+        setattr(self, f"{prefix}_age", age)
+        birth_year.textChanged.connect(
+            lambda text, field_prefix=prefix: getattr(
+                self, f"{field_prefix}_age"
+            ).setText(calculate_age_from_birth_year(text))
+        )
         setattr(self, f"{prefix}_identity_note", identity_note)
         setattr(self, f"{prefix}_contact_notes", notes)
         self._identity_state[prefix] = {
@@ -389,23 +467,16 @@ class OwnerContactDialog(QDialog):
         state["revealed"] = True
         button.setText("👁 隱藏")
 
-    def _relation_group(self, prefix, *, title="與目前地主的關係"):
-        group = QGroupBox(title, self)
-        form = QFormLayout(group)
-        relationship = QComboBox(group)
+    def _relation_group(self, prefix, *, title=None):
+        group = load_ui(self.RELATION_GROUP_UI_FILE, required_names=self.RELATION_GROUP_OBJECT_NAMES)
+        if title:
+            group.setTitle(title)
+        relationship = find_child(group, "relationshipCombo", FluentComboBox)
         relationship.addItems(RELATIONSHIP_TYPES)
-        supplement = QLineEdit(group)
-        supplement.setPlaceholderText("選擇「其他」時必填")
-        primary = QCheckBox("設為主要關係人", group)
-        sort_order = QSpinBox(group)
-        sort_order.setRange(0, 1_000_000)
-        relation_notes = QPlainTextEdit(group)
-        relation_notes.setFixedHeight(80)
-        form.addRow("關係類型 *", relationship)
-        form.addRow("關係補充", supplement)
-        form.addRow("", primary)
-        form.addRow("排序", sort_order)
-        form.addRow("關係備註", relation_notes)
+        supplement = find_child(group, "supplementEdit", QLineEdit)
+        primary = find_child(group, "primaryCheckBox", QCheckBox)
+        sort_order = find_child(group, "sortOrderSpin", QSpinBox)
+        relation_notes = find_child(group, "relationNotesEdit", QPlainTextEdit)
         relationship.currentTextChanged.connect(
             lambda value: supplement.setPlaceholderText(
                 "必填" if value == "其他" else "可選填"
@@ -432,45 +503,114 @@ class OwnerContactDialog(QDialog):
         layout.addWidget(scroll)
         return page
 
-    def _build_existing_contact_page(self):
-        page = QWidget(self)
-        layout = QVBoxLayout(page)
-        search_row = QHBoxLayout()
-        self.search_input = QLineEdit(page)
-        self.search_input.setPlaceholderText(
-            "輸入姓名、手機、市話、戶籍地址或聯絡地址"
+    def _on_name_edited(self, _text_value):
+        if self._linked_contact is not None:
+            return
+        self._search_timer.start()
+
+    def _search_for_matching_contacts(self):
+        if self._linked_contact is not None:
+            return
+        query = self.new_name.text().strip()
+        if len(query) < 2:
+            self._match_hint.hide()
+            self._match_table.hide()
+            self._use_match_button.hide()
+            return
+        try:
+            rows = self.repository.search_owner_contacts(query, limit=5)
+        except Exception:
+            return
+        if not rows:
+            self._match_hint.setText("沒有找到相符的既有關係人。")
+            self._match_hint.show()
+            self._match_table.hide()
+            self._use_match_button.hide()
+            return
+        self._match_table.set_contacts(rows)
+        self._match_table.selectRow(0)
+        self._match_hint.setText(f"找到 {len(rows)} 位可能相符的既有關係人，可直接選用避免重複建立：")
+        self._match_hint.show()
+        self._match_table.show()
+        self._use_match_button.show()
+
+    def _apply_contact_link(self, contact):
+        if not contact:
+            return
+        self._linked_contact = dict(contact)
+        self.new_name.setText(_text(contact.get("name")))
+        self.new_mobile_phone.setText(_text(contact.get("mobile_phone")))
+        self.new_home_phone.setText(_text(contact.get("home_phone")))
+        self.new_registered_address.setText(_text(contact.get("registered_address")))
+        self.new_contact_address.setText(_text(contact.get("contact_address")))
+        self.new_work_address.clear()
+        self.new_birth_year.setText(_text(contact.get("birth_year")))
+        self.new_external_id.clear()
+        self.new_identity_note.clear()
+        self.new_contact_notes.clear()
+        self._match_hint.hide()
+        self._match_table.hide()
+        self._use_match_button.hide()
+        owner_count = int(contact.get("owner_count") or 0)
+        self._link_banner.setText(
+            f"已選擇既有關係人「{_text(contact.get('name'))}」"
+            f"（已連結 {owner_count} 位地主），其他共用欄位已鎖定，"
+            "只需要填寫與目前地主的關係。"
         )
-        self.search_input.returnPressed.connect(self._search_contacts)
-        search_button = QPushButton("搜尋", page)
-        search_button.clicked.connect(self._search_contacts)
-        search_row.addWidget(self.search_input, 1)
-        search_row.addWidget(search_button)
-        layout.addLayout(search_row)
-        self.search_table = ContactChoiceTable(page)
-        self.search_table.itemSelectionChanged.connect(self._sync_selected_contact)
-        layout.addWidget(self.search_table, 1)
-        layout.addWidget(self._relation_group("link"))
-        return page
+        self._unlink_button.show()
+        self._set_shared_fields_enabled(False)
+
+    def _clear_contact_link(self):
+        self._linked_contact = None
+        self._link_banner.setText("")
+        self._unlink_button.hide()
+        self._set_shared_fields_enabled(True)
+        for field in (
+            self.new_mobile_phone,
+            self.new_home_phone,
+            self.new_registered_address,
+            self.new_contact_address,
+            self.new_work_address,
+            self.new_birth_year,
+            self.new_identity_note,
+        ):
+            field.clear()
+        self.new_contact_notes.clear()
+        self.new_name.setFocus()
+
+    def _set_shared_fields_enabled(self, enabled):
+        for widget in (
+            self.new_external_id,
+            self.new_external_id_button,
+            self.new_mobile_phone,
+            self.new_home_phone,
+            self.new_registered_address,
+            self.new_contact_address,
+            self.new_work_address,
+            self.new_birth_year,
+            self.new_identity_note,
+            self.new_contact_notes,
+        ):
+            widget.setEnabled(enabled)
+        for button in self._address_helper_buttons:
+            button.setEnabled(enabled)
 
     def _build_edit_content(self, layout):
         shared_notice = QLabel(
             "此區資料由多位地主共用。修改後，所有連結到此關係人的地主都會同步更新。",
             self,
         )
+        shared_notice.setObjectName("ownerContactSharedNotice")
         shared_notice.setWordWrap(True)
-        shared_notice.setStyleSheet(
-            "background:#3b2f16;color:#fde68a;border:1px solid #92400e;"
-            "border-radius:5px;padding:8px;"
-        )
         layout.addWidget(shared_notice)
         owner_count = int(self.existing.get("owner_count") or 0)
         if owner_count > 1:
             count_label = QLabel(f"目前已連結 {owner_count} 位地主。", self)
-            count_label.setStyleSheet("color:#fbbf24;font-weight:600;")
+            count_label.setObjectName("ownerContactOwnerCount")
             layout.addWidget(count_label)
         layout.addWidget(self._contact_group("edit"))
         relation_notice = QLabel("此區修改只會影響目前地主。", self)
-        relation_notice.setStyleSheet("color:#93c5fd;padding-top:4px;")
+        relation_notice.setObjectName("ownerContactRelationNotice")
         layout.addWidget(relation_notice)
         layout.addWidget(self._relation_group("edit"))
         if self.readonly:
@@ -486,28 +626,6 @@ class OwnerContactDialog(QDialog):
             detail_meta.setWordWrap(True)
             layout.addWidget(detail_meta)
         layout.addStretch(1)
-
-    def _search_contacts(self):
-        query = self.search_input.text().strip()
-        if not query:
-            self.search_table.set_contacts([])
-            QMessageBox.information(
-                self,
-                "請輸入搜尋條件",
-                "請輸入姓名、手機、市話、戶籍地址或聯絡地址。",
-            )
-            return
-        try:
-            rows = self.repository.search_owner_contacts(query, limit=50)
-        except Exception as exc:
-            QMessageBox.warning(self, "搜尋失敗", f"無法搜尋既有關係人：{exc}")
-            return
-        self.search_table.set_contacts(rows)
-        if not rows:
-            QMessageBox.information(self, "沒有結果", "找不到符合條件的關係人。")
-
-    def _sync_selected_contact(self):
-        self._selected_contact = self.search_table.selected_contact()
 
     def _fill_existing(self, values):
         self.edit_name.setText(_text(values.get("name")))
@@ -528,6 +646,7 @@ class OwnerContactDialog(QDialog):
         )
         self.edit_contact_address.setText(_text(values.get("contact_address")))
         self.edit_work_address.setText(_text(values.get("work_address")))
+        self.edit_birth_year.setText(_text(values.get("birth_year")))
         self.edit_identity_note.setText(_text(values.get("identity_note")))
         self.edit_contact_notes.setPlainText(_text(values.get("contact_notes")))
         relationship = _text(values.get("relationship_type"))
@@ -544,6 +663,7 @@ class OwnerContactDialog(QDialog):
             QLineEdit,
             QPlainTextEdit,
             QComboBox,
+            FluentComboBox,
             QCheckBox,
             QSpinBox,
         ):
@@ -580,6 +700,9 @@ class OwnerContactDialog(QDialog):
             "work_address": getattr(
                 self, f"{prefix}_work_address"
             ).text().strip(),
+            "birth_year": getattr(
+                self, f"{prefix}_birth_year"
+            ).text().strip(),
             "identity_note": getattr(
                 self, f"{prefix}_identity_note"
             ).text().strip(),
@@ -612,11 +735,11 @@ class OwnerContactDialog(QDialog):
                     "relation_updated_at"
                 ),
             }
-        if self.mode_tabs.currentIndex() == 1:
+        if self._linked_contact is not None:
             return {
                 "mode": "link",
-                "contact_id": int((self._selected_contact or {}).get("id") or 0),
-                "relation": self._relation_values("link"),
+                "contact_id": int((self._linked_contact or {}).get("id") or 0),
+                "relation": self._relation_values("new"),
             }
         return {
             "mode": "new",
@@ -690,17 +813,351 @@ class OwnerContactDialog(QDialog):
         self.accept()
 
 
-class OwnerContactsWidget(QWidget):
-    HEADERS = (
-        "主要",
-        "姓名",
-        "關係",
-        "手機",
-        "市話",
-        "戶籍地址",
-        "聯絡地址",
-        "身分補充",
-        "狀態",
+class OwnerContactTreeView(QGraphicsView):
+    """Draws the current owner and their contacts as a simple one-level
+    tree: the owner as a root box at the top, one child box per contact
+    below it, connected by right-angle "org chart" connectors -- a
+    vertical stem down from the root to a shared horizontal trunk, then
+    one vertical drop to each contact, labeled with that contact's
+    relationship (e.g. "配偶", "兒子（雙胞胎）") -- per an explicit user
+    request to match a reference org-chart image, instead of the
+    original straight diagonal line per contact. There is no deeper
+    nesting -- owner_contact_relations only ever links an owner directly
+    to a contact, never a contact to another contact -- so this is a
+    star/radial relationship, just drawn top-down like a family tree
+    since that is the shape users actually expect from "關係人樹狀圖".
+
+    A pure alternate view onto OwnerContactsWidget's own `rows`/
+    `owner_label` state (set via set_data()), not a separate data
+    source: double-clicking a node re-selects that same row in the
+    table and re-uses view_selected()/edit_selected(), so every existing
+    action (查看/編輯/停用/複製電話/複製地址) still goes through the one
+    already-tested code path instead of a second copy of it here.
+
+    Zoomable/pannable so a large family (many contacts) doesn't just
+    shrink into unreadable boxes or run off the edge with no way back:
+    set_data() always fits the whole tree in view first (reset_zoom()),
+    the mouse wheel zooms in/out around the cursor, and left-drag pans
+    (QGraphicsView's own ScrollHandDrag) once zoomed in far enough that
+    the tree no longer fits.
+    """
+
+    node_activated = Signal(int)
+
+    _MIN_ZOOM = 0.3
+    _MAX_ZOOM = 4.0
+    _ZOOM_STEP = 1.15
+
+    # Colours come from the theme when drawn (see customer_theme).
+    _COLOR_TOKENS = {
+        "_ROOT_FILL": "green_tint",
+        "_ROOT_BORDER": "green",
+        "_NODE_FILL": "field",
+        "_NODE_BORDER": "rule_strong",
+        "_PRIMARY_FILL": "overdue",
+        "_PRIMARY_BORDER": "amber_ink",
+        "_INACTIVE_FILL": "auto",
+        "_INACTIVE_BORDER": "rule",
+        "_TEXT_COLOR": "ink",
+        "_MUTED_TEXT_COLOR": "ink2",
+        "_LINE_COLOR": "rule_strong",
+        "_LABEL_COLOR": "ink2",
+        "_BACKGROUND_COLOR": "paper",
+    }
+
+    def __getattr__(self, name):
+        token_name = type(self)._COLOR_TOKENS.get(name)
+        if token_name is None:
+            raise AttributeError(name)
+        return qcolor(token_name)
+
+    _NODE_HEIGHT = 58
+    _NODE_MIN_WIDTH = 110
+    _NODE_MAX_WIDTH = 220
+    _NODE_GAP = 28
+    _ROOT_TOP = 16
+    _CHILD_TOP = 140
+    _TRUNK_DROP = 40  # distance below the root box where the shared horizontal trunk sits
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setRenderHint(QPainter.Antialiasing)
+        self.setBackgroundBrush(QBrush(self._BACKGROUND_COLOR))
+        self.setScene(QGraphicsScene(self))
+        self.setDragMode(QGraphicsView.ScrollHandDrag)
+        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
+        self._row_boxes = []  # [(QGraphicsRectItem, row_index)]
+        self._relation_labels = []  # [(label_item, backing_rect_item)]
+        self._empty_label = None
+        self._zoom = 1.0
+
+    def zoom_in(self):
+        self._apply_zoom(self._zoom * self._ZOOM_STEP)
+
+    def zoom_out(self):
+        self._apply_zoom(self._zoom / self._ZOOM_STEP)
+
+    def reset_zoom(self):
+        """Fit the whole tree in view -- the default after every
+        set_data(), so a large family starts as a full overview instead
+        of shrunken, unreadable boxes or a tree that runs off the edge."""
+        scene_rect = self.scene().itemsBoundingRect()
+        if scene_rect.isEmpty():
+            return
+        self.resetTransform()
+        self.fitInView(scene_rect, Qt.KeepAspectRatio)
+        # fitInView() scales by the *viewport's* current pixel size, which
+        # is genuinely 0x0 before this widget has ever been shown/resized
+        # (true in headless tests, and briefly true for any widget that
+        # hasn't been laid out yet) -- that leaves the transform's scale
+        # at 0, and every later zoom_in()/zoom_out() divides by
+        # self._zoom, so a stray 0 here would raise ZeroDivisionError the
+        # next time either is called instead of just doing nothing.
+        computed_zoom = self.transform().m11()
+        self._zoom = computed_zoom if computed_zoom > 0 else 1.0
+
+    def _apply_zoom(self, target_zoom):
+        target_zoom = max(self._MIN_ZOOM, min(self._MAX_ZOOM, target_zoom))
+        factor = target_zoom / self._zoom
+        if factor == 1:
+            return
+        self.scale(factor, factor)
+        self._zoom = target_zoom
+
+    def wheelEvent(self, event):
+        if event.angleDelta().y() > 0:
+            self.zoom_in()
+        elif event.angleDelta().y() < 0:
+            self.zoom_out()
+        event.accept()
+
+    def set_data(self, owner_label, rows):
+        scene = self.scene()
+        scene.clear()
+        self._row_boxes = []
+        self._relation_labels = []
+        if not rows:
+            text = scene.addSimpleText(
+                "目前尚未建立關係人資料。" if owner_label else "請先選取地主"
+            )
+            text.setBrush(QBrush(self._MUTED_TEXT_COLOR))
+            text.setPos(16, 16)
+            self.setSceneRect(scene.itemsBoundingRect().adjusted(-16, -16, 16, 16))
+            self.reset_zoom()
+            return
+
+        root_text = owner_label or "地主"
+        root_box, root_center_x, _root_bottom_y = self._add_node(
+            scene,
+            text=f"地主\n{root_text}",
+            center_x=0,
+            top=self._ROOT_TOP,
+            fill=self._ROOT_FILL,
+            border=self._ROOT_BORDER,
+            text_color=self._TEXT_COLOR,
+            bold=True,
+        )
+
+        widths = [self._node_width(_node_lines(row)) for row in rows]
+        total_width = sum(widths) + self._NODE_GAP * (len(widths) - 1)
+        cursor_x = root_center_x - total_width / 2
+        child_center_xs = []
+        for width in widths:
+            child_center_xs.append(cursor_x + width / 2)
+            cursor_x += width + self._NODE_GAP
+
+        # Right-angle "org chart" connectors per explicit user request
+        # (they supplied a reference image): one vertical stem down from
+        # the root to a shared horizontal trunk, then one vertical drop
+        # from the trunk to each contact -- instead of the previous
+        # straight diagonal line per contact. The stem+trunk are shared
+        # structure, so they always stay solid; only each contact's own
+        # final drop segment (and its relationship label) reflects that
+        # one relation's active/inactive state.
+        root_bottom_y = self._ROOT_TOP + self._NODE_HEIGHT
+        trunk_y = root_bottom_y + self._TRUNK_DROP
+        stem = QGraphicsLineItem(root_center_x, root_bottom_y, root_center_x, trunk_y)
+        stem_pen = QPen(self._LINE_COLOR)
+        stem_pen.setWidth(2)
+        stem.setPen(stem_pen)
+        stem.setZValue(-2)
+        scene.addItem(stem)
+        if len(child_center_xs) > 1:
+            trunk = QGraphicsLineItem(
+                min(child_center_xs), trunk_y, max(child_center_xs), trunk_y
+            )
+            trunk_pen = QPen(self._LINE_COLOR)
+            trunk_pen.setWidth(2)
+            trunk.setPen(trunk_pen)
+            trunk.setZValue(-2)
+            scene.addItem(trunk)
+
+        for row_index, (row, width, child_center_x) in enumerate(
+            zip(rows, widths, child_center_xs)
+        ):
+            active = bool(row.get("is_active"))
+            primary = bool(row.get("is_primary"))
+            if not active:
+                fill, border, text_color = (
+                    self._INACTIVE_FILL,
+                    self._INACTIVE_BORDER,
+                    self._MUTED_TEXT_COLOR,
+                )
+            elif primary:
+                fill, border, text_color = (
+                    self._PRIMARY_FILL,
+                    self._PRIMARY_BORDER,
+                    self._TEXT_COLOR,
+                )
+            else:
+                fill, border, text_color = (
+                    self._NODE_FILL,
+                    self._NODE_BORDER,
+                    self._TEXT_COLOR,
+                )
+            child_box, _child_center_x, child_top_y = self._add_node(
+                scene,
+                text="\n".join(_node_lines(row)),
+                center_x=child_center_x,
+                top=self._CHILD_TOP,
+                fill=fill,
+                border=border,
+                text_color=text_color,
+                bold=primary,
+                width=width,
+                dashed=not active,
+            )
+            child_box.setData(0, row_index)
+            for item in child_box.childItems():
+                item.setData(0, row_index)
+            self._row_boxes.append((child_box, row_index))
+
+            drop = QGraphicsLineItem(child_center_x, trunk_y, child_center_x, child_top_y)
+            pen = QPen(self._LINE_COLOR)
+            pen.setWidth(2)
+            if not active:
+                pen.setStyle(Qt.DashLine)
+            drop.setPen(pen)
+            # Stacking order matters here, not just visually but for
+            # painting *correctness*: QGraphicsScene paints equal-Z items
+            # in insertion order, so without an explicit order the
+            # label's own opaque backing rect -- added to the scene after
+            # the label itself -- was painting directly on top of the
+            # text and hiding it completely (a real bug caught from a
+            # user screenshot: every relationship label showed as a
+            # blank notch on the connecting line, not text). line sits at
+            # the bottom, backing above it (so it still blanks out the
+            # line under the label), and the label text on top of both.
+            drop.setZValue(-2)
+            scene.addItem(drop)
+
+            label_text = _relation_label(row) or "關係人"
+            label = QGraphicsSimpleTextItem(label_text)
+            label.setBrush(QBrush(self._LABEL_COLOR))
+            label_font = QFont(label.font())
+            label_font.setPointSize(max(label_font.pointSize() - 1, 7))
+            label.setFont(label_font)
+            label_rect = label.boundingRect()
+            mid_x = child_center_x
+            mid_y = (trunk_y + child_top_y) / 2
+            backing = QGraphicsRectItem(
+                mid_x - label_rect.width() / 2 - 4,
+                mid_y - label_rect.height() / 2 - 1,
+                label_rect.width() + 8,
+                label_rect.height() + 2,
+            )
+            backing.setBrush(QBrush(self._BACKGROUND_COLOR))
+            backing.setPen(QPen(Qt.NoPen))
+            backing.setZValue(-1)
+            scene.addItem(backing)
+            label.setPos(mid_x - label_rect.width() / 2, mid_y - label_rect.height() / 2)
+            label.setZValue(0)
+            scene.addItem(label)
+            self._relation_labels.append((label, backing))
+
+            cursor_x += width + self._NODE_GAP
+
+        self.setSceneRect(scene.itemsBoundingRect().adjusted(-24, -24, 24, 24))
+        self.reset_zoom()
+
+    def _node_width(self, lines):
+        metrics = QFontMetrics(self.font())
+        widest = max((metrics.horizontalAdvance(line) for line in lines), default=0)
+        return min(max(widest + 32, self._NODE_MIN_WIDTH), self._NODE_MAX_WIDTH)
+
+    def _add_node(
+        self, scene, *, text, center_x, top, fill, border, text_color, bold,
+        width=None, dashed=False,
+    ):
+        lines = text.split("\n")
+        width = width if width is not None else self._node_width(lines)
+        rect = QGraphicsRectItem(
+            center_x - width / 2, top, width, self._NODE_HEIGHT
+        )
+        rect.setBrush(QBrush(fill))
+        pen = QPen(border)
+        pen.setWidth(2)
+        if dashed:
+            pen.setStyle(Qt.DashLine)
+        rect.setPen(pen)
+        scene.addItem(rect)
+
+        label = QGraphicsSimpleTextItem(text, rect)
+        font = QFont(self.font())
+        font.setBold(bold)
+        label.setFont(font)
+        label.setBrush(QBrush(text_color))
+        label_rect = label.boundingRect()
+        label.setPos(
+            center_x - label_rect.width() / 2,
+            top + (self._NODE_HEIGHT - label_rect.height()) / 2,
+        )
+        return rect, center_x, top + self._NODE_HEIGHT
+
+    def mouseDoubleClickEvent(self, event):
+        item = self.itemAt(event.pos())
+        row_index = item.data(0) if item is not None else None
+        if row_index is None and item is not None:
+            row_index = item.parentItem().data(0) if item.parentItem() else None
+        if row_index is not None:
+            self.node_activated.emit(int(row_index))
+            return
+        super().mouseDoubleClickEvent(event)
+
+
+def _node_lines(row):
+    lines = [_text(row.get("name")) or "（未命名）"]
+    if not bool(row.get("is_active")):
+        lines.append("已停用")
+    elif row.get("is_primary"):
+        lines.append("★ 主要聯絡人")
+    phones = phone_choices(row)
+    if phones:
+        lines.append(phones[0][1])
+    return lines
+
+
+class OwnerContactsWidget(QWidget, DesktopSupportMixin):
+    ui_file = "main/owner_contacts.ui"
+    ui_object_names = (
+        "ownerContactsOwnerLabel",
+        "addButton",
+        "editButton",
+        "deactivateButton",
+        "reactivateButton",
+        "copyPhoneButton",
+        "copyAddressButton",
+        "refreshButton",
+        "showInactiveCheckBox",
+        "listViewButton",
+        "treeViewButton",
+        "treeZoomOutButton",
+        "treeZoomInButton",
+        "treeZoomResetButton",
+        "viewStack",
+        "ownerContactsTable",
+        "ownerContactsStatusLabel",
     )
 
     def __init__(
@@ -721,60 +1178,43 @@ class OwnerContactsWidget(QWidget):
         self.owner_label = ""
         self.rows = []
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        self.owner_label_widget = QLabel("請先選取地主", self)
-        self.owner_label_widget.setStyleSheet("color:#dbeafe;font-weight:600;")
-        layout.addWidget(self.owner_label_widget)
+        # Layout: ui/main/owner_contacts.ui; colours: ui/theme.qss.  The 樹狀圖
+        # view is drawn in code and becomes the second page of viewStack.
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.owner_label_widget = find_child(content, "ownerContactsOwnerLabel", QLabel)
+        self.add_button = find_child(content, "addButton", QPushButton)
+        self.edit_button = find_child(content, "editButton", QPushButton)
+        self.edit_button.setText("查看" if self.current_role == "viewer" else "編輯")
+        self.deactivate_button = find_child(content, "deactivateButton", QPushButton)
+        self.reactivate_button = find_child(content, "reactivateButton", QPushButton)
+        self.copy_phone_button = find_child(content, "copyPhoneButton", QPushButton)
+        self.copy_address_button = find_child(content, "copyAddressButton", QPushButton)
+        self.refresh_button = find_child(content, "refreshButton", QPushButton)
+        self.show_inactive = find_child(content, "showInactiveCheckBox", QCheckBox)
 
-        toolbar = QGridLayout()
-        toolbar.setContentsMargins(0, 0, 0, 0)
-        toolbar.setHorizontalSpacing(6)
-        toolbar.setVerticalSpacing(6)
-        self.add_button = QPushButton("新增", self)
-        self.edit_button = QPushButton(
-            "查看" if self.current_role == "viewer" else "編輯", self
-        )
-        self.deactivate_button = QPushButton("停用", self)
-        self.reactivate_button = QPushButton("重新啟用", self)
-        self.copy_phone_button = QPushButton("複製電話", self)
-        self.copy_address_button = QPushButton("複製地址", self)
-        self.refresh_button = QPushButton("重新整理", self)
-        self.show_inactive = QCheckBox("顯示已停用", self)
-        toolbar_buttons = (
-            self.add_button,
-            self.edit_button,
-            self.deactivate_button,
-            self.reactivate_button,
-            self.copy_phone_button,
-            self.copy_address_button,
-            self.refresh_button,
-        )
-        for position, button in enumerate(toolbar_buttons):
-            row, column = divmod(position, 4)
-            button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            toolbar.addWidget(button, row, column)
-        self.show_inactive.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
-        toolbar.addWidget(self.show_inactive, 1, 3)
-        for column in range(4):
-            toolbar.setColumnStretch(column, 1)
-        layout.addLayout(toolbar)
+        self.list_view_button = find_child(content, "listViewButton", QPushButton)
+        self.tree_view_button = find_child(content, "treeViewButton", QPushButton)
+        self.tree_zoom_out_button = find_child(content, "treeZoomOutButton", QPushButton)
+        self.tree_zoom_in_button = find_child(content, "treeZoomInButton", QPushButton)
+        self.tree_zoom_reset_button = find_child(content, "treeZoomResetButton", QPushButton)
 
-        self.table = QTableWidget(0, len(self.HEADERS), self)
-        self.table.setHorizontalHeaderLabels(self.HEADERS)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.verticalHeader().setVisible(False)
-        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table = find_child(content, "ownerContactsTable", QTableWidget)
         self.table.itemSelectionChanged.connect(self._update_buttons)
         self.table.doubleClicked.connect(lambda _index: self.view_selected())
-        layout.addWidget(self.table, 1)
 
-        self.status_label = QLabel("", self)
-        self.status_label.setWordWrap(True)
-        self.status_label.setStyleSheet("color:#9ca3af;")
-        layout.addWidget(self.status_label)
+        self.view_stack = find_child(content, "viewStack", QStackedWidget)
+        self.tree_view = OwnerContactTreeView(self)
+        self.tree_view.node_activated.connect(self._activate_tree_node)
+        self.view_stack.addWidget(self.tree_view)
+        QWidget.setTabOrder(self.table, self.tree_view)
+
+        self.list_view_button.clicked.connect(lambda: self._set_tree_view_active(False))
+        self.tree_view_button.clicked.connect(lambda: self._set_tree_view_active(True))
+        self.tree_zoom_in_button.clicked.connect(self.tree_view.zoom_in)
+        self.tree_zoom_out_button.clicked.connect(self.tree_view.zoom_out)
+        self.tree_zoom_reset_button.clicked.connect(self.tree_view.reset_zoom)
+
+        self.status_label = find_child(content, "ownerContactsStatusLabel", QLabel)
 
         self.add_button.clicked.connect(self.add_contact)
         self.edit_button.clicked.connect(self.edit_selected)
@@ -811,10 +1251,30 @@ class OwnerContactsWidget(QWidget):
         self.record_id = None
         self.owner_label = ""
         self.rows = []
-        self.table.setRowCount(0)
+        self._clear_views()
         self.owner_label_widget.setText("請先選取地主")
         self.status_label.setText("沒有選取地主，關係人操作已停用。")
         self._update_buttons()
+
+    def _clear_views(self):
+        self.table.setRowCount(0)
+        self.tree_view.set_data(self.owner_label, [])
+
+    def _set_tree_view_active(self, show_tree):
+        self.list_view_button.setChecked(not show_tree)
+        self.tree_view_button.setChecked(show_tree)
+        self.view_stack.setCurrentWidget(self.tree_view if show_tree else self.table)
+        for button in (
+            self.tree_zoom_out_button,
+            self.tree_zoom_in_button,
+            self.tree_zoom_reset_button,
+        ):
+            button.setEnabled(show_tree)
+
+    def _activate_tree_node(self, row_index):
+        if 0 <= row_index < self.table.rowCount():
+            self.table.setCurrentCell(row_index, 0)
+            self.view_selected()
 
     def refresh(self):
         if self.record_id is None:
@@ -823,7 +1283,7 @@ class OwnerContactsWidget(QWidget):
         repository = self.repository()
         if not hasattr(repository, "list_owner_contacts"):
             self.rows = []
-            self.table.setRowCount(0)
+            self._clear_views()
             self.status_label.setText("此功能需要連線至支援關係人管理的正式伺服器。")
             self._update_buttons()
             return
@@ -836,7 +1296,7 @@ class OwnerContactsWidget(QWidget):
             )
         except Exception as exc:
             self.rows = []
-            self.table.setRowCount(0)
+            self._clear_views()
             self.status_label.setText(f"關係人載入失敗：{exc}")
             self._update_buttons()
             return
@@ -871,16 +1331,17 @@ class OwnerContactsWidget(QWidget):
                 if column in {5, 6, 7}:
                     item.setToolTip(_text(value))
                 if not active:
-                    item.setForeground(QColor("#9ca3af"))
-                    item.setBackground(QColor("#2d2d2d"))
+                    item.setForeground(qcolor("ink2"))
+                    item.setBackground(qcolor("auto"))
                 elif row_data.get("is_primary"):
-                    item.setBackground(QColor("#374151"))
+                    item.setBackground(qcolor("muted_bg"))
                 self.table.setItem(row, column, item)
         self.table.resizeColumnsToContents()
         for column in (5, 6, 7):
             self.table.setColumnWidth(
                 column, min(self.table.columnWidth(column), 260)
             )
+        self.tree_view.set_data(self.owner_label, self.rows)
         self._update_buttons()
 
     def selected_relation(self):
@@ -934,45 +1395,62 @@ class OwnerContactsWidget(QWidget):
             owner_address=self._owner_address(),
             parent=self,
         )
-        if dialog.exec() != QDialog.Accepted:
-            return
-        values = dialog.result_values()
-        try:
+
+        def on_accepted():
+            values = dialog.result_values()
             if values["mode"] == "link":
-                repository.link_owner_contact(
-                    self.record_id,
-                    {
-                        "contact_id": values["contact_id"],
-                        "relation": values["relation"],
-                    },
-                )
-            else:
-                action = self._duplicate_action(values["contact"])
-                if action is None:
-                    return
-                if isinstance(action, dict):
+                try:
                     repository.link_owner_contact(
                         self.record_id,
                         {
-                            "contact_id": int(action["id"]),
+                            "contact_id": values["contact_id"],
                             "relation": values["relation"],
                         },
                     )
-                else:
-                    repository.create_owner_contact(
-                        self.record_id,
-                        {
-                            "contact": values["contact"],
-                            "relation": values["relation"],
-                        },
-                    )
-        except Exception as exc:
-            QMessageBox.warning(self, "新增失敗", f"無法建立關係人：{exc}")
-            return
-        self.refresh()
-        self.status_label.setText("關係人已新增。")
+                except Exception as exc:
+                    QMessageBox.warning(self, "新增失敗", f"無法建立關係人：{exc}")
+                    return
+                self.refresh()
+                self.status_label.setText("關係人已新增。")
+                return
 
-    def _duplicate_action(self, contact):
+            def on_duplicate_action_resolved(action):
+                if action is None:
+                    return
+                try:
+                    if isinstance(action, dict):
+                        repository.link_owner_contact(
+                            self.record_id,
+                            {
+                                "contact_id": int(action["id"]),
+                                "relation": values["relation"],
+                            },
+                        )
+                    else:
+                        repository.create_owner_contact(
+                            self.record_id,
+                            {
+                                "contact": values["contact"],
+                                "relation": values["relation"],
+                            },
+                        )
+                except Exception as exc:
+                    QMessageBox.warning(self, "新增失敗", f"無法建立關係人：{exc}")
+                    return
+                self.refresh()
+                self.status_label.setText("關係人已新增。")
+
+            self._resolve_duplicate_action(values["contact"], on_duplicate_action_resolved)
+
+        self._show_non_modal_dialog(dialog, on_accepted=on_accepted)
+
+    def _resolve_duplicate_action(self, contact, on_result):
+        """Async counterpart of the old _duplicate_action(): instead of
+        returning True/None/dict synchronously, calls on_result(...) with
+        that same value once it is known -- immediately if no picker
+        dialog is needed, or from ExistingContactPickerDialog's
+        completion callback if one is shown. See add_contact() for the
+        one caller."""
         repository = self.repository()
         duplicates = repository.find_owner_contact_duplicates(
             name=contact.get("name", ""),
@@ -983,7 +1461,8 @@ class OwnerContactsWidget(QWidget):
             limit=20,
         )
         if not duplicates:
-            return True
+            on_result(True)
+            return
         message = QMessageBox(self)
         message.setWindowTitle("發現可能重複的關係人")
         message.setIcon(QMessageBox.Warning)
@@ -1005,13 +1484,20 @@ class OwnerContactsWidget(QWidget):
         message.exec()
         clicked = message.clickedButton()
         if clicked == create_anyway:
-            return True
+            on_result(True)
+            return
         if clicked != use_existing or clicked == cancel:
-            return None
+            on_result(None)
+            return
         picker = ExistingContactPickerDialog(duplicates, self)
-        if picker.exec() != QDialog.Accepted:
-            return None
-        return picker.selected_contact()
+
+        def on_picker_finished():
+            if picker.result() == QDialog.Accepted:
+                on_result(picker.selected_contact())
+            else:
+                on_result(None)
+
+        self._show_non_modal_dialog(picker, on_finished=on_picker_finished)
 
     def edit_selected(self):
         selected = self.selected_relation()
@@ -1036,29 +1522,33 @@ class OwnerContactsWidget(QWidget):
             readonly=not self.can_write,
             parent=self,
         )
-        if dialog.exec() != QDialog.Accepted or not self.can_write:
-            return
-        values = dialog.result_values()
-        try:
-            repository.update_owner_contact(
-                self.record_id,
-                selected["relation_id"],
-                {
-                    "contact": values["contact"],
-                    "relation": values["relation"],
-                    "expected_contact_updated_at": values.get(
-                        "expected_contact_updated_at"
-                    ),
-                    "expected_relation_updated_at": values.get(
-                        "expected_relation_updated_at"
-                    ),
-                },
-            )
-        except Exception as exc:
-            QMessageBox.warning(self, "儲存失敗", f"無法更新關係人：{exc}")
-            return
-        self.refresh()
-        self.status_label.setText("關係人資料已更新。")
+
+        def on_accepted():
+            if not self.can_write:
+                return
+            values = dialog.result_values()
+            try:
+                repository.update_owner_contact(
+                    self.record_id,
+                    selected["relation_id"],
+                    {
+                        "contact": values["contact"],
+                        "relation": values["relation"],
+                        "expected_contact_updated_at": values.get(
+                            "expected_contact_updated_at"
+                        ),
+                        "expected_relation_updated_at": values.get(
+                            "expected_relation_updated_at"
+                        ),
+                    },
+                )
+            except Exception as exc:
+                QMessageBox.warning(self, "儲存失敗", f"無法更新關係人：{exc}")
+                return
+            self.refresh()
+            self.status_label.setText("關係人資料已更新。")
+
+        self._show_non_modal_dialog(dialog, on_accepted=on_accepted)
 
     def view_selected(self):
         selected = self.selected_relation()
@@ -1081,35 +1571,40 @@ class OwnerContactsWidget(QWidget):
             owner_address=self._owner_address(),
             parent=self,
         )
-        result = dialog.exec()
-        if (
-            self.can_write
-            and result == QDialog.Accepted
-            and getattr(dialog, "edit_requested", False)
-        ):
-            self._open_edit_dialog(repository, existing, selected)
+
+        def on_finished():
+            if (
+                self.can_write
+                and dialog.result() == QDialog.Accepted
+                and getattr(dialog, "edit_requested", False)
+            ):
+                self._open_edit_dialog(repository, existing, selected)
+
+        self._show_non_modal_dialog(dialog, on_finished=on_finished)
 
     def deactivate_selected(self):
         selected = self.selected_relation()
         if not self.can_write or not selected or not selected.get("is_active"):
             return
         dialog = DeactivateRelationDialog(selected.get("name"), self)
-        if dialog.exec() != QDialog.Accepted:
-            return
-        try:
-            self.repository().deactivate_owner_contact(
-                self.record_id,
-                selected["relation_id"],
-                reason=dialog.reason(),
-                expected_relation_updated_at=selected.get(
-                    "relation_updated_at"
-                ),
-            )
-        except Exception as exc:
-            QMessageBox.warning(self, "停用失敗", f"無法停用關係：{exc}")
-            return
-        self.refresh()
-        self.status_label.setText("關係已停用。")
+
+        def on_accepted():
+            try:
+                self.repository().deactivate_owner_contact(
+                    self.record_id,
+                    selected["relation_id"],
+                    reason=dialog.reason(),
+                    expected_relation_updated_at=selected.get(
+                        "relation_updated_at"
+                    ),
+                )
+            except Exception as exc:
+                QMessageBox.warning(self, "停用失敗", f"無法停用關係：{exc}")
+                return
+            self.refresh()
+            self.status_label.setText("關係已停用。")
+
+        self._show_non_modal_dialog(dialog, on_accepted=on_accepted)
 
     def reactivate_selected(self):
         selected = self.selected_relation()

@@ -32,6 +32,11 @@ logs/
 .build-preserved-data/
 .test-runtime/
 
+# Downloaded offline map tiles (see download_offline_map_tiles.bat) --
+# the manifest listing which tiles exist is committed; the actual PNGs
+# are a local, one-time download, never checked in.
+offline_map_tiles/
+
 # Local GitHub staging checkout
 LandCustomerSystem/
 

@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, Query
 
 from customer_api.auth import ApiSession
+from customer_api.postgres_owner_match import OwnerAttachError
 from customer_api.schemas import (
     RecordImportBatch,
     RecordUpdateWithHistory,
@@ -20,6 +21,7 @@ def register_record_routes(app, *, settings, source, current_session, editor_use
         q: str = Query(default="", max_length=200),
         district: str = Query(default="", max_length=100),
         section: str = Query(default="", max_length=100),
+        subsection: str = Query(default="", max_length=100),
         land_number: str = Query(default="", max_length=100),
         owner_name: str = Query(default="", max_length=100),
         offset: int = Query(default=0, ge=0),
@@ -31,6 +33,7 @@ def register_record_routes(app, *, settings, source, current_session, editor_use
             filters={
                 "district": district,
                 "section": section,
+                "subsection": subsection,
                 "land_number": land_number,
                 "owner_name": owner_name,
             },
@@ -48,12 +51,62 @@ def register_record_routes(app, *, settings, source, current_session, editor_use
             raise HTTPException(status_code=404, detail="找不到資料。")
         return record
 
+    @app.get("/api/v1/owner-candidates")
+    def owner_candidates(
+        user: Annotated[AuthenticatedUser, Depends(editor_user)],
+        owner_name: str = Query(default="", max_length=200),
+        external_id: str = Query(default="", max_length=100),
+        address: str = Query(default="", max_length=1000),
+        phone: str = Query(default="", max_length=60),
+        rejected_record_id: Annotated[list[int] | None, Query()] = None,
+        limit: int = Query(default=10, ge=1, le=30),
+    ):
+        """Existing owners a hand-typed new record probably belongs to.
+
+        Identity numbers and phones are masked in the answer; matching runs
+        here on the decrypted values.  SQLite (單機) sources answer
+        ``supported: false`` and the desktop then simply saves as before.
+        """
+
+        finder = getattr(source, "owner_candidates", None)
+        if not callable(finder):
+            return {"supported": False, "items": [], "exact_owner_id": None}
+        result = finder(
+            user,
+            {
+                "owner_name": owner_name,
+                "external_id": external_id,
+                "address": address,
+                "phone": phone,
+            },
+            limit=limit,
+            rejected_record_ids=rejected_record_id or (),
+        )
+        return {"supported": True, **result}
+
     @app.post("/api/v1/records", status_code=201)
     def create_record(
         payload: RecordWrite,
         user: Annotated[AuthenticatedUser, Depends(editor_user)],
     ):
-        record_id = source.save_record(user, payload.normalized_values())
+        values = payload.normalized_values()
+        if values.get("owner_id") is not None and not callable(
+            getattr(source, "owner_candidates", None)
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="這個資料來源不支援指定既有地主。",
+            )
+        try:
+            record_id = source.save_record(user, values)
+        except OwnerAttachError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except KeyError as exc:
+            if values.get("owner_id") is None:
+                raise
+            raise HTTPException(
+                status_code=404, detail="找不到選擇的既有地主，請重新查詢。"
+            ) from exc
         return {"id": record_id}
 
     @app.put("/api/v1/records/{record_id}")
@@ -115,8 +168,11 @@ def register_record_routes(app, *, settings, source, current_session, editor_use
             }
             for item in payload.items
         ]
+        options = (
+            {} if payload.urban_plan_id is None else {"urban_plan_id": payload.urban_plan_id}
+        )
         try:
-            return source.import_records(user, items, payload.source_file_name)
+            return source.import_records(user, items, payload.source_file_name, **options)
         except KeyError as exc:
             raise HTTPException(
                 status_code=404, detail="匯入要更新的資料不存在。"

@@ -2,6 +2,7 @@
 
 import csv
 import re
+from datetime import date
 
 
 PING_CONVERSION_FACTOR = 0.3025
@@ -11,6 +12,7 @@ LEGACY_SHARED_LAND_BATCH_FIELDS = (
     "address",
     "numerator",
     "denominator",
+    "registration_reason",
     "note",
     "visit_log",
 )
@@ -108,11 +110,69 @@ def format_ping_text(value):
     return "" if number is None else f"{number:.2f}"
 
 
+def calculate_age_from_birth_year(value, *, today=None):
+    """Turn a 4-digit Gregorian birth year into a whole-number age string.
+
+    Only the year is known (not month/day), so this is a simple calendar-year
+    subtraction -- the same approximation used when someone says "he was born
+    in 1965" rather than giving an exact birthday.
+    """
+
+    text = str(value or "").strip()
+    if not text.isdigit() or len(text) != 4:
+        return ""
+    year = int(text)
+    current_year = (today or date.today()).year
+    if not (1900 <= year <= current_year):
+        return ""
+    return str(current_year - year)
+
+
 def mask_identity_text(value):
     text = str(value or "").strip()
     if len(text) <= 5:
         return text
     return text[:4] + ("*" * (len(text) - 5)) + text[-1]
+
+
+def mask_identity_to_four_digits(value):
+    """Privacy-mask an identity number to its leading letter + first 3
+    digits + last digit -- explicit user spec for the "測試" privacy mask
+    toggle: "英文+數字前三碼+數字最後一碼", no filler characters (unlike
+    mask_identity_text()'s lighter, always-on "前4碼+星號+末1碼"
+    convenience mask used elsewhere). "H123456789" becomes "H1239".
+
+    Structurally this is just "first 4 characters + last character" --
+    text[:4] happens to already be the leading letter plus the first 3
+    digits for a real Taiwan ID, so no special-casing of the letter
+    itself is needed. Values too short to have a real middle portion to
+    hide (<=4 characters) are returned unchanged rather than duplicating
+    their own last character.
+    """
+    text = str(value or "").strip()
+    if len(text) <= 4:
+        return text
+    return text[:4] + text[-1]
+
+
+def mask_owner_display_name(value):
+    """Reduce an owner name to just its surname for the privacy mask toggle.
+
+    A 1-3 character name keeps only its first character (covers the
+    overwhelming majority of Chinese names -- a single-character surname
+    plus a 1-2 character given name). A 4+ character name keeps its first
+    two characters instead, so a two-character compound surname (歐陽,
+    司馬, ...) followed by a given name is not truncated into a different,
+    unrelated surname. This is a length heuristic, not a real compound-
+    surname dictionary lookup -- it will occasionally keep one character
+    too many/few for an unusual name shape, but never leaks more of the
+    given name than that.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return text
+    keep = 2 if len(text) >= 4 else 1
+    return text[:keep]
 
 
 TAIWAN_ID_LETTER_VALUES = {
@@ -197,6 +257,7 @@ def build_duplicate_signature(data):
     parts = [
         normalize_match_text(data.get("district")),
         normalize_match_text(data.get("section")),
+        normalize_match_text(data.get("subsection")),
         normalize_match_text(data.get("registration_order")),
         normalize_match_text(data.get("land_number")),
         normalize_match_text(data.get("owner_name")),
@@ -256,7 +317,24 @@ def parse_shared_land_rows(text):
         if record["denominator"] and (denominator is None or denominator <= 0):
             errors.append(f"第 {line_number} 行分母必須大於 0")
             continue
-        records.append({key: value or None for key, value in record.items()})
+        records.append(
+            {"_line_number": line_number, **{key: value or None for key, value in record.items()}}
+        )
     if not records and not errors:
         errors.append("請至少輸入一筆所有權人資料")
+    else:
+        seen_orders = {}
+        for record in records:
+            order = record.get("registration_order")
+            if not order:
+                continue
+            if order in seen_orders:
+                errors.append(
+                    f"第 {record['_line_number']} 行登記次序「{order}」"
+                    f"與第 {seen_orders[order]} 行重複，請確認是否貼錯或漏改序號"
+                )
+                continue
+            seen_orders[order] = record["_line_number"]
+    for record in records:
+        record.pop("_line_number", None)
     return records, errors

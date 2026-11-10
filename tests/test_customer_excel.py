@@ -67,6 +67,7 @@ class CustomerExcelTests(unittest.TestCase):
         data = {
             "district": "中壢區",
             "section": "中路段",
+            "subsection": "",
             "land_number": "1-3",
             "owner_name": None,
         }

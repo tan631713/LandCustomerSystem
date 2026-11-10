@@ -296,8 +296,15 @@ def recover_admin_password(
     recovery_username,
     recovery_password,
     new_admin_password,
+    target_username="admin",
 ):
-    """Reset admin locally after proving another active account owns the data key."""
+    """Reset an admin locally after proving another active account owns the data key.
+
+    target_username defaults to the historical "admin" account, whose
+    behaviour (including creating it when missing) is unchanged. Any other
+    target must already exist and already be an admin; this tool never
+    creates or promotes anyone else.
+    """
 
     if len(str(new_admin_password)) < 10:
         raise ValueError("新的 admin 密碼至少需要 10 個字元。")
@@ -334,11 +341,22 @@ def recover_admin_password(
         )
         data_key = unwrap_account_data_key(account, recovery_password)
         matched_sample = prove_data_key_matches_server(connection, data_key)
-        admin_rows = connection.execute(
-            "SELECT id FROM users WHERE lower(username) = 'admin'"
-        ).fetchall()
-        if len(admin_rows) > 1:
-            raise ValueError("伺服器存在多個 admin 帳號，未進行修改。")
+        target = str(target_username or "admin").strip() or "admin"
+        is_default_admin = target.lower() == "admin"
+        if is_default_admin:
+            admin_rows = connection.execute(
+                "SELECT id FROM users WHERE lower(username) = 'admin'"
+            ).fetchall()
+            if len(admin_rows) > 1:
+                raise ValueError("伺服器存在多個 admin 帳號，未進行修改。")
+        else:
+            target_rows = connection.execute(
+                "SELECT id, role FROM users WHERE lower(username) = lower(%s)",
+                (target,),
+            ).fetchall()
+            if len(target_rows) != 1 or str(target_rows[0][1] or "").lower() != "admin":
+                raise ValueError("要重設的管理員帳號不存在或不是管理員，未修改任何資料。")
+            admin_rows = [(target_rows[0][0],)]
         password_salt, password_hash = hash_password(new_admin_password)
         encryption_salt = os.urandom(16).hex()
         wrapped_data_key = make_fernet(
@@ -361,7 +379,11 @@ def recover_admin_password(
                 ),
             )
             recovery_status = "admin_password_reset"
-            recovery_summary = "家中主機離線重設 admin 密碼"
+            recovery_summary = (
+                "家中主機離線重設 admin 密碼"
+                if is_default_admin
+                else f"家中主機離線重設管理員密碼（{target}）"
+            )
         else:
             connection.execute(
                 """
@@ -395,7 +417,7 @@ def recover_admin_password(
         )
     return {
         "status": recovery_status,
-        "username": "admin",
+        "username": "admin" if is_default_admin else target,
         "verified_by": str(row[1]),
         "data_key_verified": matched_sample,
     }

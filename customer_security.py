@@ -10,7 +10,15 @@ from cryptography.fernet import Fernet, InvalidToken
 
 AUTH_ITERATIONS = 200_000
 ENCRYPTION_PREFIX = "enc:v1:"
-ENCRYPTED_FIELDS = {"owner_name", "external_id", "address", "note", "visit_log", "name"}
+ENCRYPTED_FIELDS = {
+    "owner_name",
+    "external_id",
+    "address",
+    "note",
+    "visit_log",
+    "name",
+    "birth_year",
+}
 DECRYPTION_ERROR_TEXT = "無法解密"
 
 

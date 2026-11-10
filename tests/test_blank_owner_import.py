@@ -9,6 +9,7 @@ class BlankOwnerImportTests(unittest.TestCase):
         required_land = {
             "district": "中壢區",
             "section": "中路段",
+            "subsection": "",
             "land_number": "1-3",
         }
 
@@ -25,12 +26,14 @@ class BlankOwnerImportTests(unittest.TestCase):
         first = {
             "district": "中壢區",
             "section": "中路段",
+            "subsection": "",
             "land_number": "1-3",
             "owner_name": "",
         }
         second = {
             "district": "中壢區",
             "section": "中路段",
+            "subsection": "",
             "land_number": "1-5",
             "owner_name": None,
         }
@@ -44,6 +47,7 @@ class BlankOwnerImportTests(unittest.TestCase):
         record = {
             "district": "中壢區",
             "section": "中路段",
+            "subsection": "",
             "land_number": "1-3",
             "owner_name": None,
         }

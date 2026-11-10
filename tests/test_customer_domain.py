@@ -5,6 +5,8 @@ from customer_domain import (
     calculate_ping,
     calculate_total_declared_value,
     mask_identity_text,
+    mask_identity_to_four_digits,
+    mask_owner_display_name,
     normalize_taiwan_identity,
     normalize_search_text,
     parse_number,
@@ -34,9 +36,26 @@ class CustomerDomainTests(unittest.TestCase):
         self.assertEqual(calculate_total_declared_value(record), "1,000,000")
         self.assertEqual(calculate_ping(record), "15.12")
 
+    def test_owner_display_name_mask_keeps_only_the_surname(self):
+        self.assertEqual(mask_owner_display_name(""), "")
+        self.assertEqual(mask_owner_display_name(None), "")
+        self.assertEqual(mask_owner_display_name("王"), "王")
+        self.assertEqual(mask_owner_display_name("王小"), "王")
+        self.assertEqual(mask_owner_display_name("王小明"), "王")
+        # 4+ characters keeps 2 -- covers a two-character compound surname
+        # (歐陽, 司馬, ...) followed by a given name without truncating
+        # into an unrelated single character.
+        self.assertEqual(mask_owner_display_name("歐陽小華"), "歐陽")
+        self.assertEqual(mask_owner_display_name("  王小明  "), "王")
+
     def test_identity_mask_and_duplicate_signature(self):
         self.assertEqual(mask_identity_text("A123456789"), "A123*****9")
         self.assertEqual(mask_identity_text("A1234"), "A1234")
+        self.assertEqual(mask_identity_to_four_digits("H123456789"), "H1239")
+        self.assertEqual(mask_identity_to_four_digits("A1234"), "A1234")
+        self.assertEqual(mask_identity_to_four_digits("A12"), "A12")
+        self.assertEqual(mask_identity_to_four_digits(""), "")
+        self.assertEqual(mask_identity_to_four_digits(None), "")
         self.assertEqual(
             normalize_taiwan_identity(" a123456789 "), "A123456789"
         )
@@ -45,6 +64,7 @@ class CustomerDomainTests(unittest.TestCase):
         first = {
             "district": " 中正區 ",
             "section": "一段",
+            "subsection": "",
             "registration_order": "1",
             "land_number": "100",
             "owner_name": "王小明",
@@ -77,7 +97,7 @@ class CustomerDomainTests(unittest.TestCase):
         self.assertIn("分母必須大於 0", errors[0])
 
         records, errors = parse_shared_land_rows(
-            "林先生、C123456789、桃園市、2、5、追蹤、二訪"
+            "林先生、C123456789、桃園市、2、5、收購、追蹤、二訪"
         )
         self.assertFalse(errors)
         self.assertEqual(
@@ -88,6 +108,7 @@ class CustomerDomainTests(unittest.TestCase):
                 "address",
                 "numerator",
                 "denominator",
+                "registration_reason",
                 "note",
                 "visit_log",
             ],

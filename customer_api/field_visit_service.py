@@ -32,6 +32,9 @@ STATUS_TRANSITIONS = {
     "completed": frozenset(),
     "cancelled": frozenset({"planned"}),
 }
+# Statuses reached while standing at the landowner's address.  Only these may
+# carry an opt-in request to remember the phone GPS as the address location.
+ARRIVAL_LOCATION_STATUSES = frozenset({"in_progress", "completed", "skipped", "postponed"})
 
 
 class FieldVisitTransitionError(ValueError):
@@ -181,6 +184,17 @@ def _candidate_snapshot(items):
     ]
 
 
+def _stop_group_key(item: dict):
+    """Land shares of the same owner are visited as one stop."""
+
+    owner_id = item.get("owner_id")
+    try:
+        owner_id = int(owner_id)
+    except (TypeError, ValueError):
+        return None
+    return owner_id if owner_id > 0 else None
+
+
 def build_optimized_field_visit_plan(
     route_id: int,
     items: list[dict],
@@ -224,6 +238,7 @@ def build_optimized_field_visit_plan(
                 priority=int(item.get("priority") or 0),
                 route_order=active_rank,
                 is_order_locked=bool(item.get("is_order_locked")),
+                group_key=_stop_group_key(item),
             )
         )
     optimized = optimize_route(
@@ -294,6 +309,18 @@ class FieldVisitService:
         require_field_visit_capability(user, FIELD_VISIT_VIEW)
         return self.source.get_field_visit_route(user, int(route_id))
 
+    def list_unresolved(self, user, *, mine_only: bool = False):
+        require_field_visit_capability(user, FIELD_VISIT_VIEW)
+        return self.source.list_unresolved_field_visit_items(user, mine_only=mine_only)
+
+    def list_calendar_items(
+        self, user, *, start_date: date, end_date: date, mine_only: bool = False
+    ):
+        require_field_visit_capability(user, FIELD_VISIT_VIEW)
+        return self.source.list_visit_calendar_items(
+            user, start_date, end_date, mine_only=mine_only
+        )
+
     def create_route(
         self,
         user,
@@ -360,8 +387,10 @@ class FieldVisitService:
         longitude: float | None = None,
         note: str = "",
         postponed_until: datetime | None = None,
+        contact_date: date | None = None,
         idempotency_key: str | None = None,
         allowed_old_statuses: Iterable[str] | None = None,
+        save_location: bool = False,
     ):
         capability = (
             FIELD_VISIT_COMPLETE
@@ -388,11 +417,20 @@ class FieldVisitService:
             "longitude": longitude,
             "note": note,
             "postponed_until": postponed_until,
+            "contact_date": contact_date,
             "allowed_old_statuses": sorted(
                 str(status).strip().lower()
                 for status in (allowed_old_statuses or [])
             ),
         }
+        save_location = bool(
+            save_location
+            and latitude is not None
+            and new_status in ARRIVAL_LOCATION_STATUSES
+        )
+        if save_location:
+            # Only added when requested so earlier request hashes stay stable.
+            payload["save_location"] = True
         key = normalize_idempotency_key(idempotency_key)
         return self.source.transition_field_visit_item(
             user,
@@ -402,7 +440,9 @@ class FieldVisitService:
             longitude=longitude,
             note=note,
             postponed_until=postponed_until,
+            contact_date=contact_date,
             allowed_old_statuses=set(payload["allowed_old_statuses"]) or None,
+            save_location=save_location,
             idempotency_key=key,
             request_hash=field_visit_request_hash("transition_item", payload),
         )

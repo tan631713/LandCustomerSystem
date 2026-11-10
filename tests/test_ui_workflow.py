@@ -28,6 +28,25 @@ from customer_repository import CustomerRepository
 from customer_security import decrypt_value
 
 
+class _AutoFinishedSignal:
+    """Minimal stand-in for a QDialog's `finished` signal.
+
+    _show_non_modal_dialog() (see customer_desktop_support.py) opens
+    editing dialogs non-modally: it connects a callback to
+    `dialog.finished`, then calls `dialog.show()` -- it never blocks on
+    `.exec()` itself. A bare fake dialog with only an `exec()` method (the
+    old pattern, from before that non-modal refactor) has no `.finished`
+    signal to connect to, which raises AttributeError; uncaught, that
+    error is reported through a real QMessageBox.critical(), which then
+    blocks forever in headless/offscreen tests since nothing dismisses it.
+    Connecting to this instead fires the callback immediately, simulating
+    a dialog that closes as Accepted the moment it would have opened.
+    """
+
+    def connect(self, callback):
+        callback(QDialog.Accepted)
+
+
 class UiWorkflowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -54,6 +73,16 @@ class UiWorkflowTests(unittest.TestCase):
         app.init_db()
 
     def tearDown(self):
+        # Saving a brand-new record (and a few other flows) defers its
+        # table refresh to the next event-loop tick via
+        # QTimer.singleShot(0, ...) -- see save_record()'s docstring
+        # comment. A test that triggers one of these without pumping the
+        # loop afterward leaves it queued; it would otherwise fire during
+        # a *later* test, against a database this teardown has already
+        # deleted below, surfacing as an unrelated
+        # "sqlite3.OperationalError: unable to open database file" there.
+        # Flush it here, while this test's own temp database still exists.
+        self.application.processEvents()
         for name, value in self.originals.items():
             setattr(app, name, value)
         self.temp_context.cleanup()
@@ -142,6 +171,95 @@ class UiWorkflowTests(unittest.TestCase):
             finally:
                 window.close()
 
+    def test_basic_data_form_uses_grouped_responsive_reference_layout(self):
+        window = app.LandApp(Fernet.generate_key())
+        try:
+            layout = window.basic_data_form_layout
+            positions = {}
+            for key, container in window.form_field_containers.items():
+                index = layout.indexOf(container)
+                self.assertGreaterEqual(index, 0, key)
+                positions[key] = layout.getItemPosition(index)
+
+            self.assertEqual(
+                set(window.form_field_containers),
+                # birth_year/age deliberately sit outside LAND_FIELDS (see
+                # customer_window_ui.py's EXTRA_OWNER_FORM_FIELD_LABELS
+                # comment) but still get their own form_field_containers
+                # entries so build_field_container() can render them. So does
+                # urban_plan (都市計畫), a combo box that only shows with a
+                # home server that has plans.
+                {key for key, _label in app.LAND_FIELDS} | {"birth_year", "age", "urban_plan"},
+            )
+            self.assertFalse(window.form_field_containers["urban_plan"].isVisibleTo(window))
+            self.assertEqual(positions["urban_plan"][1:], (0, 1, 6))
+            self.assertLess(positions["urban_plan"][0], positions["district"][0])
+            self.assertEqual(positions["district"][0], positions["section"][0])
+            self.assertEqual(positions["district"][1:], (0, 1, 3))
+            self.assertEqual(positions["section"][1:], (3, 1, 3))
+
+            self.assertEqual(positions["subsection"][0], positions["land_number"][0])
+            self.assertEqual(positions["subsection"][1:], (0, 1, 3))
+            self.assertEqual(positions["land_number"][1:], (3, 1, 3))
+
+            compact_row = positions["registration_order"][0]
+            self.assertEqual(positions["numerator"][0], compact_row)
+            self.assertEqual(positions["denominator"][0], compact_row)
+            self.assertEqual(positions["registration_order"][3], 2)
+            self.assertEqual(positions["numerator"][3], 2)
+            self.assertEqual(positions["denominator"][3], 2)
+
+            self.assertEqual(positions["total_declared_value"][3], 6)
+            self.assertEqual(positions["owner_name"][0], positions["external_id"][0])
+            self.assertEqual(positions["owner_name"][3], 3)
+            self.assertEqual(positions["external_id"][3], 3)
+            self.assertEqual(positions["address"][3], 6)
+            self.assertEqual(positions["note"][3], 6)
+
+            self.assertEqual(window.auto_calculation_badge.text(), "自動計算")
+            self.assertTrue(window.fields["total_declared_value"].isReadOnly())
+            self.assertEqual(window.fields["note"].placeholderText(), "尚未填寫")
+        finally:
+            window.close()
+
+    def test_basic_data_form_scrolls_instead_of_clipping_fields(self):
+        application = QApplication.instance()
+        original_font = application.font()
+        window = app.LandApp(Fernet.generate_key())
+        try:
+            window.current_font_size_key = "xlarge"
+            window.apply_saved_font_size()
+            window.resize(1400, 760)
+            window.show()
+            application.processEvents()
+
+            self.assertEqual(
+                window.basic_data_form_layout.sizeConstraint(),
+                window_ui_module.QLayout.SetMinimumSize,
+            )
+            self.assertGreater(
+                window.basic_data_scroll_area.verticalScrollBar().maximum(),
+                0,
+            )
+            for key, container in window.form_field_containers.items():
+                if key == "urban_plan":
+                    continue  # hidden unless the home server has plans
+                # "age" is a read-only live display of birth_year, not a
+                # real input -- it lives in age_display_widget, not
+                # self.fields (see customer_window_ui.py's
+                # EXTRA_OWNER_FORM_FIELD_LABELS comment).
+                widget = (
+                    window.age_display_widget if key == "age" else window.fields[key]
+                )
+                self.assertLessEqual(
+                    widget.geometry().bottom(),
+                    container.rect().bottom(),
+                    key,
+                )
+        finally:
+            window.close()
+            application.setFont(original_font)
+
     def test_postgresql_login_uses_api_account_not_legacy_sqlite_account(self):
         class FakeApiClient:
             def __init__(self):
@@ -191,6 +309,7 @@ class UiWorkflowTests(unittest.TestCase):
             self.assertIsNotNone(setup_dialog.encryption_key)
 
             login_dialog = app.AuthDialog(setup_mode=False)
+            login_dialog.username_edit.setText("admin")
             login_dialog.password_edit.setText("test-password")
             login_dialog.submit()
             self.assertEqual(login_dialog.result(), QDialog.Accepted)
@@ -200,6 +319,7 @@ class UiWorkflowTests(unittest.TestCase):
                 values = {
                     "district": "中正區",
                     "section": "一段",
+                    "subsection": "",
                     "land_number": "100",
                     "area": "100",
                     "declared_value": "20,000",
@@ -212,6 +332,13 @@ class UiWorkflowTests(unittest.TestCase):
                     window.set_field_text(key, value)
                 window.save_record()
                 record_id = window.selected_record_id
+                # Saving a brand-new record defers its table refresh to the
+                # next event-loop tick via QTimer.singleShot(0, ...) (see
+                # save_record()'s docstring comment) to avoid a reentrant
+                # Qt model reset while still inside the save button's own
+                # click handling -- pump the loop once so that refresh has
+                # actually happened before asserting on table_model rows.
+                self.application.processEvents()
 
                 self.assertIsNotNone(record_id)
                 self.assertEqual(len(window.table_model.all_rows), 1)
@@ -311,6 +438,20 @@ class UiWorkflowTests(unittest.TestCase):
                 def exec(self):
                     return QDialog.Accepted
 
+                finished = _AutoFinishedSignal()
+
+                def show(self):
+                    pass
+
+                def raise_(self):
+                    pass
+
+                def activateWindow(self):
+                    pass
+
+                def result(self):
+                    return QDialog.Accepted
+
                 def values(self):
                     return {"due_date": "2026-07-20", "status": "待回覆", "note": "再聯絡"}
 
@@ -324,6 +465,20 @@ class UiWorkflowTests(unittest.TestCase):
                 def exec(self):
                     return QDialog.Accepted
 
+                finished = _AutoFinishedSignal()
+
+                def show(self):
+                    pass
+
+                def raise_(self):
+                    pass
+
+                def activateWindow(self):
+                    pass
+
+                def result(self):
+                    return QDialog.Accepted
+
             class FakeFollowUpListDialog:
                 def __init__(self, reminders, parent=None, on_record_activated=None):
                     captured["reminders"] = reminders
@@ -333,6 +488,20 @@ class UiWorkflowTests(unittest.TestCase):
                 def exec(self):
                     return QDialog.Accepted
 
+                finished = _AutoFinishedSignal()
+
+                def show(self):
+                    pass
+
+                def raise_(self):
+                    pass
+
+                def activateWindow(self):
+                    pass
+
+                def result(self):
+                    return QDialog.Accepted
+
             class FakeRecordHistoryDialog:
                 def __init__(self, logs, record_label="", parent=None):
                     captured["history_logs"] = logs
@@ -340,6 +509,20 @@ class UiWorkflowTests(unittest.TestCase):
                     captured["history_parent"] = parent
 
                 def exec(self):
+                    return QDialog.Accepted
+
+                finished = _AutoFinishedSignal()
+
+                def show(self):
+                    pass
+
+                def raise_(self):
+                    pass
+
+                def activateWindow(self):
+                    pass
+
+                def result(self):
                     return QDialog.Accepted
 
             with (
@@ -373,6 +556,7 @@ class UiWorkflowTests(unittest.TestCase):
                 {
                     "district": "D",
                     "section": "S",
+                    "subsection": "",
                     "land_number": "100",
                     "owner_name": "Owner 1",
                     "note": "",
@@ -383,6 +567,7 @@ class UiWorkflowTests(unittest.TestCase):
                 {
                     "district": "D",
                     "section": "S",
+                    "subsection": "",
                     "land_number": "100",
                     "owner_name": "Owner 2",
                     "external_id": "A2",
@@ -410,6 +595,20 @@ class UiWorkflowTests(unittest.TestCase):
                 def exec(self):
                     return QDialog.Accepted
 
+                finished = _AutoFinishedSignal()
+
+                def show(self):
+                    pass
+
+                def raise_(self):
+                    pass
+
+                def activateWindow(self):
+                    pass
+
+                def result(self):
+                    return QDialog.Accepted
+
                 def selected_case_id(self):
                     return case_id
 
@@ -421,6 +620,20 @@ class UiWorkflowTests(unittest.TestCase):
                     self.parent = parent
 
                 def exec(self):
+                    return QDialog.Accepted
+
+                finished = _AutoFinishedSignal()
+
+                def show(self):
+                    pass
+
+                def raise_(self):
+                    pass
+
+                def activateWindow(self):
+                    pass
+
+                def result(self):
                     return QDialog.Accepted
 
                 def selected_ids(self):
@@ -436,6 +649,20 @@ class UiWorkflowTests(unittest.TestCase):
                 def exec(self):
                     return QDialog.Accepted
 
+                finished = _AutoFinishedSignal()
+
+                def show(self):
+                    pass
+
+                def raise_(self):
+                    pass
+
+                def activateWindow(self):
+                    pass
+
+                def result(self):
+                    return QDialog.Accepted
+
                 def result_values(self):
                     return {field_id: "custom value"}
 
@@ -445,6 +672,20 @@ class UiWorkflowTests(unittest.TestCase):
                     self.parent = parent
 
                 def exec(self):
+                    return QDialog.Accepted
+
+                finished = _AutoFinishedSignal()
+
+                def show(self):
+                    pass
+
+                def raise_(self):
+                    pass
+
+                def activateWindow(self):
+                    pass
+
+                def result(self):
                     return QDialog.Accepted
 
                 def values(self):
@@ -468,6 +709,20 @@ class UiWorkflowTests(unittest.TestCase):
                 def exec(self):
                     return QDialog.Accepted
 
+                finished = _AutoFinishedSignal()
+
+                def show(self):
+                    pass
+
+                def raise_(self):
+                    pass
+
+                def activateWindow(self):
+                    pass
+
+                def result(self):
+                    return QDialog.Accepted
+
                 def values(self):
                     return {
                         "contact_date": "2026-07-13",
@@ -487,6 +742,20 @@ class UiWorkflowTests(unittest.TestCase):
                 def exec(self):
                     return QDialog.Accepted
 
+                finished = _AutoFinishedSignal()
+
+                def show(self):
+                    pass
+
+                def raise_(self):
+                    pass
+
+                def activateWindow(self):
+                    pass
+
+                def result(self):
+                    return QDialog.Accepted
+
             captured = {}
 
             class FakeHealthCheckDialog:
@@ -495,6 +764,20 @@ class UiWorkflowTests(unittest.TestCase):
                     captured["health_parent"] = parent
 
                 def exec(self):
+                    return QDialog.Accepted
+
+                finished = _AutoFinishedSignal()
+
+                def show(self):
+                    pass
+
+                def raise_(self):
+                    pass
+
+                def activateWindow(self):
+                    pass
+
+                def result(self):
                     return QDialog.Accepted
 
             with (
@@ -584,6 +867,20 @@ class UiWorkflowTests(unittest.TestCase):
             def exec(self):
                 return QDialog.Accepted
 
+            finished = _AutoFinishedSignal()
+
+            def show(self):
+                pass
+
+            def raise_(self):
+                pass
+
+            def activateWindow(self):
+                pass
+
+            def result(self):
+                return QDialog.Accepted
+
             def values(self):
                 return dict(self._values)
 
@@ -631,6 +928,7 @@ class UiWorkflowTests(unittest.TestCase):
                         {
                             "district": "桃園區",
                             "section": "中路段",
+                            "subsection": "",
                             "land_number": "10",
                             "owner_name": "Owner A",
                         }
@@ -644,6 +942,7 @@ class UiWorkflowTests(unittest.TestCase):
                         {
                             "district": "桃園區",
                             "section": "中路段",
+                            "subsection": "",
                             "land_number": "20",
                             "owner_name": "Owner B",
                         }
@@ -687,6 +986,20 @@ class UiWorkflowTests(unittest.TestCase):
                     self.parent = parent
 
                 def exec(self):
+                    return QDialog.Accepted
+
+                finished = _AutoFinishedSignal()
+
+                def show(self):
+                    pass
+
+                def raise_(self):
+                    pass
+
+                def activateWindow(self):
+                    pass
+
+                def result(self):
                     return QDialog.Accepted
 
                 def selected_ids(self):
@@ -757,6 +1070,7 @@ class UiWorkflowTests(unittest.TestCase):
                 {
                     "district": "桃園區",
                     "section": "一段",
+                    "subsection": "",
                     "land_number": "100",
                     "owner_name": "王小明",
                     "address": "舊地址",
@@ -777,6 +1091,20 @@ class UiWorkflowTests(unittest.TestCase):
                 def exec(self):
                     return QDialog.Accepted
 
+                finished = _AutoFinishedSignal()
+
+                def show(self):
+                    pass
+
+                def raise_(self):
+                    pass
+
+                def activateWindow(self):
+                    pass
+
+                def result(self):
+                    return QDialog.Accepted
+
             captured = {}
 
             class FakeImportResultDialog:
@@ -787,6 +1115,20 @@ class UiWorkflowTests(unittest.TestCase):
                     captured["parent"] = parent
 
                 def exec(self):
+                    return QDialog.Accepted
+
+                finished = _AutoFinishedSignal()
+
+                def show(self):
+                    pass
+
+                def raise_(self):
+                    pass
+
+                def activateWindow(self):
+                    pass
+
+                def result(self):
                     return QDialog.Accepted
 
             result = {
@@ -801,6 +1143,7 @@ class UiWorkflowTests(unittest.TestCase):
                     {
                         "district": "桃園區",
                         "section": "一段",
+                        "subsection": "",
                         "land_number": "100",
                         "owner_name": "王小明",
                         "address": "新地址",
@@ -828,6 +1171,336 @@ class UiWorkflowTests(unittest.TestCase):
             self.assertTrue(any(row["field_key"] == "address" for row in logs))
         finally:
             window.close()
+
+    def test_excel_import_keeps_the_name_column_when_inserting_new_records(self):
+        """The bulk-insert path used to rebuild every record from LAND_FIELDS only,
+        dropping `name` (kept out of LAND_FIELDS on purpose) even though the Excel
+        parser supplies it, and crashed with
+        `NOT NULL constraint failed: customers.name`. A record without a `name`
+        key at all must fall back to the owner's name."""
+        app.REPOSITORY.create_admin_user("test-password")
+        encryption_key = app.REPOSITORY.authenticate_user("admin", "test-password")
+        window = app.LandApp(encryption_key)
+        try:
+
+            class FakePreviewDialog:
+                import_mode = "import_all"
+
+                def __init__(self, records, columns, duplicates, parent):
+                    del records, columns, duplicates, parent
+
+                def exec(self):
+                    return QDialog.Accepted
+
+                finished = _AutoFinishedSignal()
+
+                def show(self):
+                    pass
+
+                def raise_(self):
+                    pass
+
+                def activateWindow(self):
+                    pass
+
+                def result(self):
+                    return QDialog.Accepted
+
+            captured = {}
+
+            class FakeImportResultDialog:
+                def __init__(self, summary_lines, detail_lines=None, error_rows=None, parent=None):
+                    captured["summary_lines"] = summary_lines
+                    del detail_lines, error_rows, parent
+
+                def exec(self):
+                    return QDialog.Accepted
+
+                finished = _AutoFinishedSignal()
+
+                def show(self):
+                    pass
+
+                def raise_(self):
+                    pass
+
+                def activateWindow(self):
+                    pass
+
+                def result(self):
+                    return QDialog.Accepted
+
+            result = {
+                "source_file_name": "地主清冊.xlsx",
+                "column_map": {
+                    1: "district",
+                    2: "section",
+                    3: "land_number",
+                    4: "owner_name",
+                },
+                "records": [
+                    {   # what the Excel parser produces: `name` is already filled in
+                        "district": "桃園區",
+                        "section": "一段",
+                        "subsection": "",
+                        "land_number": "100",
+                        "owner_name": "王小明",
+                        "name": "王小明",
+                    },
+                    {   # no `name` key at all
+                        "district": "桃園區",
+                        "section": "一段",
+                        "subsection": "",
+                        "land_number": "101",
+                        "owner_name": "李小華",
+                    },
+                ],
+                "error_rows": [],
+            }
+            with (
+                patch.object(import_controller, "ImportPreviewDialog", FakePreviewDialog),
+                patch.object(import_controller, "ImportResultDialog", FakeImportResultDialog),
+                patch.object(app.QMessageBox, "critical", return_value=QMessageBox.Ok) as critical,
+            ):
+                window.handle_excel_import_ready(result)
+
+            critical.assert_not_called()
+            self.assertIn("成功新增：2", captured["summary_lines"])
+            with app.connect() as conn:
+                rows = conn.execute(
+                    "SELECT name, owner_name FROM customers ORDER BY id"
+                ).fetchall()
+            self.assertEqual(
+                [
+                    (decrypt_value(window.fernet, row["name"]), decrypt_value(window.fernet, row["owner_name"]))
+                    for row in rows
+                ],
+                [("王小明", "王小明"), ("李小華", "李小華")],
+            )
+        finally:
+            window.close()
+
+    def _run_excel_import(self, window, result, import_mode):
+        captured = {}
+
+        class FakePreviewDialog:
+            def __init__(self, records, columns, duplicates, parent):
+                self.import_mode = import_mode
+                captured["preview_records"] = records
+                captured["preview_columns"] = columns
+
+            def exec(self):
+                return QDialog.Accepted
+
+            finished = _AutoFinishedSignal()
+
+            def show(self):
+                pass
+
+            def raise_(self):
+                pass
+
+            def activateWindow(self):
+                pass
+
+            def result(self):
+                return QDialog.Accepted
+
+        class FakeImportResultDialog:
+            def __init__(self, summary_lines, detail_lines=None, error_rows=None, parent=None):
+                captured["summary_lines"] = summary_lines
+
+            def exec(self):
+                return QDialog.Accepted
+
+            finished = _AutoFinishedSignal()
+
+            def show(self):
+                pass
+
+            def raise_(self):
+                pass
+
+            def activateWindow(self):
+                pass
+
+            def result(self):
+                return QDialog.Accepted
+
+        with (
+            patch.object(import_controller, "ImportPreviewDialog", FakePreviewDialog),
+            patch.object(import_controller, "ImportResultDialog", FakeImportResultDialog),
+            patch.object(app.QMessageBox, "question", return_value=QMessageBox.Yes),
+            patch.object(app.QMessageBox, "critical", return_value=QMessageBox.Ok) as critical,
+        ):
+            window.handle_excel_import_ready(result)
+        critical.assert_not_called()
+        return captured
+
+    def test_reimporting_a_corrected_masked_export_updates_records_by_system_id(self):
+        """Real user workflow: export everything (privacy mask on), fill in
+        missing 身分證／地址 in Excel, import it back. Every row must update
+        the record it came from -- the 完整地號 column used to be read as 地號,
+        so all rows were inserted again -- and the masked 姓名／身分證 the
+        export wrote must never overwrite the real ones."""
+        from customer_domain import mask_identity_to_four_digits, mask_owner_display_name
+
+        app.REPOSITORY.create_admin_user("test-password")
+        encryption_key = app.REPOSITORY.authenticate_user("admin", "test-password")
+        window = app.LandApp(encryption_key)
+        try:
+            ids = []
+            for land_number, owner, external_id, address, note in (
+                ("129-1", "謝大明", "S221234569", "", "舊備註"),
+                ("129-2", "謝小華", "", "桃園市中壢區西園路6號", ""),
+                ("129-3", "林一", "", "", ""),
+            ):
+                data = window.normalize_record_data(
+                    {
+                        "district": "中壢區",
+                        "section": "西園段",
+                        "subsection": "一小段",
+                        "registration_order": "0001",
+                        "land_number": land_number,
+                        "area": "100",
+                        "declared_value": "126313",
+                        "numerator": "1",
+                        "denominator": "20",
+                        "owner_name": owner,
+                        "external_id": external_id,
+                        "address": address,
+                        "note": note,
+                    }
+                )
+                ids.append(app.REPOSITORY.save_customer(app.encrypt_record(window.fernet, data)))
+            window.refresh_records()
+
+            raw_rows = [dict(record["raw"]) for record in window.table_model.all_rows]
+            raw_rows.sort(key=lambda row: int(row["rowid"] if "rowid" in row else row["id"]))
+            for raw_row in raw_rows:
+                raw_row["owner_name"] = mask_owner_display_name(raw_row.get("owner_name"))
+                raw_row["external_id"] = mask_identity_to_four_digits(raw_row.get("external_id"))
+            by_number = {row["land_number"]: row for row in raw_rows}
+            by_number["129-1"]["address"] = "桃園市中壢區西園路6之10號6樓"  # filled in
+            by_number["129-1"]["note"] = ""  # blank must not erase 舊備註
+            by_number["129-2"]["external_id"] = "H123456789"  # full ID added
+            by_number["129-2"]["owner_name"] = "謝小華"  # unmasked name: unchanged
+            by_number["129-3"]["external_id"] = "S2219"  # partial ID from 謄本: written
+            raw_rows.append(dict(by_number["129-3"], rowid=str(ids[2] + 100)))  # gone
+
+            file_path = Path(self.temp_context.name) / "corrected-export.xlsx"
+            app.EXCEL_SERVICE.write_rows(file_path, raw_rows, window.get_export_columns())
+            result = app.EXCEL_SERVICE.read_import_file(file_path)
+            self.assertIn("record_id", result["column_map"].values())
+            self.assertEqual(result["error_rows"], [])
+            self.assertEqual(
+                sorted(record["land_number"] for record in result["records"]),
+                ["129-1", "129-2", "129-3", "129-3"],
+            )
+
+            captured = self._run_excel_import(window, result, "all")
+
+            self.assertEqual(captured["preview_columns"][0], ("_change_summary", "變更內容"))
+            self.assertIn("成功新增：0", captured["summary_lines"])
+            self.assertIn("成功更新：3", captured["summary_lines"])
+            self.assertIn("重複略過：1", captured["summary_lines"])
+            with app.connect() as conn:
+                rows = conn.execute(
+                    "SELECT id, owner_name, external_id, address, note FROM customers ORDER BY id"
+                ).fetchall()
+            self.assertEqual([row["id"] for row in rows], ids)
+            plain = [
+                {key: decrypt_value(window.fernet, row[key] or "") for key in
+                 ("owner_name", "external_id", "address", "note")}
+                for row in rows
+            ]
+            self.assertEqual(plain[0]["owner_name"], "謝大明")
+            self.assertEqual(plain[0]["external_id"], "S221234569")
+            self.assertEqual(plain[0]["address"], "桃園市中壢區西園路6之10號6樓")
+            self.assertEqual(plain[0]["note"], "舊備註")
+            self.assertEqual(plain[1]["external_id"], "H123456789")
+            self.assertEqual(plain[1]["address"], "桃園市中壢區西園路6號")
+            self.assertEqual(plain[1]["owner_name"], "謝小華")
+            self.assertEqual(plain[2]["external_id"], "S2219")
+            self.assertEqual(len(rows), 3)
+
+            window.refresh_records()
+            raw_rows = [dict(record["raw"]) for record in window.table_model.all_rows]
+            for raw_row in raw_rows:
+                raw_row["external_id"] = "S22****19"
+            file_path = Path(self.temp_context.name) / "masked-again.xlsx"
+            app.EXCEL_SERVICE.write_rows(file_path, raw_rows, window.get_export_columns())
+            captured = self._run_excel_import(
+                window, app.EXCEL_SERVICE.read_import_file(file_path), "update_duplicates"
+            )
+            warned = [
+                record for record in captured["preview_records"]
+                if record.get("_import_warnings")
+            ]
+            self.assertEqual(len(warned), 3)
+            self.assertIn("成功更新：0", captured["summary_lines"])
+        finally:
+            window.close()
+
+    def test_reimport_never_inserts_a_row_whose_system_id_is_gone(self):
+        app.REPOSITORY.create_admin_user("test-password")
+        encryption_key = app.REPOSITORY.authenticate_user("admin", "test-password")
+        window = app.LandApp(encryption_key)
+        try:
+            result = {
+                "column_map": {1: "record_id", 2: "district", 3: "section", 4: "land_number"},
+                "records": [
+                    {
+                        "record_id": "999",
+                        "district": "桃園區",
+                        "section": "一段",
+                        "subsection": None,
+                        "land_number": "100",
+                        "owner_name": "王小明",
+                        "name": "王小明",
+                    }
+                ],
+                "error_rows": [],
+            }
+            captured = self._run_excel_import(window, result, "all")
+            self.assertIn("成功新增：0", captured["summary_lines"])
+            self.assertIn("重複略過：1", captured["summary_lines"])
+            with app.connect() as conn:
+                count = conn.execute("SELECT COUNT(*) FROM customers").fetchone()[0]
+            self.assertEqual(count, 0)
+        finally:
+            window.close()
+
+    def test_signature_duplicate_check_includes_subsection(self):
+        app.REPOSITORY.create_admin_user("test-password")
+        encryption_key = app.REPOSITORY.authenticate_user("admin", "test-password")
+        window = app.LandApp(encryption_key)
+        try:
+            data = window.normalize_record_data(
+                {
+                    "district": "桃園區",
+                    "section": "一段",
+                    "subsection": "二小段",
+                    "land_number": "100",
+                    "owner_name": "王小明",
+                }
+            )
+            app.REPOSITORY.save_customer(app.encrypt_record(window.fernet, data))
+            records = [dict(data)]
+            duplicates, _watch = window.annotate_import_duplicates(records)
+            self.assertEqual(duplicates, {0})
+            self.assertIn("資料庫已存在", records[0]["_duplicate_reason"])
+        finally:
+            window.close()
+
+    def test_export_headers_map_back_to_the_right_import_fields(self):
+        import customer_excel
+
+        self.assertEqual(customer_excel.map_header("系統ID"), "record_id")
+        for header in ("完整地號", "持分筆數", "權利範圍面積", "備註摘要"):
+            self.assertIsNone(customer_excel.map_header(header), header)
+        self.assertEqual(customer_excel.map_header("地號"), "land_number")
+        self.assertEqual(customer_excel.map_header("ID"), "external_id")
 
     def test_postgresql_preview_excel_import_uses_api_batch_without_sqlite_backup(self):
         app.REPOSITORY.create_admin_user("test-password")
@@ -878,6 +1551,20 @@ class UiWorkflowTests(unittest.TestCase):
             def exec(self):
                 return QDialog.Accepted
 
+            finished = _AutoFinishedSignal()
+
+            def show(self):
+                pass
+
+            def raise_(self):
+                pass
+
+            def activateWindow(self):
+                pass
+
+            def result(self):
+                return QDialog.Accepted
+
         captured = {}
 
         class FakeImportResultDialog:
@@ -886,6 +1573,20 @@ class UiWorkflowTests(unittest.TestCase):
                 del detail_lines, error_rows, parent
 
             def exec(self):
+                return QDialog.Accepted
+
+            finished = _AutoFinishedSignal()
+
+            def show(self):
+                pass
+
+            def raise_(self):
+                pass
+
+            def activateWindow(self):
+                pass
+
+            def result(self):
                 return QDialog.Accepted
 
         repository = ApiImportRepository()
@@ -907,6 +1608,7 @@ class UiWorkflowTests(unittest.TestCase):
                     {
                         "district": "中壢區",
                         "section": "青埔段",
+                        "subsection": "",
                         "land_number": "200-8",
                         "owner_name": "李小華",
                         "name": "李小華",
@@ -1162,8 +1864,8 @@ class UiWorkflowTests(unittest.TestCase):
                     "同地號批量新增",
                     "匯入 .xlsx",
                     "Excel 匯入設定檔",
-                    "匯出 Excel",
                     "匯出選取資料",
+                    "設定寄信重複偵測標籤",
                     "匯出選取 Word",
                     "報表與列印範本",
                     "傳送選取資料到手機",
@@ -1181,7 +1883,9 @@ class UiWorkflowTests(unittest.TestCase):
                     "操作記錄",
                     "使用者與權限",
                     "字體大小",
+                    "外觀主題",
                     "欄位顯示",
+                    "測試",
                     "唯讀模式",
                     "修改密碼",
                     "備份狀態",
@@ -1309,10 +2013,25 @@ class UiWorkflowTests(unittest.TestCase):
             def exec(self):
                 return QDialog.Accepted
 
+            finished = _AutoFinishedSignal()
+
+            def show(self):
+                pass
+
+            def raise_(self):
+                pass
+
+            def activateWindow(self):
+                pass
+
+            def result(self):
+                return QDialog.Accepted
+
             def criteria(self):
                 return {
                     "district": "中壢區",
                     "section": "中原段",
+                    "subsection": "",
                     "land_number": "382-2",
                 }
 
@@ -1335,6 +2054,7 @@ class UiWorkflowTests(unittest.TestCase):
                 {
                     "district": "中壢區",
                     "section": "中原段",
+                    "subsection": "",
                     "land_number": "382-2",
                 },
             )
@@ -1430,6 +2150,20 @@ class UiWorkflowTests(unittest.TestCase):
             def exec(self):
                 return QDialog.Accepted
 
+            finished = _AutoFinishedSignal()
+
+            def show(self):
+                pass
+
+            def raise_(self):
+                pass
+
+            def activateWindow(self):
+                pass
+
+            def result(self):
+                return QDialog.Accepted
+
             def selected_policy(self):
                 return {
                     "compress_backups": False,
@@ -1445,9 +2179,13 @@ class UiWorkflowTests(unittest.TestCase):
                 patch.object(app, "BackupManagementDialog", FakeBackupManagementDialog),
                 patch.object(app.QMessageBox, "information"),
             ):
-                result = window.manage_backups()
+                window.manage_backups()
 
-            self.assertIsNotNone(result)
+            # manage_backups() now always returns None -- its actual work
+            # (saving the policy, running maintenance) happens in the
+            # non-modal dialog's on_accepted callback instead (fired
+            # synchronously here by FakeBackupManagementDialog.finished).
+            # These side effects are what's worth asserting on.
             self.assertFalse(app.DATABASE.compress_backups)
             self.assertEqual(app.DATABASE.backup_retention_days, 45)
             self.assertEqual(app.DATABASE.backup_max_count, 12)
@@ -1467,13 +2205,11 @@ class UiWorkflowTests(unittest.TestCase):
                 for action in window.settings_menu.actions()
                 if action.text() == "備份管理"
             )
-            with patch.object(
-                app.BackupManagementDialog,
-                "exec",
-                return_value=QDialog.Rejected,
-            ) as execute_dialog:
+            # manage_backups() opens this dialog non-modally now (.show(),
+            # not a blocking .exec()) -- see _show_non_modal_dialog.
+            with patch.object(app.BackupManagementDialog, "show") as show_dialog:
                 action.trigger()
-            execute_dialog.assert_called_once()
+            show_dialog.assert_called_once()
         finally:
             window.close()
 
@@ -1485,6 +2221,20 @@ class UiWorkflowTests(unittest.TestCase):
                 pass
 
             def exec(self):
+                return QDialog.Accepted
+
+            finished = _AutoFinishedSignal()
+
+            def show(self):
+                pass
+
+            def raise_(self):
+                pass
+
+            def activateWindow(self):
+                pass
+
+            def result(self):
                 return QDialog.Accepted
 
             def selected_policy(self):
@@ -1560,6 +2310,20 @@ class UiWorkflowTests(unittest.TestCase):
             def exec(self):
                 return QDialog.Accepted
 
+            finished = _AutoFinishedSignal()
+
+            def show(self):
+                pass
+
+            def raise_(self):
+                pass
+
+            def activateWindow(self):
+                pass
+
+            def result(self):
+                return QDialog.Accepted
+
             def selected_rules(self):
                 return ["land_number_missing", "denominator_zero"]
 
@@ -1581,10 +2345,30 @@ class UiWorkflowTests(unittest.TestCase):
                 captured["on_issue_ignored"] = on_issue_ignored
                 captured["ignored_count"] = ignored_count
                 captured["on_clear_ignored"] = on_clear_ignored
+                # The real dialog is shown non-modally now (see
+                # _show_non_modal_dialog): on_issue_ignored/on_issue_activated
+                # fire from live button/double-click handling while it is
+                # open, not from a blocking .exec() return value. Simulate
+                # that interaction here instead, since this fake never
+                # actually opens a window for anything to click on.
+                on_issue_ignored(issues[0])
+                on_issue_activated(issues[0].record_id)
 
             def exec(self):
-                captured["on_issue_ignored"](captured["issues"][0])
-                captured["on_issue_activated"](captured["issues"][0].record_id)
+                return QDialog.Accepted
+
+            finished = _AutoFinishedSignal()
+
+            def show(self):
+                pass
+
+            def raise_(self):
+                pass
+
+            def activateWindow(self):
+                pass
+
+            def result(self):
                 return QDialog.Accepted
 
         window = app.LandApp(encryption_key)
@@ -1678,10 +2462,32 @@ class UiWorkflowTests(unittest.TestCase):
         encryption_key = app.REPOSITORY.authenticate_user("admin", "test-password")
 
         class FakeBatchDialog:
-            def __init__(self, _initial_values, _parent):
+            def __init__(
+                self,
+                _initial_values,
+                _parent,
+                *,
+                district_options=None,
+                section_options=None,
+                subsection_options=None,
+            ):
                 pass
 
             def exec(self):
+                return QDialog.Accepted
+
+            finished = _AutoFinishedSignal()
+
+            def show(self):
+                pass
+
+            def raise_(self):
+                pass
+
+            def activateWindow(self):
+                pass
+
+            def result(self):
                 return QDialog.Accepted
 
             def values(self):
@@ -1689,11 +2495,16 @@ class UiWorkflowTests(unittest.TestCase):
                     {
                         "district": "中正區",
                         "section": "一段",
+                        "subsection": "",
                         "land_number": "100",
                         "area": "100",
                         "declared_value": "20,000",
                     },
-                    "1\t王小明\tA123456789\t台北市\t1\t2\t重要\t已拜訪\n"
+                    # Per-row order is SHARED_LAND_BATCH_FIELDS: registration_
+                    # order, owner_name, external_id, address, numerator,
+                    # denominator, registration_reason, note, visit_log --
+                    # the blank 7th column below is registration_reason.
+                    "1\t王小明\tA123456789\t台北市\t1\t2\t\t重要\t已拜訪\n"
                     "2\t陳小華\tB123456789\t新北市\t1\t3",
                 )
 
@@ -1706,6 +2517,20 @@ class UiWorkflowTests(unittest.TestCase):
                 FakePreviewDialog.columns = columns
 
             def exec(self):
+                return QDialog.Accepted
+
+            finished = _AutoFinishedSignal()
+
+            def show(self):
+                pass
+
+            def raise_(self):
+                pass
+
+            def activateWindow(self):
+                pass
+
+            def result(self):
                 return QDialog.Accepted
 
         window = app.LandApp(encryption_key)
@@ -1749,8 +2574,8 @@ class UiWorkflowTests(unittest.TestCase):
                     "address",
                     "numerator",
                     "denominator",
+                    "registration_reason",
                     "note",
-                    "visit_log",
                 ],
             )
             self.assertEqual(
@@ -1758,8 +2583,8 @@ class UiWorkflowTests(unittest.TestCase):
                 ["1", "2"],
             )
             self.assertEqual(
-                [key for key, _label in FakePreviewDialog.columns[-5:]],
-                ["district", "section", "land_number", "area", "declared_value"],
+                [key for key, _label in FakePreviewDialog.columns[-6:]],
+                ["district", "section", "subsection", "land_number", "area", "declared_value"],
             )
             self.assertEqual(decrypt_value(window.fernet, rows[0]["external_id"]), "A123456789")
             self.assertEqual(decrypt_value(window.fernet, rows[0]["address"]), "台北市")
@@ -1770,6 +2595,13 @@ class UiWorkflowTests(unittest.TestCase):
             self.assertEqual(decrypt_value(window.fernet, rows[0]["visit_log"]), "已拜訪")
             self.assertEqual(actions, ["批量新增"])
         finally:
+            # Batch-adding new records defers its table refresh via
+            # QTimer.singleShot(0, ...), same as save_record() for a single
+            # new record. Flushing it here (rather than leaving it queued)
+            # keeps it from firing during a *later* test's processEvents()
+            # call against a database this test's teardown has already
+            # torn down.
+            self.application.processEvents()
             window.close()
 
     def test_postgresql_api_mode_enables_remote_safe_tools_only(self):
@@ -1815,8 +2647,8 @@ class UiWorkflowTests(unittest.TestCase):
                     "同地號批量新增",
                     "匯入 .xlsx",
                     "Excel 匯入設定檔",
-                    "匯出 Excel",
                     "匯出選取資料",
+                    "設定寄信重複偵測標籤",
                     "匯出選取 Word",
                     "報表與列印範本",
                     "傳送選取資料到手機",
@@ -1887,7 +2719,9 @@ class UiWorkflowTests(unittest.TestCase):
                     "操作記錄",
                     "使用者與權限",
                     "字體大小",
+                    "外觀主題",
                     "欄位顯示",
+                    "測試",
                     "唯讀模式",
                     "修改密碼",
                     "備份狀態",

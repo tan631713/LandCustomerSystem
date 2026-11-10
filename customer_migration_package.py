@@ -28,6 +28,7 @@ from migrate_sqlite_to_postgresql import (
     SOURCE_TARGET_COUNT_QUERIES,
     analyze_records,
     apply_migration,
+    _copy_users,
     build_source,
     collect_source_counts,
     read_plain_records,
@@ -459,6 +460,118 @@ def import_migration_package(
         "package": str(Path(package).resolve()),
         "server_accounts_preserved": True,
         "source_users_copied": False,
+        "pre_migration_backup": str(backup["backup_path"]),
+        "plan": asdict(plan),
+        "result": result,
+        "verification": final_report,
+    }
+
+
+_ADMIN_LOCK_KEY = 741_202_607  # same advisory-lock key as customer_recovery_account
+
+
+def _server_account_count(dsn: str) -> int:
+    import psycopg
+
+    with psycopg.connect(dsn, connect_timeout=5) as connection:
+        return int(connection.execute("SELECT COUNT(*) FROM users").fetchone()[0])
+
+
+def _copy_source_users_into_empty_server(sqlite_database):
+    """Run inside apply_migration's transaction: re-check users is empty
+    under the shared admin advisory lock, only then copy the source users
+    (so a concurrent bootstrap cannot be overwritten by ON CONFLICT)."""
+
+    def callback(connection):
+        connection.execute("SELECT pg_advisory_xact_lock(%s)", (_ADMIN_LOCK_KEY,))
+        existing = int(connection.execute("SELECT COUNT(*) FROM users").fetchone()[0])
+        if existing:
+            raise ValueError(
+                "伺服器在匯入過程中已經出現帳號，為避免覆蓋既有帳號，遷移已回滾。"
+            )
+        _copy_users(sqlite_database, connection)
+        return _prepare_target_for_import(connection)
+
+    return callback
+
+
+def import_migration_package_into_empty_server(
+    package: Path | str,
+    dsn: str,
+    *,
+    source_username: str,
+    source_password: str,
+    backup_creator=create_backup,
+) -> dict:
+    """First import into a server whose users table is completely empty.
+
+    import_migration_package() needs an existing server admin to authenticate
+    as, which a freshly reinstalled server does not have. This path instead
+    authenticates only the standalone account, copies the standalone users
+    (that admin becomes the server admin) and keeps the standalone data key
+    as the server's shared key -- the same thing migrate_sqlite_to_postgresql
+    does. Every safety check of the normal import still applies: business
+    tables must be empty, a pre-import backup is taken, counts and orphans are
+    verified inside the transaction, and any failure rolls everything back.
+    """
+
+    if not str(dsn or "").strip():
+        raise ValueError("找不到家中伺服器 PostgreSQL 連線設定。")
+    with tempfile.TemporaryDirectory(prefix="lcs-migration-import-") as temporary:
+        manifest, database_path = extract_migration_package(package, temporary)
+        sqlite_database, repository = build_source(database_path)
+        source_counts = collect_source_counts(sqlite_database)
+        manifest_counts = {
+            str(name): int(value)
+            for name, value in (manifest.get("source_counts") or {}).items()
+        }
+        if source_counts != manifest_counts:
+            raise ValueError("遷移包資料筆數與建立時清單不一致，未匯入。")
+        if int(source_counts.get("customer_attachments") or 0):
+            raise ValueError("此版本不允許匯入含附件的單機資料。")
+
+        source_data_key = repository.authenticate_user(
+            str(source_username).strip(), source_password
+        )
+        if not source_data_key:
+            raise ValueError("單機版帳號或密碼錯誤，未匯入任何資料。")
+        source_user = getattr(repository, "last_authenticated_user", None) or {}
+        if str(source_user.get("role") or "").lower() != "admin":
+            raise PermissionError(
+                "空資料庫的第一次匯入必須使用單機版的管理員帳號；匯入後這個帳號會成為伺服器的管理員。"
+            )
+        records = read_plain_records(repository, source_data_key)
+
+        if _server_account_count(dsn):
+            raise ValueError("伺服器已經有帳號，請改用一般匯入（需輸入家中伺服器管理員帳密）。")
+        initial_report = verify_postgres(dsn)
+        _validate_target_is_empty(initial_report)
+        backup = backup_creator(label="pre-migration")
+        if backup.get("status") != "ok" or not backup.get("backup_path"):
+            raise RuntimeError("匯入前 PostgreSQL 備份未完成，遷移已停止。")
+
+        plan = analyze_records(records, source_data_key)
+        result = apply_migration(
+            sqlite_database,
+            records,
+            source_data_key,
+            dsn,
+            copy_users=False,
+            before_migration_callback=_copy_source_users_into_empty_server(
+                sqlite_database
+            ),
+            verification_callback=lambda connection: _verify_connection_counts(
+                connection, source_counts
+            ),
+        )
+        final_report = verify_postgres(dsn)
+        _validate_final_report(final_report, source_counts)
+    return {
+        "status": "ok",
+        "mode": "empty_server",
+        "package": str(Path(package).resolve()),
+        "server_accounts_preserved": False,
+        "source_users_copied": True,
         "pre_migration_backup": str(backup["backup_path"]),
         "plan": asdict(plan),
         "result": result,

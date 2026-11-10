@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ownerMatchPanel</class>
+ <widget class="QFrame" name="ownerMatchPanel">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>720</width>
+    <height>230</height>
+   </rect>
+  </property>
+  <property name="toolTip">
+   <string>手動新增資料時，依姓名找出可能是同一位的既有地主。</string>
+  </property>
+  <layout class="QVBoxLayout" name="ownerMatchLayout" stretch="0,1,0">
+   <property name="spacing">
+    <number>6</number>
+   </property>
+   <property name="leftMargin">
+    <number>12</number>
+   </property>
+   <property name="topMargin">
+    <number>10</number>
+   </property>
+   <property name="rightMargin">
+    <number>12</number>
+   </property>
+   <property name="bottomMargin">
+    <number>10</number>
+   </property>
+   <item>
+    <layout class="QHBoxLayout" name="ownerMatchHeaderRow" stretch="0,1">
+     <property name="spacing">
+      <number>8</number>
+     </property>
+     <item>
+      <widget class="QLabel" name="ownerMatchTitle">
+       <property name="text">
+        <string>可能是同一位地主</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLabel" name="ownerMatchHint">
+       <property name="text">
+        <string>選「選這位」會把這筆土地加到該地主名下，不會另外新增地主。</string>
+       </property>
+       <property name="wordWrap">
+        <bool>true</bool>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="TableWidget" name="ownerMatchTable">
+     <property name="minimumSize">
+      <size>
+       <width>0</width>
+       <height>96</height>
+      </size>
+     </property>
+     <property name="maximumSize">
+      <size>
+       <width>16777215</width>
+       <height>300</height>
+      </size>
+     </property>
+     <property name="editTriggers">
+      <set>QAbstractItemView::EditTrigger::NoEditTriggers</set>
+     </property>
+     <property name="selectionMode">
+      <enum>QAbstractItemView::SelectionMode::SingleSelection</enum>
+     </property>
+     <property name="selectionBehavior">
+      <enum>QAbstractItemView::SelectionBehavior::SelectRows</enum>
+     </property>
+     <property name="columnCount">
+      <number>3</number>
+     </property>
+     <attribute name="verticalHeaderVisible">
+      <bool>false</bool>
+     </attribute>
+     <attribute name="horizontalHeaderStretchLastSection">
+      <bool>false</bool>
+     </attribute>
+     <column>
+      <property name="text">
+       <string>地主</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>地址／相符原因</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>土地／電話</string>
+      </property>
+     </column>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="ownerMatchButtonRow" stretch="1,0,0,0">
+     <property name="spacing">
+      <number>8</number>
+     </property>
+     <item>
+      <widget class="QLabel" name="ownerMatchChosenLabel">
+       <property name="text">
+        <string/>
+       </property>
+       <property name="wordWrap">
+        <bool>true</bool>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PushButton" name="ownerMatchClearChoiceButton">
+       <property name="text">
+        <string>取消選擇</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PushButton" name="ownerMatchNewOwnerButton">
+       <property name="text">
+        <string>都不是，新增新地主</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PrimaryPushButton" name="ownerMatchChooseButton">
+       <property name="text">
+        <string>選這位</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>PushButton</class>
+   <extends>QPushButton</extends>
+   <header>qfluentwidgets</header>
+  </customwidget>
+  <customwidget>
+   <class>PrimaryPushButton</class>
+   <extends>QPushButton</extends>
+   <header>qfluentwidgets</header>
+  </customwidget>
+  <customwidget>
+   <class>TableWidget</class>
+   <extends>QTableWidget</extends>
+   <header>qfluentwidgets</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>

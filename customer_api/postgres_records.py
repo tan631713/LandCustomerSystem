@@ -12,6 +12,10 @@ from customer_api.postgres_schema import (
     IDENTITY_PRIMARY_KEY_CONSTRAINTS,
     repair_postgres_identity_sequences,
 )
+from customer_api.postgres_urban_plans import (
+    apply_record_urban_plan,
+    assign_imported_lands,
+)
 from customer_postgres_keys import land_key_for, owner_key_for
 from customer_security import decrypt_value, make_fernet
 
@@ -110,12 +114,13 @@ class PostgreSQLRecordMixin:
         encrypted = _encrypted_record(user, values)
         owner_row = conn.execute(
             """
-            INSERT INTO owners (owner_key, owner_name, external_id, address)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO owners (owner_key, owner_name, external_id, address, birth_year)
+            VALUES (%s, %s, %s, %s, %s)
             ON CONFLICT (owner_key) DO UPDATE SET
                 owner_name = EXCLUDED.owner_name,
                 external_id = EXCLUDED.external_id,
                 address = EXCLUDED.address,
+                birth_year = EXCLUDED.birth_year,
                 updated_at = CURRENT_TIMESTAMP
             RETURNING id
             """,
@@ -124,6 +129,7 @@ class PostgreSQLRecordMixin:
                 encrypted["owner_name"],
                 encrypted.get("external_id"),
                 encrypted.get("address"),
+                encrypted.get("birth_year"),
             ),
         ).fetchone()
         land_row = self._save_land(conn, values)
@@ -142,6 +148,7 @@ class PostgreSQLRecordMixin:
 
         district = values.get("district") or ""
         section = values.get("section") or ""
+        subsection = values.get("subsection") or ""
         land_number = values.get("land_number") or ""
         land_key = land_key_for(values)
         row = conn.execute(
@@ -172,15 +179,16 @@ class PostgreSQLRecordMixin:
             return conn.execute(
                 """
                 INSERT INTO lands (
-                    land_key, district, section, land_number, area,
+                    land_key, district, section, subsection, land_number, area,
                     declared_value
-                ) VALUES (%s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
                     land_key,
                     district,
                     section,
+                    subsection,
                     land_number,
                     values.get("area"),
                     values.get("declared_value"),
@@ -200,6 +208,7 @@ class PostgreSQLRecordMixin:
                 END,
                 district = %s,
                 section = %s,
+                subsection = %s,
                 land_number = %s,
                 area = %s,
                 declared_value = %s,
@@ -213,6 +222,7 @@ class PostgreSQLRecordMixin:
                 land_key,
                 district,
                 section,
+                subsection,
                 land_number,
                 values.get("area"),
                 values.get("declared_value"),
@@ -233,9 +243,21 @@ class PostgreSQLRecordMixin:
             previous_address = self._record_address_before_update(
                 conn, user, record_id
             )
-        owner_id, land_id, encrypted = self._save_owner_and_land(
-            conn, user, values
-        )
+        values = dict(values)
+        chosen_owner_id = values.pop("owner_id", None)
+        if chosen_owner_id is not None and record_id is None:
+            # A new record the user explicitly put under an existing owner.
+            values = self._attach_values_to_owner(
+                conn, user, values, chosen_owner_id
+            )
+            encrypted = _encrypted_record(user, values)
+            owner_id = int(chosen_owner_id)
+            land_id = int(self._save_land(conn, values)["id"])
+        else:
+            owner_id, land_id, encrypted = self._save_owner_and_land(
+                conn, user, values
+            )
+        apply_record_urban_plan(conn, land_id, values.get("urban_plan_id"))
         if record_id is None:
             row = conn.execute(
                 """
@@ -329,8 +351,11 @@ class PostgreSQLRecordMixin:
 
         return self._record_write_with_identity_repair(save_with_history)
 
-    def import_records(self, user, items, source_file_name="import.xlsx"):
+    def import_records(
+        self, user, items, source_file_name="import.xlsx", urban_plan_id=None
+    ):
         items = [dict(item) for item in items]
+        urban_plan_summary = None
         safe_name = Path(str(source_file_name or "import.xlsx")).name or "import.xlsx"
         inserted_ids = []
         updated_ids = []
@@ -435,13 +460,20 @@ class PostgreSQLRecordMixin:
                     ),
                 ),
             )
-        return {
+            if urban_plan_id is not None:
+                urban_plan_summary = assign_imported_lands(
+                    conn, user, inserted_ids + updated_ids, urban_plan_id
+                )
+        result = {
             "batch_id": batch_id,
             "inserted_count": len(inserted_ids),
             "updated_count": len(updated_ids),
             "inserted_ids": inserted_ids,
             "updated_ids": updated_ids,
         }
+        if urban_plan_summary is not None:
+            result["urban_plan"] = urban_plan_summary
+        return result
 
     def delete_record(self, user, record_id):
         record_id = int(record_id)
@@ -455,7 +487,7 @@ class PostgreSQLRecordMixin:
             snapshot = self._capture_record_snapshot(conn, record_id)
             label = " / ".join(
                 str(row.get(key) or "")
-                for key in ("district", "section", "land_number")
+                for key in ("district", "section", "subsection", "land_number")
             ).strip(" / ") or f"ID {record_id}"
             conn.execute(
                 """

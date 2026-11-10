@@ -4,11 +4,18 @@
     [Parameter(Mandatory = $true)]
     [string]$SupportRoot,
     [ValidateSet('Start', 'Check')]
-    [string]$Mode = 'Start'
+    [string]$Mode = 'Start',
+    [switch]$NonInteractive
 )
 
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+if ($NonInteractive) {
+    # 只在控制台以 -NonInteractive 呼叫時套用；未帶這個參數時（例如既有的
+    # 「啟動家中伺服器.bat」）維持改版前完全相同的環境變數與輸出位元組。
+    $env:PYTHONUTF8 = '1'
+    $env:PYTHONIOENCODING = 'utf-8'
+}
 
 $packagePath = [IO.Path]::GetFullPath($PackageRoot)
 $supportPath = [IO.Path]::GetFullPath($SupportRoot)
@@ -54,7 +61,33 @@ $state = [ordered]@{
     backup_status = 'not_checked'
     api_url = ''
     process_id = $null
+    account_count = $null
+    backup_directory = ''
+    backup_count = $null
+    latest_backup = ''
+    latest_backup_at = ''
+    steps = @()
 }
+
+# 控制台用的 7 步結構化進度（只新增診斷檔欄位，不影響任何既有輸出）。
+$stepDefinitions = @(
+    @{ Key = 'prerequisites'; Name = '檢查必要軟體' },
+    @{ Key = 'netbird'; Name = '檢查 NetBird 連線' },
+    @{ Key = 'postgresql'; Name = '啟動 PostgreSQL' },
+    @{ Key = 'database'; Name = '檢查資料庫' },
+    @{ Key = 'migration_recovery'; Name = '遷移與帳號恢復' },
+    @{ Key = 'backup'; Name = '自動備份' },
+    @{ Key = 'server'; Name = '啟動 HTTPS 伺服器' }
+)
+$state.steps = @(for ($index = 0; $index -lt $stepDefinitions.Count; $index++) {
+    [ordered]@{
+        n = $index + 1
+        key = $stepDefinitions[$index].Key
+        name = $stepDefinitions[$index].Name
+        status = 'pending'
+        reason = ''
+    }
+})
 
 function Save-Diagnostics {
     $state.checked_at = [DateTimeOffset]::Now.ToString('o')
@@ -72,6 +105,53 @@ function Set-Stage {
     $state.message = $Description
     Save-Diagnostics
     Write-Host $Description
+}
+
+function Set-StepState {
+    param(
+        [Parameter(Mandatory = $true)][string]$Key,
+        [Parameter(Mandatory = $true)][ValidateSet('pending', 'running', 'done', 'skipped', 'failed')][string]$Status,
+        [string]$Reason = ''
+    )
+    foreach ($step in $state.steps) {
+        if ($step.key -eq $Key) {
+            $step.status = $Status
+            $step.reason = $Reason
+            break
+        }
+    }
+    Save-Diagnostics
+}
+
+function Complete-RemainingSteps {
+    param([string]$Reason = '')
+    foreach ($step in $state.steps) {
+        if ($step.status -in @('pending', 'running')) {
+            $step.status = 'done'
+            $step.reason = $Reason
+        }
+    }
+}
+
+function Set-FailedStep {
+    param([Parameter(Mandatory = $true)][string]$Message)
+    $stageToStep = @{
+        prerequisites = 'prerequisites'; netbird = 'netbird'; windows_services = 'postgresql'
+        pre_upgrade_backup = 'database'; database = 'database'; https = 'server'
+        backup = 'backup'; server = 'server'
+    }
+    $target = @($state.steps | Where-Object { $_.status -eq 'running' }) | Select-Object -First 1
+    if (-not $target -and $stageToStep.ContainsKey([string]$state.stage)) {
+        $mapped = @($state.steps | Where-Object { $_.key -eq $stageToStep[[string]$state.stage] }) | Select-Object -First 1
+        if ($mapped -and $mapped.status -ne 'done') { $target = $mapped }
+    }
+    if (-not $target) {
+        $target = @($state.steps | Where-Object { $_.status -eq 'pending' }) | Select-Object -First 1
+    }
+    if ($target) {
+        $target.status = 'failed'
+        $target.reason = $Message
+    }
 }
 
 function Get-PostgreSqlService {
@@ -139,6 +219,9 @@ function Confirm-PrerequisiteInstallation {
         Write-Host ("     {0}" -f $Missing[$index].Reason)
     }
     Write-Host ''
+    if ($NonInteractive) {
+        throw ("缺少必要軟體：{0}。非互動模式不會詢問是否自動安裝；請先用「啟動家中伺服器.bat」完成一次安裝後再使用控制台。" -f (($Missing | ForEach-Object { $_.Name }) -join '、'))
+    }
     $answer = (Read-Host '是否現在由系統協助安裝以上軟體？請輸入 Y 或 N').Trim()
     return $answer -match '^(?i:y|yes|是)$'
 }
@@ -240,7 +323,15 @@ function Invoke-ServerTool {
         # 取得 $LASTEXITCODE 前就被全域 Stop 設定中止。
         $ErrorActionPreference = 'Continue'
         if (Test-Path -LiteralPath $serverExecutable -PathType Leaf) {
-            & $serverExecutable @Arguments 2>&1 | Out-Host
+            if ($NonInteractive) {
+                # PowerShell 5.1 會把原生程式的 stderr 包成 ErrorRecord，Out-Host
+                # 顯示時會加上紅字的 NativeCommandError，讓 Uvicorn 正常的 INFO
+                # 訊息看起來像錯誤。轉成純文字輸出即可移除這個假錯誤外觀，且
+                # 不影響 $LASTEXITCODE。未帶 -NonInteractive 時維持原本行為。
+                & $serverExecutable @Arguments 2>&1 | ForEach-Object { Write-Host $_.ToString() }
+            } else {
+                & $serverExecutable @Arguments 2>&1 | Out-Host
+            }
             return [int]$LASTEXITCODE
         }
         if (-not (Test-Path -LiteralPath $pythonExecutable -PathType Leaf)) {
@@ -252,8 +343,56 @@ function Invoke-ServerTool {
         if (-not (Test-Path -LiteralPath $serverScript -PathType Leaf) -or -not $script:pythonExecutable) {
             throw '找不到 LandCustomerServer.exe，伺服器封裝可能不完整。'
         }
-        & $script:pythonExecutable $serverScript @Arguments 2>&1 | Out-Host
+        if ($NonInteractive) {
+            & $script:pythonExecutable $serverScript @Arguments 2>&1 | ForEach-Object { Write-Host $_.ToString() }
+        } else {
+            & $script:pythonExecutable $serverScript @Arguments 2>&1 | Out-Host
+        }
         return [int]$LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+}
+
+function Invoke-ServerToolCaptured {
+    # 與 Invoke-ServerTool 相同的呼叫方式，但同時把整段輸出保留下來嘗試解析
+    # 成 JSON，讓診斷檔可以新增 account_count 等欄位。每一行仍會照常顯示，
+    # 不影響既有的畫面輸出或 $LASTEXITCODE 判斷方式。
+    param([Parameter(Mandatory = $true)][string[]]$Arguments)
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $lines = [Collections.Generic.List[string]]::new()
+        $collector = { param($item) $text = $item.ToString(); Write-Host $text; $lines.Add($text) }
+        $useExecutable = Test-Path -LiteralPath $serverExecutable -PathType Leaf
+        $usePython = (-not $useExecutable) -and (Test-Path -LiteralPath $serverScript -PathType Leaf) -and $script:pythonExecutable
+        if (-not $useExecutable -and -not $usePython) {
+            throw '找不到 LandCustomerServer.exe，伺服器封裝可能不完整。'
+        }
+        if ($NonInteractive) {
+            if ($useExecutable) {
+                & $serverExecutable @Arguments 2>&1 | ForEach-Object { & $collector $_ }
+            } else {
+                & $script:pythonExecutable $serverScript @Arguments 2>&1 | ForEach-Object { & $collector $_ }
+            }
+        } else {
+            # 未帶 -NonInteractive 時維持改版前完全相同的畫面輸出（含 stderr 的原生顯示）。
+            $raw = $null
+            if ($useExecutable) {
+                & $serverExecutable @Arguments 2>&1 | Tee-Object -Variable raw | Out-Host
+            } else {
+                & $script:pythonExecutable $serverScript @Arguments 2>&1 | Tee-Object -Variable raw | Out-Host
+            }
+            foreach ($item in @($raw)) { $lines.Add($item.ToString()) }
+        }
+        $code = [int]$LASTEXITCODE
+        $json = $null
+        try {
+            $json = ($lines -join "`n") | ConvertFrom-Json -ErrorAction Stop
+        } catch {
+            $json = $null
+        }
+        return [PSCustomObject]@{ ExitCode = $code; Json = $json }
     } finally {
         $ErrorActionPreference = $previousErrorActionPreference
     }
@@ -317,6 +456,7 @@ try {
     }
 
     Set-Stage -Name 'prerequisites' -Description '[1/7] 檢查必要軟體...'
+    Set-StepState -Key 'prerequisites' -Status 'running'
     $prerequisites = Get-PrerequisiteState
     $state.winget_available = [bool]$prerequisites.Winget
     $state.missing_software = @($prerequisites.Missing | ForEach-Object { $_.Name })
@@ -350,8 +490,10 @@ try {
         $state.software_check = 'ok'
         Save-Diagnostics
     }
+    Set-StepState -Key 'prerequisites' -Status 'done'
 
     Set-Stage -Name 'netbird' -Description '[2/7] 檢查 NetBird 私人 VPN...'
+    Set-StepState -Key 'netbird' -Status 'running'
     $vpnIp = Get-NetBirdIp
     if (-not $vpnIp -and $Mode -eq 'Start') {
         Write-Host 'NetBird 尚未登入，接下來會開啟官方登入頁。'
@@ -368,8 +510,10 @@ try {
     $state.api_url = "https://${vpnIp}:8732/mobile/"
     Save-Diagnostics
     Write-Host "NetBird IP：$vpnIp"
+    Set-StepState -Key 'netbird' -Status 'done' -Reason "NetBird 私人 VPN 已就緒 $vpnIp"
 
     Set-Stage -Name 'windows_services' -Description '[3/7] 檢查 PostgreSQL 服務與 NetBird 防火牆...'
+    Set-StepState -Key 'postgresql' -Status 'running'
     if (-not (Test-Path -LiteralPath $preflightScript -PathType Leaf)) {
         throw '找不到伺服器環境檢查檔，封裝可能不完整。'
     }
@@ -393,6 +537,7 @@ try {
         $state.postgresql_status = [string]$postgresService.Status
     }
     Save-Diagnostics
+    Set-StepState -Key 'postgresql' -Status 'done' -Reason ("PostgreSQL 服務 {0} {1}" -f $state.postgresql_service, $state.postgresql_status)
 
     $script:existingServerProcess = $null
     $listeners = @(Get-NetTCPConnection -State Listen -LocalPort 8732 -ErrorAction SilentlyContinue)
@@ -407,6 +552,7 @@ try {
                 $state.stage = 'ready'
                 $state.message = '家中伺服器已在執行，不需要重複啟動。'
                 $state.process_id = $script:existingServerProcess
+                Complete-RemainingSteps -Reason '伺服器原本已在執行'
                 Save-Diagnostics
                 Write-Host $state.message
                 Write-Host "手機網址：$($state.api_url)"
@@ -420,10 +566,14 @@ try {
         }
     }
 
+    Set-StepState -Key 'database' -Status 'running'
     if ($Mode -eq 'Start' -and (Test-Path -LiteralPath $protectedPostgresDsn -PathType Leaf)) {
         Set-Stage -Name 'pre_upgrade_backup' -Description '[4/8] 升級前確認 PostgreSQL 完整備份...'
         $preUpgradeBackupCode = Invoke-ServerTool -Arguments @('--postgres', '--backup-if-due-hours', '24', '--backup-label', 'pre-upgrade')
         if ($preUpgradeBackupCode -ne 0) {
+            if ($NonInteractive) {
+                throw '既有 PostgreSQL 連線設定無法完成備份，需要重新輸入 postgres 管理密碼修復；非互動模式無法提示輸入，請先用「啟動家中伺服器.bat」手動修復一次。'
+            }
             Write-Warning '既有 PostgreSQL 連線設定無法完成備份，現在先修復專案帳號連線。'
             Write-Host '請輸入安裝 PostgreSQL 時設定的 postgres 管理密碼；系統不會顯示或保存這個密碼。'
             $repairCode = Invoke-ServerTool -Arguments @('--setup-postgresql')
@@ -439,24 +589,43 @@ try {
     }
 
     Set-Stage -Name 'database' -Description '[5/8] 檢查 PostgreSQL 專案資料庫...'
-    $databaseCode = Invoke-ServerTool -Arguments @('--postgres', '--check')
+    $databaseCheck = Invoke-ServerToolCaptured -Arguments @('--postgres', '--check')
+    $databaseCode = $databaseCheck.ExitCode
     if ($databaseCode -ne 0 -and $Mode -eq 'Start') {
+        if ($NonInteractive) {
+            throw '尚未完成這台 Windows 使用者的 PostgreSQL 專案資料庫設定，需要輸入 postgres 管理密碼；非互動模式無法提示輸入，請先用「啟動家中伺服器.bat」手動完成一次設定後再使用控制台。'
+        }
         Write-Host '尚未完成這台 Windows 使用者的資料庫設定，現在進行一次性設定。'
         $setupCode = Invoke-ServerTool -Arguments @('--setup-postgresql')
         if ($setupCode -ne 0) {
             throw 'PostgreSQL 專案資料庫設定失敗。'
         }
-        $databaseCode = Invoke-ServerTool -Arguments @('--postgres', '--check')
+        $databaseCheck = Invoke-ServerToolCaptured -Arguments @('--postgres', '--check')
+        $databaseCode = $databaseCheck.ExitCode
     }
     if ($databaseCode -ne 0) {
         throw 'PostgreSQL 專案資料庫檢查失敗。'
     }
     $state.database_status = 'ok'
+    if ($databaseCheck.Json -and ($null -ne $databaseCheck.Json.account_count)) {
+        $state.account_count = [int]$databaseCheck.Json.account_count
+    }
+    if ($databaseCheck.Json -and ($null -ne $databaseCheck.Json.schema_version)) {
+        $state.schema_version = [int]$databaseCheck.Json.schema_version
+    }
+    if ($databaseCheck.Json -and ($null -ne $databaseCheck.Json.record_count)) {
+        $state.record_count = [int]$databaseCheck.Json.record_count
+    }
     Save-Diagnostics
+    Set-StepState -Key 'database' -Status 'done' -Reason '資料庫連線正常'
+    Set-StepState -Key 'migration_recovery' -Status 'running'
 
     if ($recoveryFiles.Count -eq 1) {
         if ($Mode -eq 'Check') {
             throw '偵測到待匯入的帳號恢復檔；請使用「啟動家中伺服器.bat」完成匯入。'
+        }
+        if ($NonInteractive) {
+            throw '偵測到待匯入的帳號恢復檔；非互動模式不會自動詢問，請使用控制台的管理功能或「啟動家中伺服器.bat」完成匯入。'
         }
         $recoveryFile = $recoveryFiles[0]
         Write-Host ''
@@ -494,6 +663,9 @@ try {
         if ($Mode -eq 'Check') {
             throw '偵測到 admin 密碼恢復要求；請使用「啟動家中伺服器.bat」完成操作。'
         }
+        if ($NonInteractive) {
+            throw '偵測到 admin 密碼恢復要求（.request 檔）；非互動模式不會自動詢問，請使用控制台的「admin 密碼恢復」功能，或「啟動家中伺服器.bat」完成操作。'
+        }
         Write-Host ''
         Write-Host '偵測到 admin 密碼恢復要求。' -ForegroundColor Yellow
         Write-Host '此操作只在家中主機本地執行，會先驗證既有帳號與資料金鑰。'
@@ -522,6 +694,9 @@ try {
     if ($migrationFiles.Count -eq 1) {
         if ($Mode -eq 'Check') {
             throw '偵測到待匯入的單機資料遷移包；請使用「啟動家中伺服器.bat」完成匯入。'
+        }
+        if ($NonInteractive) {
+            throw '偵測到待匯入的單機資料遷移包；非互動模式不會自動詢問，請使用控制台的「匯入遷移包」功能，或「啟動家中伺服器.bat」完成匯入。'
         }
         $migrationFile = $migrationFiles[0]
         Write-Host ''
@@ -566,11 +741,17 @@ try {
         }
     }
 
+    $pendingWork = ($recoveryFiles.Count -gt 0) -or $adminRecoveryRequested -or ($migrationFiles.Count -gt 0)
+    Set-StepState -Key 'migration_recovery' -Status 'done' -Reason $(
+        if ($pendingWork) { '已處理待辦的帳號恢復／遷移項目（詳見日誌）' } else { '無待匯入遷移包、無密碼恢復要求' }
+    )
+
     if ($script:existingServerProcess) {
         $state.status = 'already_running'
         $state.stage = 'ready'
         $state.message = '帳號處理完成；家中伺服器原本已在執行。'
         $state.process_id = $script:existingServerProcess
+        Complete-RemainingSteps -Reason '伺服器原本已在執行'
         Save-Diagnostics
         Write-Host $state.message
         Write-Host "手機網址：$($state.api_url)"
@@ -607,16 +788,32 @@ try {
     Save-Diagnostics
 
     Set-Stage -Name 'backup' -Description '[7/8] 檢查每日 PostgreSQL 備份...'
-    $backupCode = Invoke-ServerTool -Arguments @('--postgres', '--backup-if-due-hours', '24', '--backup-label', 'auto')
+    Set-StepState -Key 'backup' -Status 'running'
+    $backupRun = Invoke-ServerToolCaptured -Arguments @('--postgres', '--backup-if-due-hours', '24', '--backup-label', 'auto')
+    $backupCode = $backupRun.ExitCode
     if ($backupCode -eq 0) {
         $state.backup_status = 'ok'
+        if ($backupRun.Json -and $backupRun.Json.skipped) {
+            Set-StepState -Key 'backup' -Status 'skipped' -Reason '24 小時內已有備份，略過自動備份'
+        } else {
+            Set-StepState -Key 'backup' -Status 'done' -Reason '自動備份完成'
+        }
     } else {
         $state.backup_status = 'warning'
         Write-Warning '自動備份未完成；資料庫可用，因此本次仍會啟動伺服器。請稍後檢查備份設定。'
+        Set-StepState -Key 'backup' -Status 'skipped' -Reason '自動備份未完成，請稍後檢查備份設定'
+    }
+    $backupStatusCheck = Invoke-ServerToolCaptured -Arguments @('--postgres', '--backup-status')
+    if ($backupStatusCheck.ExitCode -eq 0 -and $backupStatusCheck.Json) {
+        $state.backup_directory = [string]$backupStatusCheck.Json.backup_directory
+        $state.backup_count = [int]$backupStatusCheck.Json.backup_count
+        $state.latest_backup = [string]$backupStatusCheck.Json.latest_backup
+        $state.latest_backup_at = [string]$backupStatusCheck.Json.latest_backup_at
     }
     Save-Diagnostics
 
     Set-Stage -Name 'server' -Description '[7/7] 啟動 HTTPS 伺服器...'
+    Set-StepState -Key 'server' -Status 'running' -Reason '啟動 HTTPS 伺服器…'
     Write-Host ''
     Write-Host 'NetBird 私人 VPN 已就緒。'
     Write-Host "手機瀏覽器：$($state.api_url)"
@@ -650,6 +847,7 @@ try {
     }
     $state.status = 'error'
     $state.message = $_.Exception.Message
+    Set-FailedStep -Message $state.message
     Save-Diagnostics
     Write-Host ''
     Write-Error $state.message

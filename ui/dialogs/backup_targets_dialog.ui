@@ -1,0 +1,302 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>backupTargetsDialogContent</class>
+ <widget class="QWidget" name="backupTargetsDialogContent">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>820</width>
+    <height>520</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>異地備份</string>
+  </property>
+  <property name="dialogSize" stdset="0">
+   <size>
+    <width>820</width>
+    <height>520</height>
+   </size>
+  </property>
+  <layout class="QVBoxLayout" name="backupTargetsLayout">
+   <property name="spacing">
+    <number>6</number>
+   </property>
+   <property name="leftMargin">
+    <number>11</number>
+   </property>
+   <property name="topMargin">
+    <number>11</number>
+   </property>
+   <property name="rightMargin">
+    <number>11</number>
+   </property>
+   <property name="bottomMargin">
+    <number>11</number>
+   </property>
+   <item>
+    <widget class="QLabel" name="introLabel">
+     <property name="text">
+      <string>目的地可選 USB、NAS 或 OneDrive 同步資料夾；每次同步都會驗證 SHA-256。</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="TableWidget" name="targetsTable">
+     <property name="selectionMode">
+      <enum>QAbstractItemView::SingleSelection</enum>
+     </property>
+     <property name="selectionBehavior">
+      <enum>QAbstractItemView::SelectRows</enum>
+     </property>
+     <column>
+      <property name="text">
+       <string>ID</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>名稱</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>資料夾</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>啟用</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>最後成功</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>錯誤</string>
+      </property>
+     </column>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="targetRow" stretch="0,0,0,1,0,0">
+     <property name="spacing">
+      <number>6</number>
+     </property>
+     <property name="leftMargin">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <property name="rightMargin">
+      <number>0</number>
+     </property>
+     <property name="bottomMargin">
+      <number>0</number>
+     </property>
+     <item>
+      <widget class="QLabel" name="nameLabel">
+       <property name="text">
+        <string>名稱</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="LineEdit" name="nameEdit">
+       <property name="placeholderText">
+        <string>例如：辦公室 NAS</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLabel" name="pathLabel">
+       <property name="text">
+        <string>資料夾</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="LineEdit" name="pathEdit" />
+     </item>
+     <item>
+      <widget class="PushButton" name="browseButton">
+       <property name="text">
+        <string>瀏覽</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="CheckBox" name="enabledCheckBox">
+       <property name="text">
+        <string>啟用</string>
+       </property>
+       <property name="checked">
+        <bool>true</bool>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="passwordRow">
+     <property name="spacing">
+      <number>6</number>
+     </property>
+     <property name="leftMargin">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <property name="rightMargin">
+      <number>0</number>
+     </property>
+     <property name="bottomMargin">
+      <number>0</number>
+     </property>
+     <item>
+      <widget class="QLabel" name="backupPasswordLabel">
+       <property name="text">
+        <string>備份密碼</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PasswordLineEdit" name="backupPasswordEdit">
+       <property name="placeholderText">
+        <string>至少 10 個字元；災難還原時需要</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLabel" name="backupPasswordConfirmLabel">
+       <property name="text">
+        <string>確認</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PasswordLineEdit" name="backupPasswordConfirmEdit">
+      </widget>
+     </item>
+     <item>
+      <widget class="CheckBox" name="rememberPasswordCheckBox">
+       <property name="text">
+        <string>加密保存在本機並每日自動同步</string>
+       </property>
+       <property name="checked">
+        <bool>true</bool>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="buttonRow" stretch="0,0,1,0,0,0">
+     <property name="spacing">
+      <number>6</number>
+     </property>
+     <property name="leftMargin">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <property name="rightMargin">
+      <number>0</number>
+     </property>
+     <property name="bottomMargin">
+      <number>0</number>
+     </property>
+     <item>
+      <widget class="PrimaryPushButton" name="saveButton">
+       <property name="text">
+        <string>新增/更新</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PushButton" name="deleteButton">
+       <property name="text">
+        <string>刪除</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="buttonRowSpacer">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>0</width>
+         <height>0</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="PushButton" name="restoreButton">
+       <property name="text">
+        <string>還原完整備份</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PushButton" name="syncButton">
+       <property name="text">
+        <string>立即建立完整備份並同步</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PushButton" name="closeButton">
+       <property name="text">
+        <string>關閉</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+ <customwidget>
+  <class>CheckBox</class>
+  <extends>QCheckBox</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>LineEdit</class>
+  <extends>QLineEdit</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>PasswordLineEdit</class>
+  <extends>QLineEdit</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>PrimaryPushButton</class>
+  <extends>QPushButton</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>PushButton</class>
+  <extends>QPushButton</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>TableWidget</class>
+  <extends>QTableWidget</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ </customwidgets>
+ <resources />
+ <connections />
+</ui>

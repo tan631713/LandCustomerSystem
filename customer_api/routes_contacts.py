@@ -1,7 +1,8 @@
 """Contact-log routes."""
 
+from datetime import date as date_cls
 from typing import Annotated
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Query
 from customer_api.auth import ApiSession
 from customer_api.field_visit_service import (
     FieldVisitIdempotencyConflict,
@@ -87,3 +88,21 @@ def register_contact_routes(app, *, settings, source, current_session, editor_us
         if not deleted:
             raise HTTPException(status_code=404, detail="找不到聯絡紀錄。")
         return None
+
+    @app.get("/api/v1/contact-logs")
+    def contact_logs_by_date(
+        session: Annotated[ApiSession, Depends(current_session)],
+        date: str = Query(..., min_length=10, max_length=10),
+        mine_only: bool = Query(default=False),
+    ):
+        try:
+            date_cls.fromisoformat(date)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400, detail="日期格式錯誤，請使用 YYYY-MM-DD。"
+            ) from exc
+        return {
+            "items": source.list_contact_logs_by_date(
+                session.user, date, mine_only=mine_only
+            )
+        }

@@ -330,6 +330,30 @@ class ProductivityFeatureTests(unittest.TestCase):
             for dialog in dialogs:
                 dialog.close()
 
+    def test_map_dialog_masks_owner_name_when_privacy_mask_is_enabled(self):
+        self.repository.create_admin_user("admin-password")
+        data_key = self.repository.authenticate_user("admin", "admin-password")
+        self.repository.save_customer(
+            self.record(district="桃園區", land_number="100", owner_name="王小明")
+        )
+
+        dialog = MapLocationsDialog(
+            self.repository, make_fernet(data_key), mask_owner_names=True,
+        )
+        try:
+            self.assertEqual(dialog.rows[0]["owner_name"], "王")
+            self.assertEqual(dialog.table.item(0, 5).text(), "王")
+        finally:
+            dialog.close()
+
+        unmasked_dialog = MapLocationsDialog(
+            self.repository, make_fernet(data_key), mask_owner_names=False,
+        )
+        try:
+            self.assertEqual(unmasked_dialog.rows[0]["owner_name"], "王小明")
+        finally:
+            unmasked_dialog.close()
+
 
 if __name__ == "__main__":
     unittest.main()

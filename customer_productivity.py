@@ -5,25 +5,27 @@ import html
 import io
 import json
 import os
+import re
 import shutil
 import tempfile
+import time
 import zipfile
 from base64 import urlsafe_b64encode
 from collections import defaultdict
 from datetime import date, datetime
 from pathlib import Path
-from urllib.parse import quote
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
-from PySide6.QtCore import QObject, Qt, QUrl, Signal, Slot
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QDate, QObject, QThread, QUrl, Qt, Signal, Slot
 from PySide6.QtWidgets import (
-    QAbstractItemView,
+    QApplication,
     QCheckBox,
     QComboBox,
+    QDateEdit,
     QDialogButtonBox,
     QFileDialog,
-    QFormLayout,
-    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QInputDialog,
@@ -33,20 +35,33 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QPlainTextEdit,
+    QProgressDialog,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
-    QTabWidget,
-    QVBoxLayout,
     QWidget,
 )
+from qfluentwidgets import ComboBox as FluentComboBox
+from PySide6.QtWebEngineWidgets import QWebEngineView
 
 from customer_responsive_dialog import ResponsiveDialog as QDialog
+from customer_ui_loader import find_child, install_ui, put_in_slot
 
-from customer_domain import normalize_match_text
+from customer_domain import mask_owner_display_name, normalize_match_text
+from customer_offline_map import (
+    leaflet_assets_dir,
+    local_file_url,
+    local_tile_url_template,
+    offline_tile_cache_available,
+)
 from customer_excel import HEADER_MAP, normalize_header
 from customer_word import write_report_docx
 from customer_security import decrypt_value
+
+# 案件規劃的狀態／優先順序選項（Fluent 下拉不讀 .ui 裡的選項，改由程式加入）。
+CASE_STATUS_OPTIONS = ("進行中", "等待中", "完成", "暫停")
+TASK_STATUS_OPTIONS = ("待處理", "進行中", "等待中", "完成")
+PRIORITY_OPTIONS = ("一般", "高", "緊急")
 
 
 ROLE_LABELS = {"admin": "管理員", "editor": "編輯者", "viewer": "唯讀人員"}
@@ -69,6 +84,35 @@ def _selected_ids(table):
     return sorted(set(ids))
 
 
+NO_DUE_DATE = QDate(2000, 1, 1)
+
+
+def _configure_optional_date_edit(edit):
+    """A QDateEdit that can represent "no due date" using a sentinel
+    minimum value, the same setSpecialValueText pattern already used for
+    the backup retention spinner elsewhere in the app."""
+
+    edit.setDisplayFormat("yyyy-MM-dd")
+    edit.setCalendarPopup(True)
+    edit.setMinimumDate(NO_DUE_DATE)
+    edit.setSpecialValueText("未設定")
+    edit.setDate(NO_DUE_DATE)
+
+
+def _due_date_text(edit):
+    date = edit.date()
+    return "" if date == NO_DUE_DATE else date.toString("yyyy-MM-dd")
+
+
+def _set_due_date_text(edit, value):
+    text = str(value or "").strip()
+    if not text:
+        edit.setDate(NO_DUE_DATE)
+        return
+    parsed = QDate.fromString(text, "yyyy-MM-dd")
+    edit.setDate(parsed if parsed.isValid() else NO_DUE_DATE)
+
+
 def apply_default_import_profile(repository):
     """Install the saved default header aliases into the Excel parser."""
     profiles = [dict(row) for row in repository.list_import_profiles()]
@@ -83,6 +127,195 @@ def apply_default_import_profile(repository):
             HEADER_MAP[normalized] = target_key
             applied += 1
     return applied
+
+
+def render_map_html_document(locations, app_directory):
+    """Builds the "土地位置與地號視覺化" map HTML itself. A module-level
+    function (not a ProductivityService method) so it can be called from
+    MapLocationsDialog too -- for its embedded QWebEngineView (renders
+    the map live in-app) as well as ProductivityService.build_map_html()
+    (writes it to a file for "匯出") -- without either one needing a full
+    ProductivityService instance just to get at this. Returns
+    (html_document, row_count)."""
+    # v1.9.56 changed the map dialog to list every customer, including
+    # ones with no coordinates yet (latitude/longitude come back as
+    # None) -- filter those out here rather than assuming every row
+    # handed in already has real coordinates, otherwise the plain
+    # float(...) conversion below raises TypeError the moment a single
+    # un-located customer is present in the dialog's row list.
+    rows = []
+    for row in locations:
+        row = dict(row)
+        try:
+            row["latitude"] = float(row["latitude"])
+            row["longitude"] = float(row["longitude"])
+        except (TypeError, ValueError):
+            continue
+        rows.append(row)
+    district_counts = defaultdict(int)
+    section_counts = defaultdict(int)
+    for row in rows:
+        district_counts[row.get("district") or "未填地區"] += 1
+        section_counts[
+            f"{row.get('district') or '未填地區'}／{row.get('section') or '未填地段'}"
+        ] += 1
+
+    markers = []
+    for row in rows:
+        label = " ".join(
+            str(row.get(key) or "")
+            for key in (
+                "district", "section", "subsection", "land_number", "owner_name",
+            )
+        ).strip()
+        markers.append(
+            {
+                "lat": float(row["latitude"]),
+                "lon": float(row["longitude"]),
+                "label": label or "（未命名）",
+                # "未填地區" here matches district_counts' own fallback
+                # above -- a marker with no district recorded still
+                # needs a tab to live under, not to silently vanish
+                # whenever a district other than "全部" is selected.
+                "district": str(row.get("district") or "") or "未填地區",
+                "section": str(row.get("section") or ""),
+                "subsection": str(row.get("subsection") or ""),
+                "landNumber": str(row.get("land_number") or ""),
+                "ownerName": str(row.get("owner_name") or ""),
+            }
+        )
+    markers_json = json.dumps(markers, ensure_ascii=False).replace("</", "<\\/")
+
+    # Tab order follows district_counts' own sort (busiest district
+    # first) -- "全部" always comes first as the default view.
+    district_tabs = ["全部"] + [
+        name for name, _count in sorted(district_counts.items(), key=lambda item: -item[1])
+    ]
+    district_tabs_json = json.dumps(district_tabs, ensure_ascii=False).replace("</", "<\\/")
+    district_tab_buttons = "".join(
+        f'<button class="district-tab" data-district="{html.escape(name)}">'
+        f"{html.escape(name)}</button>"
+        for name in district_tabs
+    )
+
+    district_html = "".join(
+        f"<tr><td>{html.escape(name)}</td><td>{count}</td></tr>"
+        for name, count in sorted(district_counts.items(), key=lambda item: -item[1])
+    )
+    section_html = "".join(
+        f"<tr><td>{html.escape(name)}</td><td>{count}</td></tr>"
+        for name, count in sorted(section_counts.items(), key=lambda item: -item[1])[:50]
+    )
+
+    # Explicit user request: the map must not depend on a live
+    # network connection or a CDN. Leaflet itself is vendored locally
+    # (assets/leaflet/, bundled with the app) rather than fetched
+    # from unpkg.com; the 桃園市 offline tile cache (downloaded once
+    # by download_offline_map_tiles.bat -- see customer_offline_map.py)
+    # becomes the default base layer whenever it actually has tiles,
+    # with the existing live 國土測繪中心/CARTO layers kept as a
+    # fallback for anywhere outside that coverage or a machine with
+    # no offline cache set up yet.
+    leaflet_css_url = local_file_url(leaflet_assets_dir() / "leaflet.css")
+    leaflet_js_url = local_file_url(leaflet_assets_dir() / "leaflet.js")
+    offline_available = offline_tile_cache_available(app_directory)
+    offline_tile_url = local_tile_url_template(app_directory)
+    default_layer_js = "offlineLayer" if offline_available else "nlscLayer"
+    offline_layer_entry_js = (
+        '"本地離線地圖（桃園市）": offlineLayer, ' if offline_available else ""
+    )
+
+    document = f"""<!doctype html><html lang="zh-Hant"><meta charset="utf-8">
+<title>土地位置與地號視覺化</title>
+<link rel="stylesheet" href="{leaflet_css_url}" />
+<style>
+body{{font-family:system-ui;margin:24px;background:#f8fafc;color:#172033}}
+.grid{{display:grid;grid-template-columns:2fr 1fr;gap:20px}}section{{background:white;padding:18px;border:1px solid #d8dee9;border-radius:10px}}
+#map{{width:100%;height:480px;border:1px solid #b8c8dc;border-radius:6px}}
+table{{border-collapse:collapse;width:100%}}td,th{{border-bottom:1px solid #ddd;padding:7px;text-align:left}}
+.district-tabs{{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}}
+.district-tab{{border:1px solid #b8c8dc;background:white;color:#172033;border-radius:16px;padding:5px 12px;font-size:13px;cursor:pointer}}
+.district-tab:hover{{background:#eef3fa}}
+.district-tab.active{{background:#2563eb;border-color:#2563eb;color:white}}
+</style>
+<h1>土地位置與地號視覺化</h1>
+<p>產生時間：{datetime.now():%Y-%m-%d %H:%M:%S}　定位資料：{len(rows)} 筆。{"目前使用本機離線地圖（桃園市），不需網路連線。" if offline_available else "尚未下載離線地圖圖磚，目前使用線上底圖，需要網路連線；執行 download_offline_map_tiles.bat 可下載桃園市離線圖磚。"}點擊標記可查看地號資訊；點選下方分頁可切換只看單一地區；地圖右上角可切換底圖樣式。</p>
+<div class="grid">
+<section><h2>座標分布</h2><div class="district-tabs">{district_tab_buttons}</div><div id="map" role="img" aria-label="土地位置地圖"></div></section>
+<section><h2>地區統計</h2><table><tr><th>地區</th><th>筆數</th></tr>{district_html}</table></section>
+</div>
+<section><h2>地段分布</h2><table><tr><th>地區／地段</th><th>筆數</th></tr>{section_html}</table></section>
+<script src="{leaflet_js_url}"></script>
+<script>
+const markers = {markers_json};
+const districtTabs = {district_tabs_json};
+// 離線圖磚（桃園市，本機快取）優先當預設底圖，不需網路連線 -- 見
+// customer_offline_map.py／download_offline_map_tiles.bat。內政部國土
+// 測繪中心「通用電子地圖」跟 CARTO Voyager 兩個線上圖磚服務保留當備
+// 案：查詢範圍外的地主、或這台電腦還沒下載離線圖磚時，可以在地圖右
+// 上角的圖層切換器（L.control.layers）切過去看。
+const offlineLayer = L.tileLayer(
+  "{offline_tile_url}",
+  {{
+    maxZoom: 19,
+    // minNativeZoom (not minZoom) -- the cache only has z12+ tiles, but
+    // "全部" fits every district's markers at once, which needs a much
+    // lower zoom than any single district does. minZoom would leave the
+    // layer showing nothing at all below 12; minNativeZoom instead makes
+    // Leaflet stretch the z12 tiles to cover those lower zooms, so
+    // "全部" still shows *something* instead of a blank grey box.
+    minNativeZoom: 12,
+    attribution: "國土測繪中心 通用電子地圖（本機離線快取，桃園市）",
+  }}
+);
+const nlscLayer = L.tileLayer(
+  "https://wmts.nlsc.gov.tw/wmts/EMAP/default/GoogleMapsCompatible/{{z}}/{{y}}/{{x}}",
+  {{ maxZoom: 19, attribution: "國土測繪中心 通用電子地圖" }}
+);
+const cartoLayer = L.tileLayer(
+  "https://{{s}}.basemaps.cartocdn.com/rastertiles/voyager/{{z}}/{{x}}/{{y}}{{r}}.png",
+  {{
+    maxZoom: 20,
+    attribution: "&copy; <a href=\\"https://www.openstreetmap.org/copyright\\">OpenStreetMap</a> contributors &copy; <a href=\\"https://carto.com/attributions\\">CARTO</a>"
+  }}
+);
+const map = L.map("map", {{ layers: [{default_layer_js}] }});
+L.control.layers({{ {offline_layer_entry_js}"國土測繪中心地圖（線上）": nlscLayer, "CARTO 彩色地圖（線上）": cartoLayer }}).addTo(map);
+
+const markerLayer = L.layerGroup().addTo(map);
+
+function showDistrict(name) {{
+  markerLayer.clearLayers();
+  const visible = name === "全部" ? markers : markers.filter(function (item) {{
+    return item.district === name;
+  }});
+  const bounds = [];
+  visible.forEach(function (item) {{
+    const popup = "<b>" + [item.district, item.section, item.subsection, item.landNumber].filter(Boolean).join(" ")
+      + "</b><br>" + (item.ownerName || "");
+    L.marker([item.lat, item.lon]).addTo(markerLayer).bindPopup(popup);
+    bounds.push([item.lat, item.lon]);
+  }});
+  if (bounds.length) {{
+    map.fitBounds(bounds, {{ padding: [24, 24], maxZoom: 17 }});
+  }} else {{
+    map.setView([23.7, 121.0], 7);
+  }}
+  document.querySelectorAll(".district-tab").forEach(function (button) {{
+    button.classList.toggle("active", button.dataset.district === name);
+  }});
+}}
+
+document.querySelectorAll(".district-tab").forEach(function (button) {{
+  button.addEventListener("click", function () {{
+    showDistrict(button.dataset.district);
+  }});
+}});
+
+showDistrict(districtTabs[0] || "全部");
+</script>
+</html>"""
+    return document, len(rows)
 
 
 class ProductivityService:
@@ -354,14 +587,18 @@ class ProductivityService:
             values = {
                 key: normalize_match_text(item.get(key))
                 for key in (
-                    "district", "section", "land_number", "registration_order",
-                    "owner_name", "external_id", "address",
+                    "district", "section", "subsection", "land_number",
+                    "registration_order", "owner_name", "external_id", "address",
                 )
             }
             normalized.append((item, values))
             for key in (
                 ("external_id", values["external_id"]),
-                ("owner_land", f"{values['owner_name']}|{values['district']}|{values['section']}|{values['land_number']}"),
+                (
+                    "owner_land",
+                    f"{values['owner_name']}|{values['district']}|{values['section']}"
+                    f"|{values['subsection']}|{values['land_number']}",
+                ),
                 ("address_land", f"{values['address']}|{values['land_number']}"),
             ):
                 if key[1].strip("|"):
@@ -384,13 +621,21 @@ class ProductivityService:
             if a["external_id"] and a["external_id"] == b["external_id"]:
                 score += 50
                 reasons.append("身分證相同")
-            land_equal = all(
-                a[key] and a[key] == b[key]
-                for key in ("district", "section", "land_number")
+            # subsection (小段) is legitimately blank for most real parcels --
+            # unlike the other keys here it must only match (blank counts as
+            # a match), not also be non-blank, or two genuinely-duplicate
+            # rows that both simply have no subsection would stop scoring as
+            # a land match the moment this field was introduced.
+            land_equal = (
+                all(
+                    a[key] and a[key] == b[key]
+                    for key in ("district", "section", "land_number")
+                )
+                and a["subsection"] == b["subsection"]
             )
             if land_equal:
                 score += 30
-                reasons.append("地區地段地號相同")
+                reasons.append("地區地段小段地號相同")
             if a["owner_name"] and a["owner_name"] == b["owner_name"]:
                 score += 20
                 reasons.append("姓名相同")
@@ -413,55 +658,13 @@ class ProductivityService:
                 )
         return sorted(results, key=lambda item: (-item["score"], item["left_id"]))
 
-    @staticmethod
-    def build_map_html(locations, output_path):
-        rows = [dict(row) for row in locations]
-        district_counts = defaultdict(int)
-        section_counts = defaultdict(int)
-        for row in rows:
-            district_counts[row.get("district") or "未填地區"] += 1
-            section_counts[
-                f"{row.get('district') or '未填地區'}／{row.get('section') or '未填地段'}"
-            ] += 1
-        latitudes = [float(row["latitude"]) for row in rows] or [23.7]
-        longitudes = [float(row["longitude"]) for row in rows] or [121.0]
-        min_lat, max_lat = min(latitudes), max(latitudes)
-        min_lon, max_lon = min(longitudes), max(longitudes)
-
-        def point(row):
-            x = 40 + 820 * ((float(row["longitude"]) - min_lon) / (max_lon - min_lon or 1))
-            y = 440 - 380 * ((float(row["latitude"]) - min_lat) / (max_lat - min_lat or 1))
-            label = " ".join(
-                str(row.get(key) or "")
-                for key in ("district", "section", "land_number", "owner_name")
-            ).strip()
-            osm = f"https://www.openstreetmap.org/?mlat={row['latitude']}&mlon={row['longitude']}#map=18/{row['latitude']}/{row['longitude']}"
-            title = html.escape(f"{label} ({row['latitude']}, {row['longitude']})")
-            return (
-                f'<a href="{html.escape(osm)}"><circle cx="{x:.1f}" cy="{y:.1f}" r="7">'
-                f"<title>{title}</title></circle></a>"
-            )
-
-        point_svg = "".join(point(row) for row in rows)
-        district_html = "".join(
-            f"<tr><td>{html.escape(name)}</td><td>{count}</td></tr>"
-            for name, count in sorted(district_counts.items(), key=lambda item: -item[1])
-        )
-        section_html = "".join(
-            f"<tr><td>{html.escape(name)}</td><td>{count}</td></tr>"
-            for name, count in sorted(section_counts.items(), key=lambda item: -item[1])[:50]
-        )
-        document = f"""<!doctype html><html lang="zh-Hant"><meta charset="utf-8">
-<title>土地位置與地號視覺化</title><style>
-body{{font-family:system-ui;margin:24px;background:#f8fafc;color:#172033}}
-.grid{{display:grid;grid-template-columns:2fr 1fr;gap:20px}}section{{background:white;padding:18px;border:1px solid #d8dee9;border-radius:10px}}
-svg{{width:100%;height:auto;background:#eef6ff;border:1px solid #b8c8dc}}circle{{fill:#2563eb;stroke:white;stroke-width:2;cursor:pointer}}table{{border-collapse:collapse;width:100%}}td,th{{border-bottom:1px solid #ddd;padding:7px;text-align:left}}</style>
-<h1>土地位置與地號視覺化</h1><p>產生時間：{datetime.now():%Y-%m-%d %H:%M:%S}　定位資料：{len(rows)} 筆。點擊藍點可開啟 OpenStreetMap。</p>
-<div class="grid"><section><h2>座標分布</h2><svg viewBox="0 0 900 480" role="img"><path d="M40 440H860M40 440V60" stroke="#8aa0b8" fill="none"/>{point_svg}</svg></section>
-<section><h2>地區統計</h2><table><tr><th>地區</th><th>筆數</th></tr>{district_html}</table></section></div>
-<section><h2>地段分布</h2><table><tr><th>地區／地段</th><th>筆數</th></tr>{section_html}</table></section></html>"""
+    def build_map_html(self, locations, output_path):
+        document, row_count = self.build_map_html_document(locations)
         Path(output_path).write_text(document, encoding="utf-8")
-        return len(rows)
+        return row_count
+
+    def build_map_html_document(self, locations):
+        return render_map_html_document(locations, self.app_directory)
 
 
 class OffsiteBackupWorker(QObject):
@@ -484,18 +687,17 @@ class OffsiteBackupWorker(QObject):
 
 
 class RecycleBinDialog(QDialog):
+    # Layout: ui/dialogs/recycle_bin_dialog.ui.
+    ui_file = "dialogs/recycle_bin_dialog.ui"
+    ui_object_names = ("recycleTable", "restoreButton", "purgeButton", "purgeAllButton", "closeButton")
+
     def __init__(self, rows, parent=None):
         super().__init__(parent)
         self.rows = [dict(row) for row in rows]
         self.action = None
-        self.setWindowTitle("回收桶")
-        self.resize(820, 500)
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("刪除的土地資料會連同案件、標籤、附件與聯絡關聯保存在這裡。"))
-        self.table = QTableWidget(len(self.rows), 6)
-        self.table.setHorizontalHeaderLabels(["ID", "原始ID", "資料", "刪除者", "刪除時間", "類型"])
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.table = find_child(content, "recycleTable", QTableWidget)
+        self.table.setRowCount(len(self.rows))
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         for index, row in enumerate(self.rows):
             _set_table_row(
@@ -503,22 +705,10 @@ class RecycleBinDialog(QDialog):
                 [row["id"], row["original_id"], row["display_label"], row["deleted_by"], row["deleted_at"], row["entity_type"]],
                 row["id"],
             )
-        layout.addWidget(self.table)
-        buttons = QHBoxLayout()
-        restore = QPushButton("還原選取")
-        purge = QPushButton("永久刪除選取")
-        purge_all = QPushButton("清空回收桶")
-        close = QPushButton("關閉")
-        restore.clicked.connect(lambda: self._request("restore"))
-        purge.clicked.connect(lambda: self._request("purge"))
-        purge_all.clicked.connect(lambda: self._request("purge_all"))
-        close.clicked.connect(self.reject)
-        buttons.addWidget(restore)
-        buttons.addStretch(1)
-        buttons.addWidget(purge)
-        buttons.addWidget(purge_all)
-        buttons.addWidget(close)
-        layout.addLayout(buttons)
+        find_child(content, "restoreButton", QPushButton).clicked.connect(lambda: self._request("restore"))
+        find_child(content, "purgeButton", QPushButton).clicked.connect(lambda: self._request("purge"))
+        find_child(content, "purgeAllButton", QPushButton).clicked.connect(lambda: self._request("purge_all"))
+        find_child(content, "closeButton", QPushButton).clicked.connect(self.reject)
 
     def _request(self, action):
         if action != "purge_all" and not _selected_ids(self.table):
@@ -532,27 +722,24 @@ class RecycleBinDialog(QDialog):
 
 
 class UndoOperationsDialog(QDialog):
+    # Layout: ui/dialogs/undo_operations_dialog.ui.
+    ui_file = "dialogs/undo_operations_dialog.ui"
+    ui_object_names = ("operationsTable", "buttonBox")
+
     def __init__(self, rows, parent=None):
         super().__init__(parent)
         self.rows = [dict(row) for row in rows]
         self.operation_id = None
-        self.setWindowTitle("批次操作復原")
-        self.resize(760, 440)
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("可復原批次修改、Excel 匯入、同地號新增與資料合併。"))
-        self.table = QTableWidget(len(self.rows), 6)
-        self.table.setHorizontalHeaderLabels(["ID", "操作", "摘要", "執行者", "狀態", "時間"])
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.table = find_child(content, "operationsTable", QTableWidget)
+        self.table.setRowCount(len(self.rows))
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         for index, row in enumerate(self.rows):
             _set_table_row(self.table, index, [row["id"], row["operation_type"], row["summary"], row["actor_username"], row["status"], row["created_at"]], row["id"])
-        layout.addWidget(self.table)
-        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        buttons = find_child(content, "buttonBox", QDialogButtonBox)
         undo = buttons.addButton("復原選取操作", QDialogButtonBox.ActionRole)
         undo.clicked.connect(self.request_undo)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
 
     def request_undo(self):
         ids = _selected_ids(self.table)
@@ -564,55 +751,33 @@ class UndoOperationsDialog(QDialog):
 
 
 class UserManagementDialog(QDialog):
+    # Layout: ui/dialogs/user_management_dialog.ui.
+    ui_file = "dialogs/user_management_dialog.ui"
+    ui_object_names = (
+        "usersTable", "usernameEdit", "displayNameEdit", "passwordEdit", "roleCombo", "activeCheckBox",
+        "newModeButton", "createButton", "updateButton", "resetPasswordButton", "closeButton",
+    )
+
     def __init__(self, repository, data_key, parent=None):
         super().__init__(parent)
         self.repository = repository
         self.data_key = data_key
-        self.setWindowTitle("使用者與權限管理")
-        self.resize(780, 540)
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("管理員可管理帳號；編輯者可修改資料；唯讀人員只能查詢與匯出。"))
-        self.table = QTableWidget(0, 7)
-        self.table.setHorizontalHeaderLabels(["ID", "帳號", "顯示名稱", "角色", "啟用", "建立時間", "最後登入"])
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.table = find_child(content, "usersTable", QTableWidget)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.table.itemSelectionChanged.connect(self.load_selected)
-        layout.addWidget(self.table)
-        form = QFormLayout()
-        self.username = QLineEdit()
-        self.display_name = QLineEdit()
-        self.password = QLineEdit()
-        self.password.setEchoMode(QLineEdit.Password)
-        self.role = QComboBox()
+        self.username = find_child(content, "usernameEdit", QLineEdit)
+        self.display_name = find_child(content, "displayNameEdit", QLineEdit)
+        self.password = find_child(content, "passwordEdit", QLineEdit)
+        self.role = find_child(content, "roleCombo", FluentComboBox)
         for key, label in ROLE_LABELS.items():
-            self.role.addItem(label, key)
-        self.active = QCheckBox("啟用帳號")
-        self.active.setChecked(True)
-        form.addRow("帳號", self.username)
-        form.addRow("顯示名稱", self.display_name)
-        form.addRow("新密碼", self.password)
-        form.addRow("角色", self.role)
-        form.addRow("狀態", self.active)
-        layout.addLayout(form)
-        buttons = QHBoxLayout()
-        new_mode = QPushButton("新增模式")
-        create = QPushButton("新增帳號")
-        update = QPushButton("更新角色/狀態")
-        reset = QPushButton("重設選取帳號密碼")
-        close = QPushButton("關閉")
-        new_mode.clicked.connect(self.clear_form)
-        create.clicked.connect(self.create_user)
-        update.clicked.connect(self.update_user)
-        reset.clicked.connect(self.reset_password)
-        close.clicked.connect(self.accept)
-        buttons.addWidget(new_mode)
-        buttons.addWidget(create)
-        buttons.addWidget(update)
-        buttons.addWidget(reset)
-        buttons.addStretch(1)
-        buttons.addWidget(close)
-        layout.addLayout(buttons)
+            self.role.addItem(label, userData=key)
+        self.active = find_child(content, "activeCheckBox", QCheckBox)
+        find_child(content, "newModeButton", QPushButton).clicked.connect(self.clear_form)
+        find_child(content, "createButton", QPushButton).clicked.connect(self.create_user)
+        find_child(content, "updateButton", QPushButton).clicked.connect(self.update_user)
+        find_child(content, "resetPasswordButton", QPushButton).clicked.connect(self.reset_password)
+        find_child(content, "closeButton", QPushButton).clicked.connect(self.accept)
         self.refresh()
 
     def clear_form(self):
@@ -682,56 +847,35 @@ class UserManagementDialog(QDialog):
 
 
 class BackupTargetsDialog(QDialog):
+    # Layout: ui/dialogs/backup_targets_dialog.ui.
+    ui_file = "dialogs/backup_targets_dialog.ui"
+    ui_object_names = (
+        "targetsTable", "nameEdit", "pathEdit", "browseButton", "enabledCheckBox",
+        "backupPasswordEdit", "backupPasswordConfirmEdit", "rememberPasswordCheckBox",
+        "saveButton", "deleteButton", "restoreButton", "syncButton", "closeButton",
+    )
+
     def __init__(self, repository, service, parent=None):
         super().__init__(parent)
         self.repository = repository
         self.service = service
         self.restore_succeeded = False
-        self.setWindowTitle("異地備份")
-        self.resize(820, 520)
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("目的地可選 USB、NAS 或 OneDrive 同步資料夾；每次同步都會驗證 SHA-256。"))
-        self.table = QTableWidget(0, 6)
-        self.table.setHorizontalHeaderLabels(["ID", "名稱", "資料夾", "啟用", "最後成功", "錯誤"])
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.table = find_child(content, "targetsTable", QTableWidget)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.table.itemSelectionChanged.connect(self.load_selected)
-        layout.addWidget(self.table)
-        row = QHBoxLayout()
-        self.name = QLineEdit()
-        self.name.setPlaceholderText("例如：辦公室 NAS")
-        self.path = QLineEdit()
-        browse = QPushButton("瀏覽")
-        browse.clicked.connect(self.browse)
-        self.enabled = QCheckBox("啟用")
-        self.enabled.setChecked(True)
-        row.addWidget(QLabel("名稱")); row.addWidget(self.name)
-        row.addWidget(QLabel("資料夾")); row.addWidget(self.path, 1); row.addWidget(browse); row.addWidget(self.enabled)
-        layout.addLayout(row)
-        password_row = QHBoxLayout()
-        self.backup_password = QLineEdit()
-        self.backup_password.setEchoMode(QLineEdit.Password)
-        self.backup_password.setPlaceholderText("至少 10 個字元；災難還原時需要")
-        self.backup_password_confirm = QLineEdit()
-        self.backup_password_confirm.setEchoMode(QLineEdit.Password)
-        self.remember_password = QCheckBox("加密保存在本機並每日自動同步")
-        self.remember_password.setChecked(True)
-        password_row.addWidget(QLabel("備份密碼"))
-        password_row.addWidget(self.backup_password)
-        password_row.addWidget(QLabel("確認"))
-        password_row.addWidget(self.backup_password_confirm)
-        password_row.addWidget(self.remember_password)
-        layout.addLayout(password_row)
-        buttons = QHBoxLayout()
-        save = QPushButton("新增/更新")
-        delete = QPushButton("刪除")
-        sync = QPushButton("立即建立完整備份並同步")
-        restore = QPushButton("還原完整備份")
-        close = QPushButton("關閉")
-        save.clicked.connect(self.save); delete.clicked.connect(self.delete); sync.clicked.connect(self.sync); restore.clicked.connect(self.restore); close.clicked.connect(self.accept)
-        buttons.addWidget(save); buttons.addWidget(delete); buttons.addStretch(1); buttons.addWidget(restore); buttons.addWidget(sync); buttons.addWidget(close)
-        layout.addLayout(buttons)
+        self.name = find_child(content, "nameEdit", QLineEdit)
+        self.path = find_child(content, "pathEdit", QLineEdit)
+        find_child(content, "browseButton", QPushButton).clicked.connect(self.browse)
+        self.enabled = find_child(content, "enabledCheckBox", QCheckBox)
+        self.backup_password = find_child(content, "backupPasswordEdit", QLineEdit)
+        self.backup_password_confirm = find_child(content, "backupPasswordConfirmEdit", QLineEdit)
+        self.remember_password = find_child(content, "rememberPasswordCheckBox", QCheckBox)
+        find_child(content, "saveButton", QPushButton).clicked.connect(self.save)
+        find_child(content, "deleteButton", QPushButton).clicked.connect(self.delete)
+        find_child(content, "syncButton", QPushButton).clicked.connect(self.sync)
+        find_child(content, "restoreButton", QPushButton).clicked.connect(self.restore)
+        find_child(content, "closeButton", QPushButton).clicked.connect(self.accept)
         self.refresh()
 
     def refresh(self):
@@ -836,66 +980,63 @@ class BackupTargetsDialog(QDialog):
 
 
 class WorkflowDialog(QDialog):
-    def __init__(self, repository, parent=None):
+    """The single case-planning surface: create/edit/archive/delete cases,
+    plan their tasks, and (unified from the old separate 案件管理 dialog)
+    attach the currently selected/checked records to a case or jump back to
+    the main table filtered to just that case's records."""
+
+    # Layout: ui/dialogs/workflow_dialog.ui (both tabs).
+    ui_file = "dialogs/workflow_dialog.ui"
+    ui_object_names = (
+        "workflowTabs", "caseTable", "caseTitleEdit", "caseStatusCombo", "caseAssigneeEdit", "caseDueEdit",
+        "casePriorityCombo", "caseNextEdit", "caseNoteEdit", "caseArchivedCheckBox", "newCaseButton",
+        "saveCaseButton", "archiveCaseButton", "deleteCaseButton", "attachStatusLabel", "attachButton",
+        "filterButton", "taskTable", "taskCaseCombo", "taskTitleEdit", "taskAssigneeEdit", "taskDueEdit",
+        "taskStatusCombo", "taskPriorityCombo", "taskChecklistEdit", "newTaskButton", "saveTaskButton",
+        "deleteTaskButton", "buttonBox",
+    )
+
+    def __init__(self, repository, parent=None, *, record_ids_to_attach=None):
         super().__init__(parent)
         self.repository = repository
-        self.setWindowTitle("案件工作流程與任務看板")
-        self.resize(1000, 650)
-        layout = QVBoxLayout(self)
-        tabs = QTabWidget()
-        tabs.addTab(self._case_tab(), "案件")
-        tabs.addTab(self._task_tab(), "任務")
-        layout.addWidget(tabs)
-        close = QDialogButtonBox(QDialogButtonBox.Close)
-        close.rejected.connect(self.accept)
-        layout.addWidget(close)
+        self.record_ids_to_attach = sorted({int(value) for value in (record_ids_to_attach or [])})
+        self.filter_requested_title = None
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self._case_tab(content)
+        self._task_tab(content)
+        find_child(content, "buttonBox", QDialogButtonBox).rejected.connect(self.accept)
         self.refresh_all()
 
-    def _case_tab(self):
-        widget = QWidget(); layout = QVBoxLayout(widget)
-        self.case_table = QTableWidget(0, 9)
-        self.case_table.setHorizontalHeaderLabels(["ID", "案件", "狀態", "負責人", "期限", "優先", "下一步", "資料數", "封存"])
-        self.case_table.setSelectionBehavior(QAbstractItemView.SelectRows); self.case_table.setSelectionMode(QAbstractItemView.SingleSelection)
+    def _case_tab(self, content):
+        ui = lambda name, cls: find_child(content, name, cls)  # noqa: E731
+        self.case_table = ui("caseTable", QTableWidget)
         self.case_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.case_table.itemSelectionChanged.connect(self.load_case)
-        layout.addWidget(self.case_table)
-        form = QGridLayout()
-        self.case_title = QLineEdit(); self.case_status = QComboBox(); self.case_status.addItems(["進行中", "等待中", "完成", "暫停"])
-        self.case_assignee = QLineEdit(); self.case_due = QLineEdit(); self.case_due.setPlaceholderText("YYYY-MM-DD")
-        self.case_priority = QComboBox(); self.case_priority.addItems(["一般", "高", "緊急"])
-        self.case_next = QLineEdit(); self.case_note = QPlainTextEdit(); self.case_note.setMaximumHeight(70); self.case_archived = QCheckBox("封存")
-        fields = [("案件", self.case_title), ("狀態", self.case_status), ("負責人", self.case_assignee), ("期限", self.case_due), ("優先", self.case_priority), ("下一步", self.case_next)]
-        for index, (label, control) in enumerate(fields):
-            row, col = divmod(index, 2); form.addWidget(QLabel(label), row, col * 2); form.addWidget(control, row, col * 2 + 1)
-        form.addWidget(QLabel("備註"), 3, 0); form.addWidget(self.case_note, 3, 1, 1, 3); form.addWidget(self.case_archived, 4, 1)
-        layout.addLayout(form)
-        buttons = QHBoxLayout(); new = QPushButton("新增模式"); save = QPushButton("儲存案件"); archive = QPushButton("封存/取消封存")
-        new.clicked.connect(self.clear_case); save.clicked.connect(self.save_case); archive.clicked.connect(self.toggle_archive)
-        buttons.addWidget(new); buttons.addWidget(save); buttons.addWidget(archive); buttons.addStretch(1); layout.addLayout(buttons)
-        return widget
+        self.case_title = ui("caseTitleEdit", QLineEdit); self.case_status = ui("caseStatusCombo", FluentComboBox); self.case_status.addItems(CASE_STATUS_OPTIONS)
+        self.case_assignee = ui("caseAssigneeEdit", QLineEdit); self.case_due = ui("caseDueEdit", QDateEdit); _configure_optional_date_edit(self.case_due)
+        self.case_priority = ui("casePriorityCombo", FluentComboBox); self.case_priority.addItems(PRIORITY_OPTIONS)
+        self.case_next = ui("caseNextEdit", QLineEdit); self.case_note = ui("caseNoteEdit", QPlainTextEdit); self.case_archived = ui("caseArchivedCheckBox", QCheckBox)
+        ui("newCaseButton", QPushButton).clicked.connect(self.clear_case); ui("saveCaseButton", QPushButton).clicked.connect(self.save_case)
+        ui("archiveCaseButton", QPushButton).clicked.connect(self.toggle_archive); ui("deleteCaseButton", QPushButton).clicked.connect(self.delete_case)
+        attach_count = len(self.record_ids_to_attach)
+        self.attach_status_label = ui("attachStatusLabel", QLabel)
+        if attach_count:
+            self.attach_status_label.setText(f"目前已勾選 {attach_count} 筆資料：")
+        ui("attachButton", QPushButton).clicked.connect(self.attach_selected_records)
+        ui("filterButton", QPushButton).clicked.connect(self.filter_by_selected_case)
 
-    def _task_tab(self):
-        widget = QWidget(); layout = QVBoxLayout(widget)
-        self.task_table = QTableWidget(0, 8)
-        self.task_table.setHorizontalHeaderLabels(["ID", "案件", "任務", "負責人", "期限", "狀態", "優先", "檢查清單"])
-        self.task_table.setSelectionBehavior(QAbstractItemView.SelectRows); self.task_table.setSelectionMode(QAbstractItemView.SingleSelection)
+    def _task_tab(self, content):
+        ui = lambda name, cls: find_child(content, name, cls)  # noqa: E731
+        self.task_table = ui("taskTable", QTableWidget)
         self.task_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.task_table.itemSelectionChanged.connect(self.load_task)
-        layout.addWidget(self.task_table)
-        form = QGridLayout()
-        self.task_case = QComboBox(); self.task_title = QLineEdit(); self.task_assignee = QLineEdit(); self.task_due = QLineEdit(); self.task_due.setPlaceholderText("YYYY-MM-DD")
-        self.task_status = QComboBox(); self.task_status.addItems(["待處理", "進行中", "等待中", "完成"])
-        self.task_priority = QComboBox(); self.task_priority.addItems(["一般", "高", "緊急"])
-        self.task_checklist = QPlainTextEdit(); self.task_checklist.setPlaceholderText("每行一個檢查項目"); self.task_checklist.setMaximumHeight(80)
-        fields = [("案件", self.task_case), ("任務", self.task_title), ("負責人", self.task_assignee), ("期限", self.task_due), ("狀態", self.task_status), ("優先", self.task_priority)]
-        for index, (label, control) in enumerate(fields):
-            row, col = divmod(index, 2); form.addWidget(QLabel(label), row, col * 2); form.addWidget(control, row, col * 2 + 1)
-        form.addWidget(QLabel("檢查清單"), 3, 0); form.addWidget(self.task_checklist, 3, 1, 1, 3)
-        layout.addLayout(form)
-        buttons = QHBoxLayout(); new = QPushButton("新增模式"); save = QPushButton("儲存任務"); delete = QPushButton("刪除任務")
-        new.clicked.connect(self.clear_task); save.clicked.connect(self.save_task); delete.clicked.connect(self.delete_task)
-        buttons.addWidget(new); buttons.addWidget(save); buttons.addWidget(delete); buttons.addStretch(1); layout.addLayout(buttons)
-        return widget
+        self.task_case = ui("taskCaseCombo", FluentComboBox); self.task_title = ui("taskTitleEdit", QLineEdit); self.task_assignee = ui("taskAssigneeEdit", QLineEdit)
+        self.task_due = ui("taskDueEdit", QDateEdit); _configure_optional_date_edit(self.task_due)
+        self.task_status = ui("taskStatusCombo", FluentComboBox); self.task_status.addItems(TASK_STATUS_OPTIONS)
+        self.task_priority = ui("taskPriorityCombo", FluentComboBox); self.task_priority.addItems(PRIORITY_OPTIONS)
+        self.task_checklist = ui("taskChecklistEdit", QPlainTextEdit)
+        ui("newTaskButton", QPushButton).clicked.connect(self.clear_task); ui("saveTaskButton", QPushButton).clicked.connect(self.save_task)
+        ui("deleteTaskButton", QPushButton).clicked.connect(self.delete_task)
 
     def refresh_all(self):
         self.cases = [dict(row) for row in self.repository.list_cases()]
@@ -906,7 +1047,7 @@ class WorkflowDialog(QDialog):
         self.task_case.clear()
         for row in self.cases:
             if not row["archived_at"]:
-                self.task_case.addItem(row["title"], row["id"])
+                self.task_case.addItem(row["title"], userData=row["id"])
         if current_case is not None:
             self.task_case.setCurrentIndex(max(0, self.task_case.findData(current_case)))
         self.tasks = [dict(row) for row in self.repository.list_case_tasks()]
@@ -923,15 +1064,15 @@ class WorkflowDialog(QDialog):
     def load_case(self):
         row = self.selected_case()
         if not row: return
-        self.case_title.setText(row["title"]); self.case_status.setCurrentText(row["status"]); self.case_assignee.setText(row["assigned_to"] or ""); self.case_due.setText(row["due_date"] or ""); self.case_priority.setCurrentText(row["priority"] or "一般"); self.case_next.setText(row["next_action"] or ""); self.case_note.setPlainText(row["note"] or ""); self.case_archived.setChecked(bool(row["archived_at"]))
+        self.case_title.setText(row["title"]); self.case_status.setCurrentText(row["status"]); self.case_assignee.setText(row["assigned_to"] or ""); _set_due_date_text(self.case_due, row["due_date"]); self.case_priority.setCurrentText(row["priority"] or "一般"); self.case_next.setText(row["next_action"] or ""); self.case_note.setPlainText(row["note"] or ""); self.case_archived.setChecked(bool(row["archived_at"]))
 
     def clear_case(self):
-        self.case_table.clearSelection(); self.case_title.clear(); self.case_status.setCurrentText("進行中"); self.case_assignee.clear(); self.case_due.clear(); self.case_priority.setCurrentText("一般"); self.case_next.clear(); self.case_note.clear(); self.case_archived.setChecked(False)
+        self.case_table.clearSelection(); self.case_title.clear(); self.case_status.setCurrentText("進行中"); self.case_assignee.clear(); self.case_due.setDate(NO_DUE_DATE); self.case_priority.setCurrentText("一般"); self.case_next.clear(); self.case_note.clear(); self.case_archived.setChecked(False)
 
     def save_case(self):
         row = self.selected_case()
         try:
-            self.repository.save_case(self.case_title.text(), self.case_status.currentText(), self.case_note.toPlainText(), row["id"] if row else None, assigned_to=self.case_assignee.text(), due_date=self.case_due.text(), priority=self.case_priority.currentText(), next_action=self.case_next.text(), archived=self.case_archived.isChecked())
+            self.repository.save_case(self.case_title.text(), self.case_status.currentText(), self.case_note.toPlainText(), row["id"] if row else None, assigned_to=self.case_assignee.text(), due_date=_due_date_text(self.case_due), priority=self.case_priority.currentText(), next_action=self.case_next.text(), archived=self.case_archived.isChecked())
         except Exception as exc: QMessageBox.warning(self, "儲存失敗", str(exc)); return
         self.refresh_all()
 
@@ -939,19 +1080,50 @@ class WorkflowDialog(QDialog):
         row = self.selected_case()
         if row: self.repository.archive_case(row["id"], not bool(row["archived_at"])); self.refresh_all()
 
+    def delete_case(self):
+        row = self.selected_case()
+        if not row:
+            QMessageBox.warning(self, "未選取案件", "請先選取要刪除的案件。")
+            return
+        if QMessageBox.question(self, "刪除案件", "確定刪除選取案件？案件關聯會一起移除。") != QMessageBox.Yes:
+            return
+        self.repository.delete_case(row["id"])
+        self.clear_case()
+        self.refresh_all()
+
+    def attach_selected_records(self):
+        row = self.selected_case()
+        if not row:
+            QMessageBox.warning(self, "未選取案件", "請先在上方清單選取要加入的案件。")
+            return
+        if not self.record_ids_to_attach:
+            QMessageBox.information(self, "沒有勾選資料", "請先在主畫面勾選或選取要加入的資料，再重新開啟這個視窗。")
+            return
+        added = self.repository.add_customers_to_case(row["id"], self.record_ids_to_attach)
+        self.refresh_all()
+        QMessageBox.information(self, "完成", f"已加入 {added} 筆資料到「{row['title']}」。")
+
+    def filter_by_selected_case(self):
+        row = self.selected_case()
+        if not row:
+            QMessageBox.warning(self, "未選取案件", "請先選取要篩選的案件。")
+            return
+        self.filter_requested_title = row["title"]
+        self.accept()
+
     def load_task(self):
         row = self.selected_task()
         if not row: return
-        self.task_case.setCurrentIndex(max(0, self.task_case.findData(row["case_id"]))); self.task_title.setText(row["title"]); self.task_assignee.setText(row["assignee"] or ""); self.task_due.setText(row["due_date"] or ""); self.task_status.setCurrentText(row["status"]); self.task_priority.setCurrentText(row["priority"]); self.task_checklist.setPlainText(row["checklist"] or "")
+        self.task_case.setCurrentIndex(max(0, self.task_case.findData(row["case_id"]))); self.task_title.setText(row["title"]); self.task_assignee.setText(row["assignee"] or ""); _set_due_date_text(self.task_due, row["due_date"]); self.task_status.setCurrentText(row["status"]); self.task_priority.setCurrentText(row["priority"]); self.task_checklist.setPlainText(row["checklist"] or "")
 
     def clear_task(self):
-        self.task_table.clearSelection(); self.task_title.clear(); self.task_assignee.clear(); self.task_due.clear(); self.task_status.setCurrentText("待處理"); self.task_priority.setCurrentText("一般"); self.task_checklist.clear()
+        self.task_table.clearSelection(); self.task_title.clear(); self.task_assignee.clear(); self.task_due.setDate(NO_DUE_DATE); self.task_status.setCurrentText("待處理"); self.task_priority.setCurrentText("一般"); self.task_checklist.clear()
 
     def save_task(self):
         row = self.selected_task()
         if self.task_case.currentData() is None: QMessageBox.warning(self, "尚無案件", "請先建立案件。"); return
         try:
-            self.repository.save_case_task(self.task_case.currentData(), self.task_title.text(), assignee=self.task_assignee.text(), due_date=self.task_due.text(), status=self.task_status.currentText(), priority=self.task_priority.currentText(), checklist=self.task_checklist.toPlainText(), task_id=row["id"] if row else None)
+            self.repository.save_case_task(self.task_case.currentData(), self.task_title.text(), assignee=self.task_assignee.text(), due_date=_due_date_text(self.task_due), status=self.task_status.currentText(), priority=self.task_priority.currentText(), checklist=self.task_checklist.toPlainText(), task_id=row["id"] if row else None)
         except Exception as exc: QMessageBox.warning(self, "儲存失敗", str(exc)); return
         self.refresh_all()
 
@@ -961,16 +1133,27 @@ class WorkflowDialog(QDialog):
 
 
 class NotificationCenterDialog(QDialog):
+    # Layout: ui/dialogs/notification_center_dialog.ui.
+    ui_file = "dialogs/notification_center_dialog.ui"
+    ui_object_names = (
+        "includeReadCheckBox", "notificationsTable", "markReadButton",
+        "dismissButton", "refreshButton", "closeButton",
+    )
+
     def __init__(self, repository, parent=None):
         super().__init__(parent)
         self.repository = repository
         self.repository.refresh_notifications(date.today().isoformat())
-        self.setWindowTitle("通知中心")
-        self.resize(850, 500)
-        layout = QVBoxLayout(self)
-        top = QHBoxLayout(); self.include_read = QCheckBox("包含已讀"); self.include_read.toggled.connect(self.refresh); top.addWidget(QLabel("今日到期與逾期的追蹤、案件及任務會集中顯示。")); top.addStretch(1); top.addWidget(self.include_read); layout.addLayout(top)
-        self.table = QTableWidget(0, 7); self.table.setHorizontalHeaderLabels(["ID", "嚴重度", "類型", "標題", "內容", "已讀", "時間"]); self.table.setSelectionBehavior(QAbstractItemView.SelectRows); self.table.setSelectionMode(QAbstractItemView.ExtendedSelection); self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch); self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch); layout.addWidget(self.table)
-        buttons = QHBoxLayout(); read = QPushButton("標記已讀"); dismiss = QPushButton("隱藏選取"); refresh = QPushButton("重新整理"); close = QPushButton("關閉"); read.clicked.connect(lambda: self.mark("read")); dismiss.clicked.connect(lambda: self.mark("dismiss")); refresh.clicked.connect(self.refresh); close.clicked.connect(self.accept); buttons.addWidget(read); buttons.addWidget(dismiss); buttons.addStretch(1); buttons.addWidget(refresh); buttons.addWidget(close); layout.addLayout(buttons)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.include_read = find_child(content, "includeReadCheckBox", QCheckBox)
+        self.include_read.toggled.connect(self.refresh)
+        self.table = find_child(content, "notificationsTable", QTableWidget)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
+        find_child(content, "markReadButton", QPushButton).clicked.connect(lambda: self.mark("read"))
+        find_child(content, "dismissButton", QPushButton).clicked.connect(lambda: self.mark("dismiss"))
+        find_child(content, "refreshButton", QPushButton).clicked.connect(self.refresh)
+        find_child(content, "closeButton", QPushButton).clicked.connect(self.accept)
         self.refresh()
 
     def refresh(self):
@@ -984,14 +1167,21 @@ class NotificationCenterDialog(QDialog):
 
 
 class ImportProfilesDialog(QDialog):
+    # Layout: ui/dialogs/import_profiles_dialog.ui (the field-code list is added here).
+    ui_file = "dialogs/import_profiles_dialog.ui"
+    ui_object_names = (
+        "introLabel", "profilesTable", "nameEdit", "mappingEdit", "defaultCheckBox",
+        "newButton", "saveButton", "deleteButton", "closeButton",
+    )
+
     def __init__(self, repository, field_labels, parent=None):
         super().__init__(parent)
         self.repository = repository; self.field_labels = dict(field_labels)
-        self.setWindowTitle("Excel 匯入設定檔"); self.resize(850, 560)
-        layout = QVBoxLayout(self); layout.addWidget(QLabel("每行格式：Excel欄名=系統欄位代碼。儲存為預設後，下一次匯入會自動套用。\n可用代碼：" + "、".join(f"{key}({label})" for key, label in self.field_labels.items())))
-        self.table = QTableWidget(0, 4); self.table.setHorizontalHeaderLabels(["ID", "名稱", "預設", "欄位對應"]); self.table.setSelectionBehavior(QAbstractItemView.SelectRows); self.table.setSelectionMode(QAbstractItemView.SingleSelection); self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch); self.table.itemSelectionChanged.connect(self.load_selected); layout.addWidget(self.table)
-        form = QFormLayout(); self.name = QLineEdit(); self.mapping = QPlainTextEdit(); self.mapping.setMaximumHeight(120); self.default = QCheckBox("設為預設"); form.addRow("名稱", self.name); form.addRow("對應", self.mapping); form.addRow("", self.default); layout.addLayout(form)
-        buttons = QHBoxLayout(); new = QPushButton("新增模式"); save = QPushButton("儲存"); delete = QPushButton("刪除"); close = QPushButton("關閉"); new.clicked.connect(self.clear); save.clicked.connect(self.save); delete.clicked.connect(self.delete); close.clicked.connect(self.accept); buttons.addWidget(new); buttons.addWidget(save); buttons.addWidget(delete); buttons.addStretch(1); buttons.addWidget(close); layout.addLayout(buttons); self.refresh()
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        find_child(content, "introLabel", QLabel).setText("每行格式：Excel欄名=系統欄位代碼。儲存為預設後，下一次匯入會自動套用。\n可用代碼：" + "、".join(f"{key}({label})" for key, label in self.field_labels.items()))
+        self.table = find_child(content, "profilesTable", QTableWidget); self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch); self.table.itemSelectionChanged.connect(self.load_selected)
+        self.name = find_child(content, "nameEdit", QLineEdit); self.mapping = find_child(content, "mappingEdit", QPlainTextEdit); self.default = find_child(content, "defaultCheckBox", QCheckBox)
+        find_child(content, "newButton", QPushButton).clicked.connect(self.clear); find_child(content, "saveButton", QPushButton).clicked.connect(self.save); find_child(content, "deleteButton", QPushButton).clicked.connect(self.delete); find_child(content, "closeButton", QPushButton).clicked.connect(self.accept); self.refresh()
 
     def refresh(self):
         self.rows = [dict(row) for row in self.repository.list_import_profiles()]; self.table.setRowCount(len(self.rows))
@@ -1028,17 +1218,22 @@ class ImportProfilesDialog(QDialog):
 
 
 class ReportTemplatesDialog(QDialog):
+    # Layout: ui/dialogs/report_templates_dialog.ui (one checkable item per field is added here).
+    ui_file = "dialogs/report_templates_dialog.ui"
+    ui_object_names = (
+        "templatesTable", "nameEdit", "titleEdit", "headerEdit", "footerEdit", "fieldsList",
+        "newButton", "saveButton", "deleteButton", "exportButton", "closeButton",
+    )
+
     def __init__(self, repository, field_labels, parent=None):
         super().__init__(parent)
         self.repository = repository; self.field_labels = dict(field_labels); self.export_template = None
-        self.setWindowTitle("報表與列印範本"); self.resize(900, 650)
-        layout = QVBoxLayout(self)
-        self.table = QTableWidget(0, 4); self.table.setHorizontalHeaderLabels(["ID", "名稱", "報表標題", "欄位"]); self.table.setSelectionBehavior(QAbstractItemView.SelectRows); self.table.setSelectionMode(QAbstractItemView.SingleSelection); self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch); self.table.itemSelectionChanged.connect(self.load_selected); layout.addWidget(self.table)
-        body = QHBoxLayout(); form = QFormLayout(); self.name = QLineEdit(); self.title = QLineEdit("土地資料報表"); self.header = QPlainTextEdit(); self.header.setMaximumHeight(70); self.footer = QPlainTextEdit(); self.footer.setMaximumHeight(70); form.addRow("範本名稱", self.name); form.addRow("報表標題", self.title); form.addRow("頁首文字", self.header); form.addRow("頁尾文字", self.footer); body.addLayout(form, 2)
-        self.fields = QListWidget()
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.table = find_child(content, "templatesTable", QTableWidget); self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch); self.table.itemSelectionChanged.connect(self.load_selected)
+        self.name = find_child(content, "nameEdit", QLineEdit); self.title = find_child(content, "titleEdit", QLineEdit); self.header = find_child(content, "headerEdit", QPlainTextEdit); self.footer = find_child(content, "footerEdit", QPlainTextEdit)
+        self.fields = find_child(content, "fieldsList", QListWidget)
         for key, label in self.field_labels.items(): item = QListWidgetItem(f"{label}（{key}）"); item.setData(Qt.UserRole, key); item.setFlags(item.flags() | Qt.ItemIsUserCheckable); item.setCheckState(Qt.Checked if key in {"district", "section", "land_number", "owner_name", "address"} else Qt.Unchecked); self.fields.addItem(item)
-        body.addWidget(self.fields, 1); layout.addLayout(body)
-        buttons = QHBoxLayout(); new = QPushButton("新增模式"); save = QPushButton("儲存範本"); delete = QPushButton("刪除"); export = QPushButton("用選取範本匯出勾選資料"); close = QPushButton("關閉"); new.clicked.connect(self.clear); save.clicked.connect(self.save); delete.clicked.connect(self.delete); export.clicked.connect(self.request_export); close.clicked.connect(self.reject); buttons.addWidget(new); buttons.addWidget(save); buttons.addWidget(delete); buttons.addStretch(1); buttons.addWidget(export); buttons.addWidget(close); layout.addLayout(buttons); self.refresh()
+        find_child(content, "newButton", QPushButton).clicked.connect(self.clear); find_child(content, "saveButton", QPushButton).clicked.connect(self.save); find_child(content, "deleteButton", QPushButton).clicked.connect(self.delete); find_child(content, "exportButton", QPushButton).clicked.connect(self.request_export); find_child(content, "closeButton", QPushButton).clicked.connect(self.reject); self.refresh()
 
     def refresh(self):
         self.rows = [dict(row) for row in self.repository.list_report_templates()]; self.table.setRowCount(len(self.rows))
@@ -1073,13 +1268,16 @@ class ReportTemplatesDialog(QDialog):
 
 
 class DuplicateFinderDialog(QDialog):
+    # Layout: ui/dialogs/duplicate_finder_dialog.ui.
+    ui_file = "dialogs/duplicate_finder_dialog.ui"
+    ui_object_names = ("pairsTable", "mergeButton", "ignoreButton", "closeButton")
+
     def __init__(self, pairs, parent=None):
         super().__init__(parent); self.pairs = list(pairs); self.action = None; self.pair = None
-        self.setWindowTitle("智慧重複資料檢查"); self.resize(900, 520)
-        layout = QVBoxLayout(self); layout.addWidget(QLabel("分數綜合身分證、地號、姓名、地址與序號；合併前仍會顯示既有合併預覽。"))
-        self.table = QTableWidget(len(self.pairs), 7); self.table.setHorizontalHeaderLabels(["左ID", "右ID", "相似度", "判斷原因", "左資料", "右資料", "狀態"]); self.table.setSelectionBehavior(QAbstractItemView.SelectRows); self.table.setSelectionMode(QAbstractItemView.SingleSelection); self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.table = find_child(content, "pairsTable", QTableWidget); self.table.setRowCount(len(self.pairs)); self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         for index, pair in enumerate(self.pairs): _set_table_row(self.table, index, [pair["left_id"], pair["right_id"], f"{pair['score']}%", pair["reason"], pair["left_label"], pair["right_label"], "待確認"], pair["left_id"])
-        layout.addWidget(self.table); buttons = QHBoxLayout(); merge = QPushButton("合併選取組合"); ignore = QPushButton("忽略此組"); close = QPushButton("關閉"); merge.clicked.connect(lambda: self.request("merge")); ignore.clicked.connect(lambda: self.request("ignore")); close.clicked.connect(self.reject); buttons.addWidget(merge); buttons.addWidget(ignore); buttons.addStretch(1); buttons.addWidget(close); layout.addLayout(buttons)
+        find_child(content, "mergeButton", QPushButton).clicked.connect(lambda: self.request("merge")); find_child(content, "ignoreButton", QPushButton).clicked.connect(lambda: self.request("ignore")); find_child(content, "closeButton", QPushButton).clicked.connect(self.reject)
 
     def request(self, action):
         row = self.table.currentRow()
@@ -1087,40 +1285,609 @@ class DuplicateFinderDialog(QDialog):
         self.action = action; self.pair = self.pairs[row]; self.accept()
 
 
+NOMINATIM_USER_AGENT = "LandCustomerSystem-Desktop/1.0"
+_TRAILING_HOUSE_NUMBER = re.compile(r"\s*\d+(?:[-之]\d+)*\s*號.*$")
+
+
+def _simplify_address_for_retry(address):
+    """Drop a trailing house number (e.g. "143號", "143之1號", and anything
+    after it like floor/unit) so a query that fails at exact-address
+    precision can still resolve to the street it's on. Nominatim's Taiwan
+    coverage frequently has street-level data but not individual building
+    numbers, so an exact address often returns nothing while the bare
+    street succeeds."""
+
+    simplified = _TRAILING_HOUSE_NUMBER.sub("", address).strip()
+    return simplified if simplified and simplified != address.strip() else None
+
+
+def _query_nominatim(query_text, *, timeout):
+    # countrycodes=tw restricts matches to Taiwan. Without this, a short
+    # Chinese place name with no country/city context (e.g. a bare
+    # district/section name) can just as easily match a similarly-named
+    # place on the Chinese mainland or elsewhere in the world -- this was
+    # reported by a real user as markers landing in a completely wrong
+    # country after "全部自動查座標", since every land record in this app
+    # is Taiwanese and the query never said so.
+    query = urlencode(
+        {"q": query_text, "format": "json", "limit": 1, "countrycodes": "tw"}
+    )
+    request = Request(
+        f"https://nominatim.openstreetmap.org/search?{query}",
+        headers={"User-Agent": NOMINATIM_USER_AGENT},
+    )
+    with urlopen(request, timeout=timeout) as response:
+        payload = response.read().decode("utf-8")
+    try:
+        results = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise ValueError("地理編碼服務回應格式異常") from exc
+    if not results:
+        return None
+    result = results[0]
+    try:
+        return float(result["lat"]), float(result["lon"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("地理編碼服務回應缺少座標") from exc
+
+
+def geocode_address_via_nominatim(address, *, timeout=8):
+    """Resolve a free-text address to (latitude, longitude, approximate) via
+    OpenStreetMap's Nominatim search API. `approximate` is True when the
+    exact address had no match and the result instead comes from a
+    simplified query (house number dropped) — the caller should tell the
+    user it's only street-level, not the exact building. Returns None when
+    nothing matches even after falling back; raises OSError (network/
+    timeout) or ValueError (bad response) so callers can show a specific
+    message instead of guessing what went wrong."""
+
+    coordinates = _query_nominatim(address, timeout=timeout)
+    if coordinates is not None:
+        return coordinates[0], coordinates[1], False
+    fallback_query = _simplify_address_for_retry(address)
+    if fallback_query:
+        coordinates = _query_nominatim(fallback_query, timeout=timeout)
+        if coordinates is not None:
+            return coordinates[0], coordinates[1], True
+    return None
+
+
+def _query_google(query_text, api_key, *, timeout):
+    # components=country:TW hard-restricts results to Taiwan, mirroring
+    # _query_nominatim's countrycodes=tw -- same reasoning applies here:
+    # a short Chinese address with no country context should never
+    # resolve to a same-named place outside Taiwan.
+    query = urlencode(
+        {"address": query_text, "key": api_key, "components": "country:TW"}
+    )
+    request = Request(f"https://maps.googleapis.com/maps/api/geocode/json?{query}")
+    with urlopen(request, timeout=timeout) as response:
+        payload = response.read().decode("utf-8")
+    try:
+        result = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise ValueError("地理編碼服務回應格式異常") from exc
+    status = result.get("status")
+    if status == "ZERO_RESULTS":
+        return None
+    if status != "OK":
+        # REQUEST_DENIED (bad/restricted key), OVER_QUERY_LIMIT (quota or
+        # billing not enabled), INVALID_REQUEST, etc. -- surface Google's
+        # own error_message when present so the user can actually act on
+        # it (e.g. "This API key is not authorized to use this service or
+        # API.") instead of a generic failure.
+        message = result.get("error_message") or status or "未知錯誤"
+        raise ValueError(f"Google 地理編碼服務回應異常：{message}")
+    results = result.get("results") or []
+    if not results:
+        return None
+    try:
+        location = results[0]["geometry"]["location"]
+        return float(location["lat"]), float(location["lng"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("地理編碼服務回應缺少座標") from exc
+
+
+def geocode_address_via_google(address, api_key, *, timeout=8):
+    """Resolve a free-text address to (latitude, longitude, approximate)
+    via Google's Geocoding API. Mirrors geocode_address_via_nominatim's
+    contract exactly (same return shape, same house-number-dropped retry
+    via _simplify_address_for_retry) so callers don't need to know or
+    care which provider actually produced the result. Raises OSError
+    (network/timeout) or ValueError (bad response, refused request --
+    invalid key, quota/billing issue, etc.) so callers can show a
+    specific message instead of guessing what went wrong."""
+
+    coordinates = _query_google(address, api_key, timeout=timeout)
+    if coordinates is not None:
+        return coordinates[0], coordinates[1], False
+    fallback_query = _simplify_address_for_retry(address)
+    if fallback_query:
+        coordinates = _query_google(fallback_query, api_key, timeout=timeout)
+        if coordinates is not None:
+            return coordinates[0], coordinates[1], True
+    return None
+
+
+def geocode_address_auto(address, *, api_key=None, timeout=8):
+    """Resolve an address using Google's Geocoding API when api_key is
+    configured (better Taiwan house-number coverage than the free
+    service), otherwise fall back to the free Nominatim/OpenStreetMap
+    service. Both providers share the exact same return contract, so
+    every caller can go through this single entry point instead of
+    branching on which provider is active."""
+
+    if api_key:
+        return geocode_address_via_google(address, api_key, timeout=timeout)
+    return geocode_address_via_nominatim(address, timeout=timeout)
+
+
+GOOGLE_GEOCODING_API_KEY_SETTING = "google_geocoding_api_key"
+
+
+def save_google_geocoding_api_key(repository, api_key):
+    """Persist the Google Geocoding API key in app_settings as plain
+    text -- the same local-only-setting treatment already used for
+    SERVER_API_URL_SETTING_KEY and every other machine-level setting in
+    this table (font size, saved searches, etc.).
+
+    This was originally encrypted with the current login's Fernet key
+    (the same pattern ProductivityService.save_offsite_backup_password
+    uses), which works fine in standalone/local mode -- the data key is
+    derived deterministically from the admin password every login. But
+    in API mode (connected to the home server), configure_api_authentication()
+    deliberately issues a brand-new *random* Fernet key on every single
+    login ("ephemeral session-only key", see its docstring) since API
+    records already arrive decrypted and no persistent local key is
+    otherwise needed. Encrypting this setting with that key meant it
+    could never survive a restart in API mode: the very next login would
+    generate a different random key, decryption would silently fail, and
+    the user would have to paste the key in again every time -- exactly
+    what a real user reported. Since this key is: (a) already scoped to
+    Geocoding API only, per the setup guidance given when it's first
+    configured, and (b) stored only in this machine's own local settings
+    file, never sent anywhere -- the same threat model as the server URL
+    setting already stored in plain text here -- storing it unencrypted
+    is the correct trade-off, not a shortcut."""
+    repository.set_setting(GOOGLE_GEOCODING_API_KEY_SETTING, api_key)
+
+
+def load_google_geocoding_api_key(repository):
+    return repository.get_setting(GOOGLE_GEOCODING_API_KEY_SETTING, "") or None
+
+
+def clear_google_geocoding_api_key(repository):
+    repository.set_setting(GOOGLE_GEOCODING_API_KEY_SETTING, "")
+
+
+class BatchGeocodeWorker(QObject):
+    """Looks up coordinates for a batch of (customer_id, address) pairs.
+
+    Runs entirely off the GUI thread -- but does NOT write to the
+    repository itself, even though it easily could: a real production
+    crash elsewhere in this app (see start_record_search()'s own
+    docstring in customer_search_controller.py) was root-caused to
+    exactly this kind of background-thread code touching state the GUI
+    thread also owns. Nominatim's usage policy also caps requests at
+    roughly 1/second, hence the sleep between calls -- this can run for
+    minutes against a large batch, which is the whole reason it is a
+    background thread with a cancel button rather than a blocking loop.
+    When a Google Geocoding API key is configured, geocode_address_auto
+    uses Google instead -- Google's quota is far more generous, so a much
+    shorter pause is used in that case (still non-zero, to stay a
+    reasonable citizen rather than firing requests back-to-back).
+    """
+
+    progress = Signal(int, int)
+    located = Signal(int, float, float, bool)
+    failed = Signal(int, str)
+    finished = Signal()
+
+    MIN_REQUEST_INTERVAL_SECONDS = 1.1
+    GOOGLE_MIN_REQUEST_INTERVAL_SECONDS = 0.1
+
+    def __init__(self, pending, api_key=None):
+        super().__init__()
+        self.pending = list(pending)
+        self.api_key = api_key
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+
+    def run(self):
+        total = len(self.pending)
+        interval = (
+            self.GOOGLE_MIN_REQUEST_INTERVAL_SECONDS
+            if self.api_key
+            else self.MIN_REQUEST_INTERVAL_SECONDS
+        )
+        for index, (customer_id, address) in enumerate(self.pending, start=1):
+            if self._cancelled:
+                break
+            try:
+                result = geocode_address_auto(address, api_key=self.api_key)
+            except (URLError, HTTPError, TimeoutError, OSError) as exc:
+                self.failed.emit(int(customer_id), f"連線失敗：{exc}")
+            except ValueError as exc:
+                self.failed.emit(int(customer_id), str(exc))
+            else:
+                if result is None:
+                    self.failed.emit(int(customer_id), "查無結果")
+                else:
+                    latitude, longitude, approximate = result
+                    self.located.emit(int(customer_id), latitude, longitude, approximate)
+            self.progress.emit(index, total)
+            if index < total and not self._cancelled:
+                time.sleep(interval)
+        self.finished.emit()
+
+
 class MapLocationsDialog(QDialog):
-    def __init__(self, repository, fernet, selected_customer_id=None, parent=None):
+    ui_file = "dialogs/map_locations_dialog.ui"
+    ui_object_names = (
+        "providerHintLabel", "locationsTable", "addressInput", "geocodeButton", "batchGeocodeButton",
+        "googleKeyButton", "customerIdEdit", "latitudeEdit", "longitudeEdit", "saveButton", "exportButton",
+        "closeButton",
+    )
+
+    def __init__(
+        self,
+        repository,
+        fernet,
+        selected_customer_id=None,
+        parent=None,
+        settings_repository=None,
+        mask_owner_names=False,
+        app_directory=None,
+    ):
         super().__init__(parent); self.repository = repository; self.fernet = fernet; self.export_requested = False
-        self.setWindowTitle("地圖與地號視覺化"); self.resize(850, 540)
-        layout = QVBoxLayout(self); layout.addWidget(QLabel("輸入座標後可產生離線分布圖；藍點可連到 OpenStreetMap。地址定位可先使用下方搜尋連結。"))
-        self.table = QTableWidget(0, 7); self.table.setHorizontalHeaderLabels(["資料ID", "地區", "地段", "地號", "姓名", "緯度", "經度"]); self.table.setSelectionBehavior(QAbstractItemView.SelectRows); self.table.setSelectionMode(QAbstractItemView.SingleSelection); self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch); self.table.itemSelectionChanged.connect(self.load_selected); layout.addWidget(self.table)
-        row = QHBoxLayout(); self.customer_id = QLineEdit(str(selected_customer_id or "")); self.latitude = QLineEdit(); self.longitude = QLineEdit(); row.addWidget(QLabel("資料ID")); row.addWidget(self.customer_id); row.addWidget(QLabel("緯度")); row.addWidget(self.latitude); row.addWidget(QLabel("經度")); row.addWidget(self.longitude); layout.addLayout(row)
-        buttons = QHBoxLayout(); save = QPushButton("儲存座標"); search = QPushButton("用目前資料地址搜尋地圖"); export = QPushButton("產生視覺化 HTML"); close = QPushButton("關閉"); save.clicked.connect(self.save); search.clicked.connect(self.search_address); export.clicked.connect(self.request_export); close.clicked.connect(self.reject); buttons.addWidget(save); buttons.addWidget(search); buttons.addStretch(1); buttons.addWidget(export); buttons.addWidget(close); layout.addLayout(buttons); self.refresh()
+        self.mask_owner_names = mask_owner_names
+        # Falls back to this module's own folder (never has an
+        # offline_map_tiles subfolder next to it in that case) rather than
+        # None -- render_map_html_document()/offline_tile_cache_available()
+        # need a real path, and every existing caller/test that doesn't
+        # care about the offline map still needs to keep working
+        # unchanged, just with the live online layers as the default.
+        self.app_directory = Path(app_directory) if app_directory else Path(__file__).resolve().parent
+        self.geocode_thread = None
+        self.geocode_worker = None
+        self.progress_dialog = None
+        # App-wide settings (like the Google API key) must always go
+        # through a repository that actually implements get_setting/
+        # set_setting. In API mode `repository` here is a
+        # DesktopApiRecordRepository (talks to the home server for
+        # customer records) which has no such method -- settings always
+        # live on the local, always-present CustomerRepository instead
+        # (the same one customer_ui_qt.py's own SERVER_API_URL/font-size
+        # settings already use), passed in separately by the caller as
+        # settings_repository. Falls back to `repository` itself so
+        # standalone/local-mode callers -- and every existing test, which
+        # only ever has one repository to pass -- keep working unchanged.
+        self.settings_repository = settings_repository or repository
+        self.google_api_key = load_google_geocoding_api_key(self.settings_repository)
+        # Layout: ui/dialogs/map_locations_dialog.ui is the left-hand controls;
+        # the map beside them is added here.  The QWebEngineView must stay a
+        # direct child of the dialog: inside the loaded .ui it crashes the web
+        # engine when the process exits.
+        outer_layout = QHBoxLayout(self)
+        content = install_ui(self, self.ui_file, self.ui_object_names, layout=outer_layout)
+        ui = lambda name, cls: find_child(content, name, cls)  # noqa: E731
+        self.provider_hint = ui("providerHintLabel", QLabel)
+        self.table = ui("locationsTable", QTableWidget); self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Stretch); self.table.itemSelectionChanged.connect(self.load_selected)
+        self.address_input = ui("addressInput", QLineEdit)
+        ui("geocodeButton", QPushButton).clicked.connect(self.geocode_address)
+        ui("batchGeocodeButton", QPushButton).clicked.connect(self.batch_geocode_all)
+        ui("googleKeyButton", QPushButton).clicked.connect(self.configure_google_api_key)
+        self.customer_id = ui("customerIdEdit", QLineEdit); self.customer_id.setText(str(selected_customer_id or ""))
+        self.latitude = ui("latitudeEdit", QLineEdit); self.longitude = ui("longitudeEdit", QLineEdit)
+        ui("saveButton", QPushButton).clicked.connect(self.save); ui("exportButton", QPushButton).clicked.connect(self.request_export); ui("closeButton", QPushButton).clicked.connect(self.reject)
+
+        # Explicit user request: see the map screen directly inside the
+        # client, not just as an exported file opened separately in a
+        # browser. Shares render_map_html_document() with the "產生視覺化
+        # HTML" export button, so both always show exactly the same map.
+        self.map_view = QWebEngineView(self)
+        self.map_view.setMinimumWidth(480)
+        outer_layout.setStretch(0, 1)
+        outer_layout.addWidget(self.map_view, 1)
+
+        self.refresh()
+        self._update_provider_hint()
+
+        if selected_customer_id:
+            self._prefill_address_from_customer(selected_customer_id)
+
+    def update_map_view(self):
+        document, _row_count = render_map_html_document(self.rows, self.app_directory)
+        # setHtml() needs a file:// base URL -- not for resolving any
+        # relative path in the document (every asset/tile reference is
+        # already an absolute file:// URL, see render_map_html_document())
+        # but because QWebEngineView otherwise gives the page a
+        # non-file:// origin that Chromium's security model then refuses
+        # to load *any* local file:// resource from at all, Leaflet.js and
+        # every tile included. The directory itself is arbitrary.
+        self.map_view.setHtml(document, QUrl.fromLocalFile(str(self.app_directory) + "/"))
+
+    def _update_provider_hint(self):
+        if self.google_api_key:
+            self.provider_hint.setText("目前查座標使用：Google 地理編碼（已設定 API 金鑰）")
+        else:
+            self.provider_hint.setText("目前查座標使用：免費的 Nominatim／OpenStreetMap（未設定 Google API 金鑰）")
+
+    def configure_google_api_key(self):
+        text, accepted = QInputDialog.getText(
+            self, "設定 Google 地理編碼 API 金鑰",
+            "貼上 Google Maps Geocoding API 金鑰（AIzaSy 開頭）；"
+            "留空後按確定可清除設定，改回使用免費的 Nominatim：",
+            QLineEdit.Normal, self.google_api_key or "",
+        )
+        if not accepted:
+            return
+        text = text.strip()
+        if text:
+            save_google_geocoding_api_key(self.settings_repository, text)
+        else:
+            clear_google_geocoding_api_key(self.settings_repository)
+        self.google_api_key = text or None
+        self._update_provider_hint()
+
+    def _prefill_address_from_customer(self, customer_id):
+        try:
+            record = self.repository.get_customer(int(customer_id))
+        except Exception:
+            record = None
+        if record is None:
+            return
+        record = dict(record)
+        # Land number left out deliberately -- see batch_geocode_all()'s
+        # comment; this is only a prefilled suggestion the user can edit
+        # before pressing "查座標", but there's no reason to seed it with
+        # a token that never helps and can actively mislead the geocoder.
+        address = decrypt_value(self.fernet, record.get("address")) or " ".join(
+            str(record.get(key) or "") for key in ("district", "section")
+        )
+        self.address_input.setText(address)
 
     def refresh(self):
-        self.rows = [dict(row) for row in self.repository.list_customer_locations()]
-        for row in self.rows:
-            row["owner_name"] = decrypt_value(self.fernet, row.get("owner_name"))
-            row["address"] = decrypt_value(self.fernet, row.get("address"))
+        # Lists every customer, not just ones that already have a saved
+        # location -- this used to only query customer_locations, so a
+        # land owner with no coordinates yet simply never appeared here at
+        # all; the only way to work on one was to already know its ID and
+        # type it into the "資料ID" box by hand. Merging in every customer
+        # (location fields left blank when none exists yet) is what makes
+        # both browsing the full list and "全部自動查座標" below possible.
+        located_by_id = {
+            int(row["customer_id"]): dict(row)
+            for row in self.repository.list_customer_locations()
+        }
+        self.rows = []
+        for row in self.repository.fetch_all_customer_rows():
+            row = dict(row)
+            customer_id = int(row["id"])
+            located = located_by_id.get(customer_id)
+            self.rows.append(
+                {
+                    "customer_id": customer_id,
+                    "district": row.get("district") or "",
+                    "section": row.get("section") or "",
+                    "subsection": row.get("subsection") or "",
+                    "land_number": row.get("land_number") or "",
+                    "owner_name": (
+                        mask_owner_display_name(decrypt_value(self.fernet, row.get("owner_name")))
+                        if self.mask_owner_names
+                        else decrypt_value(self.fernet, row.get("owner_name"))
+                    ),
+                    "address": decrypt_value(self.fernet, row.get("address")),
+                    "latitude": located["latitude"] if located else None,
+                    "longitude": located["longitude"] if located else None,
+                    "source": located["source"] if located else None,
+                }
+            )
         self.table.setRowCount(len(self.rows))
-        for index, row in enumerate(self.rows): _set_table_row(self.table, index, [row["customer_id"], row["district"], row["section"], row["land_number"], row["owner_name"], row["latitude"], row["longitude"]], row["customer_id"])
+        for index, row in enumerate(self.rows):
+            _set_table_row(
+                self.table,
+                index,
+                [
+                    row["customer_id"], row["district"], row["section"], row["subsection"],
+                    row["land_number"], row["owner_name"], row["latitude"], row["longitude"],
+                ],
+                row["customer_id"],
+            )
+        self.update_map_view()
 
     def load_selected(self):
         ids = _selected_ids(self.table); row = next((r for r in self.rows if r["customer_id"] in ids), None)
-        if row: self.customer_id.setText(str(row["customer_id"])); self.latitude.setText(str(row["latitude"])); self.longitude.setText(str(row["longitude"]))
+        if row:
+            self.customer_id.setText(str(row["customer_id"]))
+            self.latitude.setText("" if row["latitude"] is None else str(row["latitude"]))
+            self.longitude.setText("" if row["longitude"] is None else str(row["longitude"]))
+            self.address_input.setText(str(row.get("address") or ""))
 
     def save(self):
         try: self.repository.set_customer_location(int(self.customer_id.text()), float(self.latitude.text()), float(self.longitude.text()))
         except Exception as exc: QMessageBox.warning(self, "儲存失敗", str(exc)); return
         self.refresh()
 
-    def search_address(self):
-        try: record = self.repository.get_customer(int(self.customer_id.text()))
-        except Exception: record = None
-        if record is None: QMessageBox.warning(self, "找不到資料", "請輸入有效的資料 ID。"); return
-        address = decrypt_value(self.fernet, record["address"]) or " ".join(str(record[key] or "") for key in ("district", "section", "land_number"))
-        QDesktopServices.openUrl(
-            QUrl(f"https://www.openstreetmap.org/search?query={quote(str(address))}")
+    def geocode_address(self):
+        address = self.address_input.text().strip()
+        if not address:
+            QMessageBox.warning(self, "缺少地址", "請先輸入要查詢的地址。")
+            return
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            coordinates = geocode_address_auto(address, api_key=self.google_api_key)
+        except (URLError, HTTPError, TimeoutError, OSError) as exc:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(self, "查詢失敗", f"無法連線到地理編碼服務，請確認網路連線後再試。\n{exc}")
+            return
+        except ValueError as exc:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(self, "查詢失敗", str(exc))
+            return
+        QApplication.restoreOverrideCursor()
+        if coordinates is None:
+            QMessageBox.information(
+                self,
+                "查無結果",
+                "找不到符合的地址，請嘗試輸入更完整的地址，"
+                "或先移除門牌號碼只查到路名／地區再手動微調。",
+            )
+            return
+        latitude, longitude, approximate = coordinates
+        self.latitude.setText(str(latitude))
+        self.longitude.setText(str(longitude))
+        if approximate:
+            QMessageBox.information(
+                self,
+                "僅定位到街道",
+                "找不到精確門牌，已定位到同一條路的大致位置，"
+                "建議對照地圖微調緯度經度。",
+            )
+
+    @staticmethod
+    def _build_geocode_pending(rows):
+        pending = []
+        for row in rows:
+            if row["latitude"] is not None and row["longitude"] is not None:
+                # A previously auto-geocoded pin is not manually verified
+                # and may be wrong (e.g. results produced before the
+                # countrycodes=tw fix in _query_nominatim existed) -- only
+                # a source of "manual" (the user typed/confirmed
+                # coordinates themselves) is treated as trustworthy enough
+                # to skip.
+                if row.get("source") == "manual":
+                    continue
+            # Only ever geocode a real address -- an earlier version of
+            # this also fell back to "district + section" (地區/地段) text
+            # when no address was on file, but a 地段 (cadastral section)
+            # name is not a real, geocodable place: it was verified live
+            # against Nominatim that a query like "中壢區 全興段" returns
+            # either nothing, or a completely unrelated result elsewhere
+            # in Taiwan whose name just happens to also contain "段"
+            # (e.g. a railway construction project in Taipei/Tainan). That
+            # is worse than not geocoding at all -- it produces a
+            # confident-looking pin in the wrong city. A customer with no
+            # real address on file is skipped here and counted as
+            # "failed" so the user knows to add a real address or place
+            # the pin manually instead.
+            address = row.get("address")
+            if address:
+                pending.append((row["customer_id"], address))
+        return pending
+
+    def batch_geocode_all(self):
+        pending = self._build_geocode_pending(self.rows)
+
+        if not pending:
+            QMessageBox.information(
+                self, "沒有需要查詢的資料",
+                "所有地主都已經有座標，或是沒有地址可查詢"
+                "（地區／地段／地號是地籍編號，不是真正的地址，無法用來查座標，"
+                "請先補上實際地址，或直接手動輸入座標）。",
+            )
+            return
+
+        interval = (
+            BatchGeocodeWorker.GOOGLE_MIN_REQUEST_INTERVAL_SECONDS
+            if self.google_api_key
+            else BatchGeocodeWorker.MIN_REQUEST_INTERVAL_SECONDS
         )
+        estimated_minutes = max(1, round(len(pending) * interval / 60))
+        provider_name = "Google" if self.google_api_key else "Nominatim（免費）"
+        reply = QMessageBox.question(
+            self, "確認開始自動查座標",
+            f"有 {len(pending)} 筆地主需要查詢座標（含還沒有座標的，以及先前自動查過、"
+            f"非手動輸入的地主，會重新查詢覆蓋掉舊結果）。將使用 {provider_name} 查詢，"
+            f"外部服務有速率限制，預計需要約 {estimated_minutes} 分鐘，"
+            f"查詢中可以按取消中止。\n\n是否開始？",
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        self._geocode_success_count = 0
+        self._geocode_failed_ids = []
+
+        self.progress_dialog = QProgressDialog("正在查詢座標…", "取消", 0, len(pending), self)
+        self.progress_dialog.setWindowTitle("全部自動查座標")
+        self.progress_dialog.setWindowModality(Qt.WindowModal)
+        self.progress_dialog.setMinimumDuration(0)
+        self.progress_dialog.setValue(0)
+
+        self.geocode_thread = QThread(self)
+        self.geocode_worker = BatchGeocodeWorker(pending, api_key=self.google_api_key)
+        self.geocode_worker.moveToThread(self.geocode_thread)
+        self.geocode_thread.started.connect(self.geocode_worker.run)
+        # Explicit QueuedConnection, not relying on AutoConnection to
+        # infer cross-thread delivery -- see BatchGeocodeWorker's own
+        # docstring and start_record_search()'s comment in
+        # customer_search_controller.py for why this app treats that as
+        # a hard rule, not a style preference, after a real crash traced
+        # to exactly this kind of connection being implicit.
+        self.geocode_worker.progress.connect(self._on_geocode_progress, Qt.QueuedConnection)
+        self.geocode_worker.located.connect(self._on_geocode_located, Qt.QueuedConnection)
+        self.geocode_worker.failed.connect(self._on_geocode_failed, Qt.QueuedConnection)
+        self.geocode_worker.finished.connect(self._on_geocode_finished, Qt.QueuedConnection)
+        self.progress_dialog.canceled.connect(self.geocode_worker.cancel)
+
+        self.geocode_thread.start()
+        self.progress_dialog.show()
+
+    def _on_geocode_progress(self, completed, total):
+        if self.progress_dialog is not None:
+            self.progress_dialog.setMaximum(total)
+            self.progress_dialog.setValue(completed)
+
+    def _on_geocode_located(self, customer_id, latitude, longitude, _approximate):
+        # The network call already happened on the worker thread; the
+        # actual repository write stays here, on the GUI thread, same
+        # reasoning as BatchGeocodeWorker's docstring.
+        try:
+            self.repository.set_customer_location(customer_id, latitude, longitude, source="geocoded")
+            self._geocode_success_count += 1
+        except Exception:
+            self._geocode_failed_ids.append(customer_id)
+
+    def _on_geocode_failed(self, customer_id, _reason):
+        self._geocode_failed_ids.append(customer_id)
+
+    def _on_geocode_finished(self):
+        self._stop_geocode_thread()
+        if self.progress_dialog is not None:
+            self.progress_dialog.close()
+            self.progress_dialog = None
+        self.refresh()
+        failed_count = len(self._geocode_failed_ids)
+        message = f"成功查到 {self._geocode_success_count} 筆座標。"
+        if failed_count:
+            message += f"\n{failed_count} 筆查詢失敗（可能地址不完整或查無結果），可以手動輸入座標。"
+        QMessageBox.information(self, "自動查座標完成", message)
+
+    def _stop_geocode_thread(self):
+        if self.geocode_thread is None:
+            return
+        self.geocode_thread.quit()
+        self.geocode_thread.wait(2000)
+        self.geocode_worker.deleteLater()
+        self.geocode_thread.deleteLater()
+        self.geocode_thread = None
+        self.geocode_worker = None
+
+    def reject(self):
+        # Closing the dialog (button or Escape) while a batch geocode is
+        # still running would otherwise leave a QThread destroyed out
+        # from under a running worker -- cancel and wait for it to
+        # actually stop first instead.
+        if self.geocode_thread is not None:
+            self.geocode_worker.cancel()
+            self.geocode_thread.quit()
+            self.geocode_thread.wait(3000)
+            self._stop_geocode_thread()
+            if self.progress_dialog is not None:
+                self.progress_dialog.close()
+                self.progress_dialog = None
+        super().reject()
 
     def request_export(self): self.export_requested = True; self.accept()
 

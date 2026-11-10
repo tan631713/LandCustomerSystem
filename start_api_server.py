@@ -103,6 +103,11 @@ def build_parser():
     parser.add_argument("--backup-if-due-hours", type=int, default=0)
     parser.add_argument("--backup-label", default="manual")
     parser.add_argument(
+        "--backup-status",
+        action="store_true",
+        help="只回報備份目錄、數量與最後備份時間後結束，不建立新備份",
+    )
+    parser.add_argument(
         "--import-recovery-account",
         metavar="PATH",
         help="驗證並匯入單機版產生的 .lcs-account 帳號恢復檔後結束",
@@ -117,10 +122,59 @@ def build_parser():
         action="store_true",
         help="在家中主機本地驗證既有帳號後安全重設 admin 密碼",
     )
+    parser.add_argument(
+        "--diagnose-owner-ids",
+        action="store_true",
+        help="唯讀統計地主身分證長度與疑似撞號（只輸出數字），存成 txt 後結束",
+    )
+    parser.add_argument(
+        "--report-dir",
+        metavar="PATH",
+        help="--diagnose-owner-ids 報告存放資料夾（預設為伺服器資料夾）",
+    )
     return parser
 
 
+def default_report_directory():
+    """The server package folder (the one with 啟動家中伺服器.bat)."""
+
+    from pathlib import Path
+
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent.parent
+    return Path(__file__).resolve().parent
+
+
+def run_owner_id_diagnostics(args, *, load_dsn=None, ask=input, ask_secret=getpass.getpass):
+    from customer_owner_id_diagnostics import DiagnosticError, format_report, run_diagnostics
+    from customer_version import APP_VERSION
+
+    if load_dsn is None:
+        from customer_api.local_postgres import load_postgres_dsn as load_dsn
+    try:
+        username = ask("管理員帳號（直接按 Enter 使用 admin）：").strip() or "admin"
+        password = ask_secret(f"請輸入 {username} 的密碼（畫面不會顯示）：")
+        path, stats = run_diagnostics(
+            load_dsn(),
+            username,
+            password,
+            output_dir=args.report_dir or default_report_directory(),
+            version=APP_VERSION,
+        )
+    except DiagnosticError as exc:
+        print(f"診斷未完成：{exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:  # noqa: BLE001 - never show the connection string
+        print(f"診斷未完成：{type(exc).__name__}", file=sys.stderr)
+        return 1
+    print(format_report(stats, version=APP_VERSION))
+    print(f"報告已存到：{path}")
+    return 0
+
+
 def run_maintenance_action(args):
+    if getattr(args, "diagnose_owner_ids", False):
+        return True, run_owner_id_diagnostics(args)
     if args.import_migration_package:
         from customer_api.local_postgres import load_postgres_dsn
         from customer_migration_package import import_migration_package
@@ -241,6 +295,10 @@ def run_maintenance_action(args):
         if args.prefer_vpn:
             certificate_arguments.append("--prefer-vpn")
         return True, install_certificate_main(certificate_arguments)
+    if args.backup_status:
+        from backup_postgresql import main as backup_main
+
+        return True, backup_main(["--status"])
     if args.backup or args.backup_if_due_hours:
         from backup_postgresql import main as backup_main
 
@@ -321,6 +379,13 @@ def show_lan_addresses(args, has_tls):
 
 
 def main(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv and argv[0] in ("admin-list", "admin-recover", "admin-bootstrap", "migration-import"):
+        from server_console_admin import SUBCOMMANDS
+
+        return SUBCOMMANDS[argv[0]](argv[1:])
+
     parser = build_parser()
     args = parser.parse_args(argv)
     select_protected_postgres_configuration(args)

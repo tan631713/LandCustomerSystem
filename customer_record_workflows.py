@@ -9,11 +9,14 @@ from customer_analytics import build_dashboard_stats
 from customer_desktop_api import DesktopApiError
 from customer_display import compact_summary_text, format_attachment_summary
 from customer_domain import (
+    calculate_age_from_birth_year,
     calculate_ping,
     calculate_total_declared_value,
     format_number_text,
     format_ping_text,
     mask_identity_text,
+    mask_identity_to_four_digits,
+    mask_owner_display_name,
 )
 from customer_fields import LAND_FIELDS
 from customer_land_details import LandDetailsDialog
@@ -31,7 +34,7 @@ from customer_security import (
     make_fernet,
 )
 from PySide6.QtCore import QPoint, QItemSelectionModel, QTimer
-from PySide6.QtWidgets import QAbstractItemView, QDialog, QPlainTextEdit
+from PySide6.QtWidgets import QAbstractItemView, QPlainTextEdit
 
 
 class RecordWorkflowMixin:
@@ -300,10 +303,16 @@ class RecordWorkflowMixin:
     def set_field_text(self, key, value):
         widget = self.fields[key]
         text = value or ""
-        if isinstance(widget, QPlainTextEdit):
-            widget.setPlainText(text)
-        else:
-            widget.setText(text)
+        # Loading data into the form is not an edit: the save-state label
+        # ignores text changes made while this counter is raised.
+        self.form_loading_depth += 1
+        try:
+            if isinstance(widget, QPlainTextEdit):
+                widget.setPlainText(text)
+            else:
+                widget.setText(text)
+        finally:
+            self.form_loading_depth -= 1
 
     def update_total_declared_value(self):
         data = {
@@ -315,6 +324,12 @@ class RecordWorkflowMixin:
         self.set_field_text("ping", calculate_ping(data) or "")
         self.set_field_text("total_declared_value", calculate_total_declared_value(data) or "")
 
+    def update_age_field(self):
+        widget = getattr(self, "age_display_widget", None)
+        if widget is None:
+            return
+        widget.setText(calculate_age_from_birth_year(self.get_field_text("birth_year")))
+
     def format_declared_value(self):
         self.set_field_text("declared_value", format_number_text(self.get_field_text("declared_value")))
 
@@ -325,9 +340,26 @@ class RecordWorkflowMixin:
         self.apply_external_id_visibility()
         self.refresh_records(self.selected_record_id)
 
+    def apply_external_id_button_availability(self):
+        # The privacy mask forces external_id to stay 4-digits/read-only
+        # regardless of this action's state (see
+        # apply_external_id_visibility()) -- disabling it while masked
+        # keeps that override from looking like a dead, do-nothing action.
+        action = getattr(self, "toggle_external_id_action", None)
+        if action is not None:
+            action.setEnabled(not self.privacy_mask_enabled)
+
     def apply_external_id_visibility(self):
         widget = self.field_widgets.get("external_id")
         if widget is None:
+            return
+        if self.privacy_mask_enabled:
+            # Overrides show_full_external_id unconditionally -- the
+            # privacy mask is a stronger, password-gated guarantee than
+            # the lightweight per-session "顯示身分證" button, so that
+            # button must not be able to defeat it while masked.
+            widget.setText(mask_identity_to_four_digits(self.current_external_id_plain))
+            widget.setReadOnly(True)
             return
         if self.show_full_external_id:
             widget.setReadOnly(False)
@@ -335,6 +367,18 @@ class RecordWorkflowMixin:
         else:
             widget.setText(mask_identity_text(self.current_external_id_plain))
             widget.setReadOnly(True)
+
+    def apply_owner_name_visibility(self):
+        widget = self.field_widgets.get("owner_name")
+        if widget is None:
+            return
+        if self.privacy_mask_enabled:
+            widget.setText(mask_owner_display_name(self.current_owner_name_plain))
+            widget.setReadOnly(True)
+        else:
+            widget.setReadOnly(False)
+            widget.setText(self.current_owner_name_plain)
+        self.refresh_owner_section_note()
 
     def select_record_in_table(self, record_id):
         with self._programmatic_land_expansion(restoring=True):
@@ -366,6 +410,19 @@ class RecordWorkflowMixin:
             return
         if node.kind == "ownership":
             self.selected_land_state_id = node.group.state_id
+            # Diagnostic breadcrumb -- see open_quality_issue_record()'s
+            # matching comment. This handler firing mid-way through a
+            # refresh_records() call (e.g. from restore_land_tree_view_state()
+            # falling back to some other row when the target record isn't in
+            # the locally cached search results) would call load_record()
+            # with a DIFFERENT id than the one the user actually asked for,
+            # which -- if it happens *after* open_quality_issue_record()'s
+            # own explicit load_record() call -- would silently overwrite it.
+            from customer_error_handler import log_diagnostic_event
+
+            log_diagnostic_event(
+                "on_record_select", f"load_record({node.record['id']!r}) via table selection"
+            )
             self.load_record(node.record["id"])
             return
         self.selected_land_state_id = node.group.state_id
@@ -407,13 +464,15 @@ class RecordWorkflowMixin:
         if node is None:
             return
         if node.kind == "land":
-            LandDetailsDialog(node.group, self).exec()
+            self._show_non_modal_dialog(LandDetailsDialog(node.group, self))
             return
         self.load_record(node.record["id"])
         if getattr(self, "detail_tabs", None) is not None:
             self.detail_tabs.setCurrentIndex(0)
 
     def selected_land_group(self):
+        if self.plan_view_active():
+            return self.plan_selected_land_group()
         if self.table_view is None or self.table_view.currentIndex().isValid() is False:
             return None
         source = self.source_table_index(self.table_view.currentIndex())
@@ -422,7 +481,7 @@ class RecordWorkflowMixin:
     def open_selected_land_detail(self):
         group = self.selected_land_group()
         if group is not None:
-            LandDetailsDialog(group, self).exec()
+            self._show_non_modal_dialog(LandDetailsDialog(group, self))
 
     def edit_selected_land(self):
         if not self.ensure_can_modify("編輯土地資料"):
@@ -464,6 +523,9 @@ class RecordWorkflowMixin:
         land_id = self._land_group_id(group)
         if land_id is not None:
             self.user_expanded_land_ids.discard(land_id)
+            # Otherwise the next refresh (e.g. after a save) re-opens a land
+            # the user closed while a search was active.
+            self.search_expanded_land_ids.discard(land_id)
 
     def restore_land_expansion_state(self, *, expand_matches=None):
         """Apply user and temporary search expansion without cross-contamination.
@@ -507,6 +569,9 @@ class RecordWorkflowMixin:
                 self.table_view.setExpanded(proxy, should_expand)
 
     def expand_all_land_groups(self):
+        if self.plan_view_active():
+            self.urban_plan_view.expand_everything()
+            return
         self.user_expanded_land_ids.update(
             land_id
             for group in self.table_model.groups
@@ -522,6 +587,9 @@ class RecordWorkflowMixin:
                     )
 
     def collapse_all_land_groups(self):
+        if self.plan_view_active():
+            self.urban_plan_view.collapse_everything()
+            return
         self.user_expanded_land_ids.clear()
         self.search_expanded_land_ids.clear()
         self._land_search_auto_expand = False
@@ -535,6 +603,10 @@ class RecordWorkflowMixin:
     def update_land_page_status(self):
         model = self.table_model
         if self.land_count_label is None:
+            return
+        if self.plan_view_active():
+            # The 都市計畫 view is not paged: its footer is its own summary.
+            self.update_urban_plan_summary()
             return
         self.land_count_label.setText(
             f"土地 {model.total_count} 筆｜地主／所有權資料 "
@@ -568,22 +640,52 @@ class RecordWorkflowMixin:
     def load_record(self, record_id):
         row = self.active_record_repository().get_customer(record_id)
         if row is None:
+            # A user report ("雙擊資料列可直接跳轉到該筆地主資料，這項無法正常使
+            # 用") that reproduced this exact symptom -- the dialog closes
+            # (its own accept() already ran) but the right-side form stays
+            # unchanged, with nothing at all telling the user why -- could
+            # never be reproduced through the normal cache-miss path
+            # get_customer() already falls back on; that fallback was
+            # verified end-to-end, including with a background search
+            # racing it, and always resolved correctly. Whatever the exact
+            # trigger (a permission gap, a genuinely deleted record, a
+            # transient network hiccup on the direct-fetch fallback), the
+            # one thing that should never happen is failing this silently
+            # -- so surface it instead of quietly leaving the old form in
+            # place with no explanation.
+            self._app_component("QMessageBox").warning(
+                self,
+                "找不到資料",
+                f"找不到資料 ID {record_id}，可能已被刪除，或目前帳號沒有讀取權限。",
+            )
             return
 
         self.selected_record_id = record_id
         self.schedule_selection_state_save()
         for key in self.fields:
-            value = row[key] or ""
+            # A server that hasn't been upgraded yet (or an older cached
+            # API response) may not have every field the desktop client
+            # currently knows about -- e.g. birth_year is new in v1.9.24
+            # and only present once the home server is also on v1.9.31+.
+            # Fall back to blank instead of crashing on a missing key.
+            value = (row[key] if key in row.keys() else None) or ""
             if key in ENCRYPTED_FIELDS:
                 value = decrypt_value(self.fernet, value)
             if key == "external_id":
                 self.current_external_id_plain = value
+            elif key == "owner_name":
+                self.current_owner_name_plain = value
             self.set_field_text(key, value)
 
         self.apply_external_id_visibility()
+        self.apply_owner_name_visibility()
         self.format_declared_value()
         self.update_total_declared_value()
+        self.update_age_field()
         self.update_management_summary(row)
+        self.load_urban_plan_into_form(row)
+        if self.plan_view_active():
+            self.urban_plan_view.select_record(record_id)
         if getattr(self, "owner_contacts_widget", None) is not None:
             owner_name = (
                 decrypt_value(self.fernet, row["owner_name"])
@@ -591,6 +693,7 @@ class RecordWorkflowMixin:
                 else row["owner_name"]
             )
             self.owner_contacts_widget.set_record(record_id, owner_name or "")
+        self.after_record_loaded()
 
     def update_management_summary(self, row=None):
         if self.management_summary_label is None:
@@ -623,13 +726,18 @@ class RecordWorkflowMixin:
         self.selected_record_id = None
         self.schedule_selection_state_save()
         self.current_external_id_plain = ""
+        self.current_owner_name_plain = ""
         self.table_view.clearSelection()
         for key in self.fields:
             self.set_field_text(key, "")
         self.apply_external_id_visibility()
+        self.apply_owner_name_visibility()
         self.update_management_summary()
+        # A new record starts in whatever plan 輸入到 says.
+        self.set_urban_plan_form_value(self.urban_plan_input_id)
         if getattr(self, "owner_contacts_widget", None) is not None:
             self.owner_contacts_widget.clear_owner()
+        self.after_new_record()
 
     def get_form_data(self):
         self.format_declared_value()
@@ -638,12 +746,31 @@ class RecordWorkflowMixin:
         for key in self.fields:
             value = self.get_field_text(key)
             data[key] = value or None
-        if self.show_full_external_id:
+        if self.privacy_mask_enabled:
+            # apply_external_id_visibility() forces this field to 4-digit/
+            # read-only while masked regardless of show_full_external_id --
+            # the widget text must never be trusted here either, for the
+            # same reason as owner_name below.
+            data["external_id"] = self.current_external_id_plain or None
+        elif self.show_full_external_id:
             self.current_external_id_plain = data.get("external_id") or ""
         else:
             data["external_id"] = self.current_external_id_plain or None
+        if self.privacy_mask_enabled:
+            # The owner_name field is read-only and showing only the
+            # surname while masked (see apply_owner_name_visibility()) --
+            # its widget text must never be trusted here, or saving while
+            # masked would permanently truncate the real name in the
+            # database.
+            data["owner_name"] = self.current_owner_name_plain or None
+        else:
+            self.current_owner_name_plain = data.get("owner_name") or ""
         data["ping"] = format_ping_text(data.get("ping") or "")
         data["name"] = data.get("owner_name") or ""
+        if self.urban_plans_available():
+            # 0 = 未分類. The repository only sends it when it would change
+            # something (see DesktopApiRecordRepository._record_save_values).
+            data["urban_plan_id"] = self.urban_plan_form_value()
         return data
 
     def get_plain_record_data(self, row):
@@ -716,6 +843,12 @@ class RecordWorkflowMixin:
             data["is_overdue"] = False
         return data
 
+    def plain_visit_calendar_item(self, row):
+        data = dict(row)
+        if "owner_name" in data:
+            data["owner_name"] = decrypt_value(self.fernet, data.get("owner_name") or "")
+        return data
+
     def dashboard_stats(self):
         return build_dashboard_stats(
             self.active_record_repository(),
@@ -761,62 +894,65 @@ class RecordWorkflowMixin:
             return
 
         dialog = self._app_component("BatchEditDialog")(len(self.checked_record_ids), self)
-        if dialog.exec() != QDialog.Accepted:
-            return
 
-        field_key, new_value = dialog.values()
-        if not field_key:
-            return
-        if field_key == "owner_name" and new_value and not self.confirm_watchlist_match(new_value):
-            return
+        def on_accepted():
+            field_key, new_value = dialog.values()
+            if not field_key:
+                return
+            if field_key == "owner_name" and new_value and not self.confirm_watchlist_match(new_value):
+                return
 
-        ids = sorted(self.checked_record_ids)
-        repository = self.active_record_repository()
-        rows = repository.fetch_customers_by_ids(ids)
-        preview_lines = self.build_batch_edit_preview_lines(
-            rows,
-            field_key,
-            dialog.field_combo.currentText(),
-            new_value,
-        )
-        preview_dialog = self._app_component("BatchEditPreviewDialog")(
-            dialog.field_combo.currentText(),
-            new_value,
-            preview_lines,
-            self,
-        )
-        if preview_dialog.exec() != QDialog.Accepted:
-            return
-        if not self.api_mode:
-            self.create_safety_backup("batch-edit")
-        repository.record_customer_undo(
-            "批次修改",
-            ids,
-            f"批次修改 {len(ids)} 筆「{dialog.field_combo.currentText()}」",
-        )
-        updates = []
-        change_logs = []
-        for row in rows:
-            plain_data = self.get_plain_record_data(row)
-            old_plain = dict(plain_data)
-            plain_data[field_key] = new_value or None
-            normalized = self.normalize_record_data(plain_data)
-            updates.append({**encrypt_record(self.fernet, normalized), "id": row["id"]})
-            change_logs.extend(
-                self.build_record_change_logs(
-                    row["id"],
-                    old_plain,
-                    normalized,
-                    "批次修改",
-                )
+            ids = sorted(self.checked_record_ids)
+            repository = self.active_record_repository()
+            rows = repository.fetch_customers_by_ids(ids)
+            preview_lines = self.build_batch_edit_preview_lines(
+                rows,
+                field_key,
+                dialog.field_combo.currentText(),
+                new_value,
             )
-        updated_count = repository.update_customers(updates)
-        if change_logs:
-            repository.add_record_change_logs(change_logs)
+            preview_dialog = self._app_component("BatchEditPreviewDialog")(
+                dialog.field_combo.currentText(),
+                new_value,
+                preview_lines,
+                self,
+            )
 
-        self.refresh_records(self.selected_record_id)
-        self._log_operation("批次修改", f"更新 {updated_count} 筆", f"欄位：{dialog.field_combo.currentText()}")
-        self._app_component("QMessageBox").information(self, "批次修改完成", f"已更新 {updated_count} 筆資料。")
+            def on_preview_accepted():
+                if not self.api_mode:
+                    self.create_safety_backup("batch-edit")
+                repository.record_customer_undo(
+                    "批次修改",
+                    ids,
+                    f"批次修改 {len(ids)} 筆「{dialog.field_combo.currentText()}」",
+                )
+                updates = []
+                change_logs = []
+                for row in rows:
+                    plain_data = self.get_plain_record_data(row)
+                    old_plain = dict(plain_data)
+                    plain_data[field_key] = new_value or None
+                    normalized = self.normalize_record_data(plain_data)
+                    updates.append({**encrypt_record(self.fernet, normalized), "id": row["id"]})
+                    change_logs.extend(
+                        self.build_record_change_logs(
+                            row["id"],
+                            old_plain,
+                            normalized,
+                            "批次修改",
+                        )
+                    )
+                updated_count = repository.update_customers(updates)
+                if change_logs:
+                    repository.add_record_change_logs(change_logs)
+
+                self.refresh_records(self.selected_record_id)
+                self._log_operation("批次修改", f"更新 {updated_count} 筆", f"欄位：{dialog.field_combo.currentText()}")
+                self._app_component("QMessageBox").information(self, "批次修改完成", f"已更新 {updated_count} 筆資料。")
+
+            self._show_non_modal_dialog(preview_dialog, on_accepted=on_preview_accepted)
+
+        self._show_non_modal_dialog(dialog, on_accepted=on_accepted)
 
     def save_record(self):
         if not self.ensure_can_modify("儲存資料"):
@@ -826,6 +962,9 @@ class RecordWorkflowMixin:
             return
         record_repository = self.active_record_repository()
         is_new_record = self.selected_record_id is None
+        if is_new_record and not self.confirm_owner_match_before_save():
+            return
+        owner_match_kwargs = self.owner_match_save_kwargs(is_new_record)
         tree_state = (
             None if is_new_record else self.capture_land_tree_view_state()
         )
@@ -860,6 +999,7 @@ class RecordWorkflowMixin:
                 self.selected_record_id = record_repository.save_customer(
                     data,
                     self.selected_record_id,
+                    **owner_match_kwargs,
                 )
         except (sqlite3.IntegrityError, DesktopApiError) as exc:
             self._app_component("QMessageBox").critical(self, "儲存失敗", database_save_failure_message(exc))
@@ -869,9 +1009,28 @@ class RecordWorkflowMixin:
             record_repository.add_record_change_logs(change_logs)
 
         if is_new_record:
-            # A new ownership can change the tree structure and therefore uses
-            # the normal full refresh path.
-            self.refresh_records(self.selected_record_id)
+            # A new ownership can change the tree structure and therefore
+            # uses the normal full refresh path (a full tree-model reset,
+            # not the in-place update the edit-existing-record branch
+            # below uses). Deliberately deferred to the next event-loop
+            # tick instead of calling it synchronously here: production
+            # crash reports showed this exact "save a brand-new record"
+            # action taking down the whole process with a raw Windows
+            # access violation inside python314.dll itself -- no Python
+            # traceback, so no exception to catch. That signature matches
+            # a reentrant Qt model reset: save_record() is itself already
+            # running nested inside Qt's own event dispatch (a button
+            # click), and resetting the tree model synchronously from
+            # there can interleave with the view's own in-flight index
+            # bookkeeping in ways a try/except inside the model can't
+            # protect against, because the corruption isn't a Python
+            # exception. QTimer.singleShot(0, ...) runs the refresh after
+            # the current call stack has fully unwound, on a clean tick,
+            # which is the standard Qt idiom for this exact class of
+            # problem.
+            new_record_id = self.selected_record_id
+            self.after_owner_match_saved(new_record_id)
+            QTimer.singleShot(0, lambda: self.refresh_records(new_record_id))
         else:
             # Existing owner/land/ownership edits must preserve the live tree.
             # Search auto-expansion belongs to an explicit search operation,
@@ -882,52 +1041,63 @@ class RecordWorkflowMixin:
                 preserve_existing_model=True,
             )
         action_type = "新增資料" if is_new_record else "修改資料"
-        self._log_operation(action_type, plain_data.get("owner_name") or "未命名資料", plain_data.get("land_number") or "")
+        # Against the home server these two are network round trips; they run in
+        # the background so the "已儲存" message is not held up by them.
+        self._log_operation_in_background(
+            action_type,
+            plain_data.get("owner_name") or "未命名資料",
+            plain_data.get("land_number") or "",
+        )
+        self._start_saved_record_reconcile()
+        self.mark_form_saved()
+        self.refresh_owner_section_note()
+        self.refresh_land_header()
         self._app_component("QMessageBox").information(self, "完成", "資料已儲存。")
 
     def change_password(self):
         dialog = self._app_component("ChangePasswordDialog")(self)
-        if dialog.exec() != QDialog.Accepted:
-            return
 
-        current_password, new_password, confirm_password = dialog.values()
-        policy_error = validate_new_password(new_password)
-        if policy_error:
-            self._app_component("QMessageBox").warning(self, "密碼太短", policy_error)
-            return
-        if new_password != confirm_password:
-            self._app_component("QMessageBox").warning(self, "密碼不一致", "兩次輸入的新密碼不一致。")
-            return
-        if current_password == new_password:
-            self._app_component("QMessageBox").warning(self, "密碼未變更", "新密碼不能和目前密碼相同。")
-            return
+        def on_accepted():
+            current_password, new_password, confirm_password = dialog.values()
+            policy_error = validate_new_password(new_password)
+            if policy_error:
+                self._app_component("QMessageBox").warning(self, "密碼太短", policy_error)
+                return
+            if new_password != confirm_password:
+                self._app_component("QMessageBox").warning(self, "密碼不一致", "兩次輸入的新密碼不一致。")
+                return
+            if current_password == new_password:
+                self._app_component("QMessageBox").warning(self, "密碼未變更", "新密碼不能和目前密碼相同。")
+                return
 
-        try:
-            repository = self.active_record_repository()
-            if self.current_user.get("username") == self.admin_username:
-                new_encryption_key, backup_path = repository.change_admin_password(
-                    current_password, new_password
-                )
-            else:
-                new_encryption_key, backup_path = repository.change_user_password(
-                    self.current_user.get("username"),
-                    current_password,
-                    new_password,
-                    self.encryption_key,
-                )
-        except ValueError as exc:
-            self._app_component("QMessageBox").warning(self, "無法修改密碼", str(exc))
-            return
-        except Exception as exc:
-            self._app_component("QMessageBox").critical(self, "修改失敗", password_change_failure_message(exc))
-            return
+            try:
+                repository = self.active_record_repository()
+                if self.current_user.get("username") == self.admin_username:
+                    new_encryption_key, backup_path = repository.change_admin_password(
+                        current_password, new_password
+                    )
+                else:
+                    new_encryption_key, backup_path = repository.change_user_password(
+                        self.current_user.get("username"),
+                        current_password,
+                        new_password,
+                        self.encryption_key,
+                    )
+            except ValueError as exc:
+                self._app_component("QMessageBox").warning(self, "無法修改密碼", str(exc))
+                return
+            except Exception as exc:
+                self._app_component("QMessageBox").critical(self, "修改失敗", password_change_failure_message(exc))
+                return
 
-        self.encryption_key = new_encryption_key
-        self.fernet = make_fernet(new_encryption_key)
-        self.productivity.fernet = self.fernet
-        self.refresh_records(self.selected_record_id)
-        self._log_operation("修改密碼", "更新登入與解密密碼", str(backup_path) if backup_path else "")
-        self._app_component("QMessageBox").information(self, "修改完成", password_changed_message(backup_path))
+            self.encryption_key = new_encryption_key
+            self.fernet = make_fernet(new_encryption_key)
+            self.productivity.fernet = self.fernet
+            self.refresh_records(self.selected_record_id)
+            self._log_operation("修改密碼", "更新登入與解密密碼", str(backup_path) if backup_path else "")
+            self._app_component("QMessageBox").information(self, "修改完成", password_changed_message(backup_path))
+
+        self._show_non_modal_dialog(dialog, on_accepted=on_accepted)
 
     def delete_record(self):
         if not self.ensure_can_modify("刪除資料"):

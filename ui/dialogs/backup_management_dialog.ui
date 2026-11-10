@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>backupManagementDialogContent</class>
+ <widget class="QWidget" name="backupManagementDialogContent">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>540</width>
+    <height>276</height>
+   </rect>
+  </property>
+  <property name="minimumSize">
+   <size>
+    <width>540</width>
+    <height>0</height>
+   </size>
+  </property>
+  <property name="windowTitle">
+   <string>備份管理</string>
+  </property>
+  <layout class="QVBoxLayout" name="backupManagementLayout">
+   <property name="spacing">
+    <number>6</number>
+   </property>
+   <property name="leftMargin">
+    <number>11</number>
+   </property>
+   <property name="topMargin">
+    <number>11</number>
+   </property>
+   <property name="rightMargin">
+    <number>11</number>
+   </property>
+   <property name="bottomMargin">
+    <number>11</number>
+   </property>
+   <item>
+    <widget class="QLabel" name="descriptionLabel">
+     <property name="text">
+      <string>系統每 6 小時檢查一次，跨日會建立每日備份並依下列規則整理。無論設定為何，最新 3 份備份都不會被自動刪除。</string>
+     </property>
+     <property name="wordWrap">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <layout class="QFormLayout" name="policyForm">
+     <property name="horizontalSpacing">
+      <number>6</number>
+     </property>
+     <property name="verticalSpacing">
+      <number>6</number>
+     </property>
+     <property name="leftMargin">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <property name="rightMargin">
+      <number>0</number>
+     </property>
+     <property name="bottomMargin">
+      <number>0</number>
+     </property>
+     <item row="0" column="0">
+      <widget class="QLabel" name="compressLabel">
+       <property name="text">
+        <string>壓縮</string>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="1">
+      <widget class="CheckBox" name="compressCheckBox">
+       <property name="text">
+        <string>新備份使用 ZIP，並自動壓縮既有 .db 備份</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="0">
+      <widget class="QLabel" name="retentionDaysLabel">
+       <property name="text">
+        <string>保留期限</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="1">
+      <widget class="SpinBox" name="retentionDaysSpin">
+       <property name="specialValueText">
+        <string>不依天數清除</string>
+       </property>
+       <property name="suffix">
+        <string> 天</string>
+       </property>
+       <property name="maximum">
+        <number>3650</number>
+       </property>
+      </widget>
+     </item>
+     <item row="2" column="0">
+      <widget class="QLabel" name="maxCountLabel">
+       <property name="text">
+        <string>最多保留</string>
+       </property>
+      </widget>
+     </item>
+     <item row="2" column="1">
+      <widget class="SpinBox" name="maxCountSpin">
+       <property name="suffix">
+        <string> 份</string>
+       </property>
+       <property name="minimum">
+        <number>3</number>
+       </property>
+       <property name="maximum">
+        <number>9999</number>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QLabel" name="hintLabel">
+     <property name="text">
+      <string>立即清理只會刪除系統在 backups 資料夾中建立的 customers-*.db / *.zip。</string>
+     </property>
+     <property name="wordWrap">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="DialogButtonBox" name="buttonBox">
+     <property name="standardButtons">
+      <set>QDialogButtonBox::Cancel|QDialogButtonBox::Save</set>
+     </property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+ <customwidget>
+  <class>CheckBox</class>
+  <extends>QCheckBox</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>SpinBox</class>
+  <extends>QSpinBox</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+  <customwidget>
+  <class>DialogButtonBox</class>
+  <extends>QDialogButtonBox</extends>
+  <header>customer_fluent</header>
+ </customwidget>
+ </customwidgets>
+ <resources />
+ <connections />
+</ui>

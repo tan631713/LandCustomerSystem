@@ -1,9 +1,94 @@
+import inspect
+import re
 import unittest
 
+import customer_search_controller
+import customer_ui_qt
 from customer_desktop_data import DesktopDataAccess
+from customer_desktop_support import DesktopSupportMixin
 from customer_management_workflows import ManagementWorkflowMixin
 from customer_settings_workflows import SettingsWorkflowMixin
 from PySide6.QtWidgets import QDialog
+
+
+class _FakeSignal:
+    """Stand-in for a real Qt signal on plain-Python fake dialogs.
+
+    Production dialogs are genuine QDialog subclasses, so `.finished` is a
+    real Qt signal `_show_non_modal_dialog()` (customer_desktop_support.py)
+    can `.connect()` to. These fakes are plain Python objects with no
+    human present to close them, so `.show()` immediately `.emit()`s this
+    with QDialog.Accepted -- matching the old `.exec() -> QDialog.Accepted`
+    behavior these fakes originally simulated before dialogs went
+    non-modal.
+    """
+
+    def __init__(self):
+        self._callbacks = []
+
+    def connect(self, callback):
+        self._callbacks.append(callback)
+
+    def emit(self, *args):
+        for callback in list(self._callbacks):
+            callback(*args)
+
+
+class LandAppStartupOrderTests(unittest.TestCase):
+    def test_font_size_is_applied_before_records_are_loaded(self):
+        # A real crash: refresh_records() on a large database sets a
+        # preview into the table model and starts a background search
+        # thread; apply_saved_font_size() then touches the tree view's
+        # stylesheet, which makes Qt synchronously walk every row for
+        # layout recomputation. That walk landing while the background
+        # thread's "results ready" signal was pending delivery produced
+        # AttributeError: '_TreeNode' object has no attribute 'kind' from
+        # a stale internalPointer() -- a genuinely empty tree can't have
+        # this problem, so font size must be applied first. This is a
+        # source-order check rather than a reproduction of the race
+        # itself (which needs real thread timing to trigger).
+        source = inspect.getsource(customer_ui_qt.LandApp.__init__)
+        self.assertLess(
+            source.index("self.apply_saved_font_size()"),
+            source.index("self.refresh_records()"),
+        )
+
+
+class BackgroundSearchThreadConnectionTests(unittest.TestCase):
+    def test_worker_signals_are_not_connected_to_bare_lambdas(self):
+        # The actual root cause of this app's long-running native-crash
+        # saga (DESKTOP_CLIENT_VERSION 1.9.35): CustomerSearchWorker's
+        # finished/failed/cancelled signals -- emitted on a background
+        # QThread -- used to be connected to bare lambdas. Qt.AutoConnection
+        # has no bound QObject to read a thread affinity from on a plain
+        # lambda, so nothing guaranteed those calls (and everything they
+        # touched, including the tree model) actually ran on the GUI
+        # thread rather than the emitting worker thread -- QAbstractItemModel
+        # is not thread-safe, and this was silently corrupting memory,
+        # surfacing later as unrelated-looking native crashes.
+        #
+        # This is a static guard against reintroducing that exact pattern
+        # in this specific method -- the real thread-timing race it guards
+        # against cannot be reliably reproduced in this test suite (see
+        # RecordTableModel._warn_if_wrong_thread() in customer_models.py
+        # for a runtime tripwire that catches it if it ever comes back
+        # anyway, anywhere in this model).
+        source = inspect.getsource(
+            customer_search_controller.SearchControllerMixin.start_record_search
+        )
+        connect_lines = [
+            line
+            for line in source.splitlines()
+            if re.search(r"\bworker\.(finished|failed|cancelled)\.connect\(", line)
+        ]
+        self.assertTrue(connect_lines, "expected to find worker signal connections")
+        for line in connect_lines:
+            self.assertNotIn(
+                "lambda",
+                line,
+                f"worker signal connected to a bare lambda, not a bound method: {line!r}",
+            )
+        self.assertIn("Qt.QueuedConnection", source)
 
 
 class DesktopDataAccessTests(unittest.TestCase):
@@ -125,8 +210,24 @@ class DesktopFieldVisitWorkflowTests(unittest.TestCase):
             def __init__(self, selected_count, parent):
                 captured["selected_count"] = selected_count
                 captured["parent"] = parent
+                self.finished = _FakeSignal()
 
             def exec(self):
+                return QDialog.Accepted
+
+            def show(self):
+                self.finished.emit(QDialog.Accepted)
+
+            def raise_(self):
+                pass
+
+            def activateWindow(self):
+                pass
+
+            def isVisible(self):
+                return False
+
+            def result(self):
                 return QDialog.Accepted
 
             def selected_date(self):
@@ -151,7 +252,7 @@ class DesktopFieldVisitWorkflowTests(unittest.TestCase):
             def critical(*_args):
                 raise AssertionError("不應顯示錯誤")
 
-        class Window(ManagementWorkflowMixin):
+        class Window(ManagementWorkflowMixin, DesktopSupportMixin):
             api_mode = True
 
             def ensure_can_modify(self, _action):

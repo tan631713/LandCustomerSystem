@@ -1,0 +1,625 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>workflowDialogContent</class>
+ <widget class="QWidget" name="workflowDialogContent">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1000</width>
+    <height>680</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>案件規劃</string>
+  </property>
+  <property name="dialogSize" stdset="0">
+   <size>
+    <width>1000</width>
+    <height>680</height>
+   </size>
+  </property>
+  <layout class="QVBoxLayout" name="workflowLayout">
+   <property name="spacing">
+    <number>6</number>
+   </property>
+   <property name="leftMargin">
+    <number>11</number>
+   </property>
+   <property name="topMargin">
+    <number>11</number>
+   </property>
+   <property name="rightMargin">
+    <number>11</number>
+   </property>
+   <property name="bottomMargin">
+    <number>11</number>
+   </property>
+   <item>
+    <widget class="QTabWidget" name="workflowTabs">
+     <property name="currentIndex">
+      <number>0</number>
+     </property>
+     <widget class="QWidget" name="casePage">
+      <attribute name="title">
+       <string>案件</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="casePageLayout">
+       <property name="spacing">
+        <number>6</number>
+       </property>
+       <property name="leftMargin">
+        <number>9</number>
+       </property>
+       <property name="topMargin">
+        <number>9</number>
+       </property>
+       <property name="rightMargin">
+        <number>9</number>
+       </property>
+       <property name="bottomMargin">
+        <number>9</number>
+       </property>
+       <item>
+        <widget class="TableWidget" name="caseTable">
+         <property name="selectionMode">
+          <enum>QAbstractItemView::SingleSelection</enum>
+         </property>
+         <property name="selectionBehavior">
+          <enum>QAbstractItemView::SelectRows</enum>
+         </property>
+         <column>
+          <property name="text">
+           <string>ID</string>
+          </property>
+         </column>
+         <column>
+          <property name="text">
+           <string>案件</string>
+          </property>
+         </column>
+         <column>
+          <property name="text">
+           <string>狀態</string>
+          </property>
+         </column>
+         <column>
+          <property name="text">
+           <string>負責人</string>
+          </property>
+         </column>
+         <column>
+          <property name="text">
+           <string>期限</string>
+          </property>
+         </column>
+         <column>
+          <property name="text">
+           <string>優先</string>
+          </property>
+         </column>
+         <column>
+          <property name="text">
+           <string>下一步</string>
+          </property>
+         </column>
+         <column>
+          <property name="text">
+           <string>資料數</string>
+          </property>
+         </column>
+         <column>
+          <property name="text">
+           <string>封存</string>
+          </property>
+         </column>
+        </widget>
+       </item>
+       <item>
+        <layout class="QGridLayout" name="caseForm">
+         <property name="horizontalSpacing">
+          <number>6</number>
+         </property>
+         <property name="verticalSpacing">
+          <number>6</number>
+         </property>
+         <property name="leftMargin">
+          <number>0</number>
+         </property>
+         <property name="topMargin">
+          <number>0</number>
+         </property>
+         <property name="rightMargin">
+          <number>0</number>
+         </property>
+         <property name="bottomMargin">
+          <number>0</number>
+         </property>
+         <item row="0" column="0">
+          <widget class="QLabel" name="caseTitleLabel">
+           <property name="text">
+            <string>案件</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="LineEdit" name="caseTitleEdit" />
+         </item>
+         <item row="0" column="2">
+          <widget class="QLabel" name="caseStatusLabel">
+           <property name="text">
+            <string>狀態</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="3">
+          <widget class="ComboBox" name="caseStatusCombo">
+          </widget>
+         </item>
+         <item row="1" column="0">
+          <widget class="QLabel" name="caseAssigneeLabel">
+           <property name="text">
+            <string>負責人</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="1">
+          <widget class="LineEdit" name="caseAssigneeEdit" />
+         </item>
+         <item row="1" column="2">
+          <widget class="QLabel" name="caseDueLabel">
+           <property name="text">
+            <string>期限</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="3">
+          <widget class="QDateEdit" name="caseDueEdit" />
+         </item>
+         <item row="2" column="0">
+          <widget class="QLabel" name="casePriorityLabel">
+           <property name="text">
+            <string>優先</string>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="1">
+          <widget class="ComboBox" name="casePriorityCombo">
+          </widget>
+         </item>
+         <item row="2" column="2">
+          <widget class="QLabel" name="caseNextLabel">
+           <property name="text">
+            <string>下一步</string>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="3">
+          <widget class="LineEdit" name="caseNextEdit" />
+         </item>
+         <item row="3" column="0">
+          <widget class="QLabel" name="caseNoteLabel">
+           <property name="text">
+            <string>備註</string>
+           </property>
+          </widget>
+         </item>
+         <item row="3" column="1" colspan="3">
+          <widget class="PlainTextEdit" name="caseNoteEdit">
+           <property name="maximumSize">
+            <size>
+             <width>16777215</width>
+             <height>70</height>
+            </size>
+           </property>
+          </widget>
+         </item>
+         <item row="4" column="1">
+          <widget class="CheckBox" name="caseArchivedCheckBox">
+           <property name="text">
+            <string>封存</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="caseButtonRow" stretch="0,0,0,0,1">
+         <property name="spacing">
+          <number>6</number>
+         </property>
+         <property name="leftMargin">
+          <number>0</number>
+         </property>
+         <property name="topMargin">
+          <number>0</number>
+         </property>
+         <property name="rightMargin">
+          <number>0</number>
+         </property>
+         <property name="bottomMargin">
+          <number>0</number>
+         </property>
+         <item>
+          <widget class="PushButton" name="newCaseButton">
+           <property name="text">
+            <string>新增模式</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="PrimaryPushButton" name="saveCaseButton">
+           <property name="text">
+            <string>儲存案件</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="PushButton" name="archiveCaseButton">
+           <property name="text">
+            <string>封存/取消封存</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="PushButton" name="deleteCaseButton">
+           <property name="text">
+            <string>刪除案件</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="caseButtonSpacer">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>0</width>
+             <height>0</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="attachRow" stretch="0,0,0,1">
+         <property name="spacing">
+          <number>6</number>
+         </property>
+         <property name="leftMargin">
+          <number>0</number>
+         </property>
+         <property name="topMargin">
+          <number>0</number>
+         </property>
+         <property name="rightMargin">
+          <number>0</number>
+         </property>
+         <property name="bottomMargin">
+          <number>0</number>
+         </property>
+         <item>
+          <widget class="QLabel" name="attachStatusLabel">
+           <property name="text">
+            <string>（未從主畫面帶入勾選資料）</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="PushButton" name="attachButton">
+           <property name="text">
+            <string>加入這個案件</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="PushButton" name="filterButton">
+           <property name="text">
+            <string>篩選顯示此案件資料</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="attachRowSpacer">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>0</width>
+             <height>0</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+        </layout>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="taskPage">
+      <attribute name="title">
+       <string>任務</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="taskPageLayout">
+       <property name="spacing">
+        <number>6</number>
+       </property>
+       <property name="leftMargin">
+        <number>9</number>
+       </property>
+       <property name="topMargin">
+        <number>9</number>
+       </property>
+       <property name="rightMargin">
+        <number>9</number>
+       </property>
+       <property name="bottomMargin">
+        <number>9</number>
+       </property>
+       <item>
+        <widget class="TableWidget" name="taskTable">
+         <property name="selectionMode">
+          <enum>QAbstractItemView::SingleSelection</enum>
+         </property>
+         <property name="selectionBehavior">
+          <enum>QAbstractItemView::SelectRows</enum>
+         </property>
+         <column>
+          <property name="text">
+           <string>ID</string>
+          </property>
+         </column>
+         <column>
+          <property name="text">
+           <string>案件</string>
+          </property>
+         </column>
+         <column>
+          <property name="text">
+           <string>任務</string>
+          </property>
+         </column>
+         <column>
+          <property name="text">
+           <string>負責人</string>
+          </property>
+         </column>
+         <column>
+          <property name="text">
+           <string>期限</string>
+          </property>
+         </column>
+         <column>
+          <property name="text">
+           <string>狀態</string>
+          </property>
+         </column>
+         <column>
+          <property name="text">
+           <string>優先</string>
+          </property>
+         </column>
+         <column>
+          <property name="text">
+           <string>檢查清單</string>
+          </property>
+         </column>
+        </widget>
+       </item>
+       <item>
+        <layout class="QGridLayout" name="taskForm">
+         <property name="horizontalSpacing">
+          <number>6</number>
+         </property>
+         <property name="verticalSpacing">
+          <number>6</number>
+         </property>
+         <property name="leftMargin">
+          <number>0</number>
+         </property>
+         <property name="topMargin">
+          <number>0</number>
+         </property>
+         <property name="rightMargin">
+          <number>0</number>
+         </property>
+         <property name="bottomMargin">
+          <number>0</number>
+         </property>
+         <item row="0" column="0">
+          <widget class="QLabel" name="taskCaseLabel">
+           <property name="text">
+            <string>案件</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="ComboBox" name="taskCaseCombo" />
+         </item>
+         <item row="0" column="2">
+          <widget class="QLabel" name="taskTitleLabel">
+           <property name="text">
+            <string>任務</string>
+           </property>
+          </widget>
+         </item>
+         <item row="0" column="3">
+          <widget class="LineEdit" name="taskTitleEdit" />
+         </item>
+         <item row="1" column="0">
+          <widget class="QLabel" name="taskAssigneeLabel">
+           <property name="text">
+            <string>負責人</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="1">
+          <widget class="LineEdit" name="taskAssigneeEdit" />
+         </item>
+         <item row="1" column="2">
+          <widget class="QLabel" name="taskDueLabel">
+           <property name="text">
+            <string>期限</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="3">
+          <widget class="QDateEdit" name="taskDueEdit" />
+         </item>
+         <item row="2" column="0">
+          <widget class="QLabel" name="taskStatusLabel">
+           <property name="text">
+            <string>狀態</string>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="1">
+          <widget class="ComboBox" name="taskStatusCombo">
+          </widget>
+         </item>
+         <item row="2" column="2">
+          <widget class="QLabel" name="taskPriorityLabel">
+           <property name="text">
+            <string>優先</string>
+           </property>
+          </widget>
+         </item>
+         <item row="2" column="3">
+          <widget class="ComboBox" name="taskPriorityCombo">
+          </widget>
+         </item>
+         <item row="3" column="0">
+          <widget class="QLabel" name="taskChecklistLabel">
+           <property name="text">
+            <string>檢查清單</string>
+           </property>
+          </widget>
+         </item>
+         <item row="3" column="1" colspan="3">
+          <widget class="PlainTextEdit" name="taskChecklistEdit">
+           <property name="maximumSize">
+            <size>
+             <width>16777215</width>
+             <height>80</height>
+            </size>
+           </property>
+           <property name="placeholderText">
+            <string>每行一個檢查項目</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="taskButtonRow" stretch="0,0,0,1">
+         <property name="spacing">
+          <number>6</number>
+         </property>
+         <property name="leftMargin">
+          <number>0</number>
+         </property>
+         <property name="topMargin">
+          <number>0</number>
+         </property>
+         <property name="rightMargin">
+          <number>0</number>
+         </property>
+         <property name="bottomMargin">
+          <number>0</number>
+         </property>
+         <item>
+          <widget class="PushButton" name="newTaskButton">
+           <property name="text">
+            <string>新增模式</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="PrimaryPushButton" name="saveTaskButton">
+           <property name="text">
+            <string>儲存任務</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="PushButton" name="deleteTaskButton">
+           <property name="text">
+            <string>刪除任務</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="taskButtonSpacer">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>0</width>
+             <height>0</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+        </layout>
+       </item>
+      </layout>
+     </widget>
+    </widget>
+   </item>
+   <item>
+    <widget class="DialogButtonBox" name="buttonBox">
+     <property name="standardButtons">
+      <set>QDialogButtonBox::Close</set>
+     </property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+ <customwidget>
+  <class>CheckBox</class>
+  <extends>QCheckBox</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>ComboBox</class>
+  <extends>QPushButton</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>DialogButtonBox</class>
+  <extends>QDialogButtonBox</extends>
+  <header>customer_fluent</header>
+ </customwidget>
+ <customwidget>
+  <class>LineEdit</class>
+  <extends>QLineEdit</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>PlainTextEdit</class>
+  <extends>QPlainTextEdit</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>PrimaryPushButton</class>
+  <extends>QPushButton</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>PushButton</class>
+  <extends>QPushButton</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>TableWidget</class>
+  <extends>QTableWidget</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ </customwidgets>
+ <resources />
+ <connections />
+</ui>

@@ -1,0 +1,519 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>sharedLandBatchDialogContent</class>
+ <widget class="QWidget" name="sharedLandBatchDialogContent">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>760</width>
+    <height>560</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>同地號批量新增</string>
+  </property>
+  <property name="dialogSize" stdset="0">
+   <size>
+    <width>760</width>
+    <height>560</height>
+   </size>
+  </property>
+  <layout class="QVBoxLayout" name="sharedLandBatchLayout" stretch="0,0,0,1,0,0">
+   <property name="spacing">
+    <number>10</number>
+   </property>
+   <property name="leftMargin">
+    <number>18</number>
+   </property>
+   <property name="topMargin">
+    <number>18</number>
+   </property>
+   <property name="rightMargin">
+    <number>18</number>
+   </property>
+   <property name="bottomMargin">
+    <number>18</number>
+   </property>
+   <item>
+    <layout class="QGridLayout" name="sharedGrid">
+     <property name="horizontalSpacing">
+      <number>10</number>
+     </property>
+     <property name="verticalSpacing">
+      <number>10</number>
+     </property>
+     <property name="leftMargin">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <property name="rightMargin">
+      <number>0</number>
+     </property>
+     <property name="bottomMargin">
+      <number>0</number>
+     </property>
+     <item row="0" column="0">
+      <widget class="QLabel" name="sharedLabel_district">
+       <property name="text">
+        <string>地區 *</string>
+       </property>
+       <property name="styleSheet">
+        <string>color: var(--text-secondary);</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="0">
+      <widget class="LineEdit" name="sharedEdit_district" />
+     </item>
+     <item row="0" column="1">
+      <widget class="QLabel" name="sharedLabel_section">
+       <property name="text">
+        <string>地段 *</string>
+       </property>
+       <property name="styleSheet">
+        <string>color: var(--text-secondary);</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="1">
+      <widget class="LineEdit" name="sharedEdit_section" />
+     </item>
+     <item row="0" column="2">
+      <widget class="QLabel" name="sharedLabel_subsection">
+       <property name="text">
+        <string>小段</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="2">
+      <widget class="LineEdit" name="sharedEdit_subsection" />
+     </item>
+     <item row="2" column="0">
+      <widget class="QLabel" name="sharedLabel_land_number">
+       <property name="text">
+        <string>地號 *</string>
+       </property>
+       <property name="styleSheet">
+        <string>color: var(--text-secondary);</string>
+       </property>
+      </widget>
+     </item>
+     <item row="3" column="0">
+      <widget class="LineEdit" name="sharedEdit_land_number" />
+     </item>
+     <item row="2" column="1">
+      <widget class="QLabel" name="sharedLabel_area">
+       <property name="text">
+        <string>面積 (m²)</string>
+       </property>
+      </widget>
+     </item>
+     <item row="3" column="1">
+      <widget class="LineEdit" name="sharedEdit_area">
+       <property name="alignment">
+        <set>Qt::AlignRight|Qt::AlignVCenter</set>
+       </property>
+      </widget>
+     </item>
+     <item row="2" column="2">
+      <widget class="QLabel" name="sharedLabel_declared_value">
+       <property name="text">
+        <string>公告現值 (元)</string>
+       </property>
+      </widget>
+     </item>
+     <item row="3" column="2">
+      <widget class="LineEdit" name="sharedEdit_declared_value">
+       <property name="alignment">
+        <set>Qt::AlignRight|Qt::AlignVCenter</set>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QFrame" name="quickAddBox">
+     <property name="frameShape">
+      <enum>QFrame::StyledPanel</enum>
+     </property>
+     <layout class="QVBoxLayout" name="quickAddLayout">
+      <property name="spacing">
+       <number>6</number>
+      </property>
+      <property name="leftMargin">
+       <number>10</number>
+      </property>
+      <property name="topMargin">
+       <number>8</number>
+      </property>
+      <property name="rightMargin">
+       <number>10</number>
+      </property>
+      <property name="bottomMargin">
+       <number>10</number>
+      </property>
+      <item>
+       <widget class="QLabel" name="quickAddTitle">
+        <property name="text">
+         <string>快速新增一列（不需要 Excel，一次輸入一位所有權人）</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="quickFieldsRow" stretch="3,3,4,1,1,2,0">
+        <property name="spacing">
+         <number>8</number>
+        </property>
+        <property name="leftMargin">
+         <number>0</number>
+        </property>
+        <property name="topMargin">
+         <number>0</number>
+        </property>
+        <property name="rightMargin">
+         <number>0</number>
+        </property>
+        <property name="bottomMargin">
+         <number>0</number>
+        </property>
+        <item>
+         <layout class="QVBoxLayout" name="quickColumn_owner_name">
+          <property name="spacing">
+           <number>2</number>
+          </property>
+          <property name="leftMargin">
+           <number>0</number>
+          </property>
+          <property name="topMargin">
+           <number>0</number>
+          </property>
+          <property name="rightMargin">
+           <number>0</number>
+          </property>
+          <property name="bottomMargin">
+           <number>0</number>
+          </property>
+          <item>
+           <widget class="QLabel" name="quickLabel_owner_name">
+            <property name="text">
+             <string>姓名</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="LineEdit" name="quickEdit_owner_name">
+            <property name="placeholderText">
+             <string>王小明</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <layout class="QVBoxLayout" name="quickColumn_external_id">
+          <property name="spacing">
+           <number>2</number>
+          </property>
+          <property name="leftMargin">
+           <number>0</number>
+          </property>
+          <property name="topMargin">
+           <number>0</number>
+          </property>
+          <property name="rightMargin">
+           <number>0</number>
+          </property>
+          <property name="bottomMargin">
+           <number>0</number>
+          </property>
+          <item>
+           <widget class="QLabel" name="quickLabel_external_id">
+            <property name="text">
+             <string>身分證</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="LineEdit" name="quickEdit_external_id">
+            <property name="placeholderText">
+             <string>A123456789</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <layout class="QVBoxLayout" name="quickColumn_address">
+          <property name="spacing">
+           <number>2</number>
+          </property>
+          <property name="leftMargin">
+           <number>0</number>
+          </property>
+          <property name="topMargin">
+           <number>0</number>
+          </property>
+          <property name="rightMargin">
+           <number>0</number>
+          </property>
+          <property name="bottomMargin">
+           <number>0</number>
+          </property>
+          <item>
+           <widget class="QLabel" name="quickLabel_address">
+            <property name="text">
+             <string>地址</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="LineEdit" name="quickEdit_address">
+            <property name="placeholderText">
+             <string>台北市中正區</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <layout class="QVBoxLayout" name="quickColumn_numerator">
+          <property name="spacing">
+           <number>2</number>
+          </property>
+          <property name="leftMargin">
+           <number>0</number>
+          </property>
+          <property name="topMargin">
+           <number>0</number>
+          </property>
+          <property name="rightMargin">
+           <number>0</number>
+          </property>
+          <property name="bottomMargin">
+           <number>0</number>
+          </property>
+          <item>
+           <widget class="QLabel" name="quickLabel_numerator">
+            <property name="text">
+             <string>分子</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="LineEdit" name="quickEdit_numerator">
+            <property name="placeholderText">
+             <string>1</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <layout class="QVBoxLayout" name="quickColumn_denominator">
+          <property name="spacing">
+           <number>2</number>
+          </property>
+          <property name="leftMargin">
+           <number>0</number>
+          </property>
+          <property name="topMargin">
+           <number>0</number>
+          </property>
+          <property name="rightMargin">
+           <number>0</number>
+          </property>
+          <property name="bottomMargin">
+           <number>0</number>
+          </property>
+          <item>
+           <widget class="QLabel" name="quickLabel_denominator">
+            <property name="text">
+             <string>分母</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="LineEdit" name="quickEdit_denominator">
+            <property name="placeholderText">
+             <string>2</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <layout class="QVBoxLayout" name="quickColumn_registration_reason">
+          <property name="spacing">
+           <number>2</number>
+          </property>
+          <property name="leftMargin">
+           <number>0</number>
+          </property>
+          <property name="topMargin">
+           <number>0</number>
+          </property>
+          <property name="rightMargin">
+           <number>0</number>
+          </property>
+          <property name="bottomMargin">
+           <number>0</number>
+          </property>
+          <item>
+           <widget class="QLabel" name="quickLabel_registration_reason">
+            <property name="text">
+             <string>原因</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="LineEdit" name="quickEdit_registration_reason">
+            <property name="placeholderText">
+             <string>買賣</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item alignment="Qt::AlignBottom">
+         <widget class="PushButton" name="quickAddButton">
+          <property name="text">
+           <string>加入清單</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="hintRow" stretch="1,0">
+     <property name="spacing">
+      <number>10</number>
+     </property>
+     <property name="leftMargin">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <property name="rightMargin">
+      <number>0</number>
+     </property>
+     <property name="bottomMargin">
+      <number>0</number>
+     </property>
+     <item>
+      <widget class="QLabel" name="formatHintLabel">
+       <property name="text">
+        <string>每行一筆，欄位順序：登記次序、姓名、身分證、地址、分子、分母、原因、備註、出訪記錄。
+可直接從 Excel 複製貼上（Tab 分隔），也接受逗號分隔；姓名為必填。</string>
+       </property>
+      </widget>
+     </item>
+     <item alignment="Qt::AlignTop">
+      <widget class="PushButton" name="pasteButton">
+       <property name="text">
+        <string>貼上剪貼簿</string>
+       </property>
+       <property name="toolTip">
+        <string>直接以剪貼簿目前內容取代下方文字</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="PlainTextEdit" name="rowsEdit">
+     <property name="placeholderText">
+      <string>1	王小明	A123456789	台北市中正區	1	2	買賣	備註	首次拜訪
+2	陳小華	B123456789	新北市板橋區	1	2</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="rowStatusLabel">
+     <property name="text">
+      <string>尚未輸入任何資料。</string>
+     </property>
+     <property name="wordWrap">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="buttonRow" stretch="1,0,0">
+     <property name="spacing">
+      <number>10</number>
+     </property>
+     <property name="leftMargin">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <property name="rightMargin">
+      <number>0</number>
+     </property>
+     <property name="bottomMargin">
+      <number>0</number>
+     </property>
+     <item>
+      <spacer name="buttonRowSpacer">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>0</width>
+         <height>0</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="PushButton" name="cancelButton">
+       <property name="text">
+        <string>取消</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PrimaryPushButton" name="previewButton">
+       <property name="text">
+        <string>預覽</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+ <customwidget>
+  <class>LineEdit</class>
+  <extends>QLineEdit</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>PlainTextEdit</class>
+  <extends>QPlainTextEdit</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>PrimaryPushButton</class>
+  <extends>QPushButton</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>PushButton</class>
+  <extends>QPushButton</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ </customwidgets>
+ <resources />
+ <connections />
+</ui>

@@ -79,7 +79,11 @@ def aggregate_lands(records):
     for record in records:
         district = str(record.get("district") or "")
         section = str(record.get("section") or "")
+        subsection = str(record.get("subsection") or "")
         land_number = str(record.get("land_number") or "")
+        # subsection is deliberately left out of the land_key -- see the
+        # PostgreSQL migration comment in postgres/schema.sql (version 13):
+        # it is a plain descriptive field here, not part of land identity.
         land_key = _stable_key("land", district, section, land_number)
         land = lands.setdefault(
             land_key,
@@ -87,6 +91,7 @@ def aggregate_lands(records):
                 "land_key": land_key,
                 "district": district,
                 "section": section,
+                "subsection": subsection,
                 "land_number": land_number,
                 "area": record.get("area") or "",
                 "declared_value": record.get("declared_value") or "",
@@ -106,5 +111,10 @@ def aggregate_lands(records):
         )
     return sorted(
         lands.values(),
-        key=lambda item: (item["district"], item["section"], item["land_number"]),
+        key=lambda item: (
+            item["district"],
+            item["section"],
+            item["subsection"],
+            item["land_number"],
+        ),
     )

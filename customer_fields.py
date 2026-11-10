@@ -4,6 +4,7 @@
 LAND_FIELDS = (
     ("district", "地區"),
     ("section", "地段"),
+    ("subsection", "小段"),
     ("registration_order", "序號"),
     ("land_number", "地號"),
     ("area", "面積/m2"),

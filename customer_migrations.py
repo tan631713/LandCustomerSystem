@@ -1,7 +1,7 @@
 """Versioned, idempotent SQLite schema migrations."""
 
 
-LATEST_SCHEMA_VERSION = 9
+LATEST_SCHEMA_VERSION = 11
 
 
 def get_columns(conn, table_name):
@@ -21,6 +21,8 @@ class MigrationRunner:
             (7, "normalize legacy contact logs", self._migration_007_normalize_contact_logs),
             (8, "mobile attachment categories", self._migration_008_attachment_categories),
             (9, "attachment uploader ownership", self._migration_009_attachment_uploader),
+            (10, "customer birth year", self._migration_010_customer_birth_year),
+            (11, "customer subsection", self._migration_011_customer_subsection),
         )
 
     @staticmethod
@@ -497,6 +499,27 @@ class MigrationRunner:
     def _migration_009_attachment_uploader(conn):
         if "created_by" not in get_columns(conn, "customer_attachments"):
             conn.execute("ALTER TABLE customer_attachments ADD COLUMN created_by INTEGER")
+
+    @staticmethod
+    def _migration_010_customer_birth_year(conn):
+        """Store the owner's Gregorian birth year so the desktop form can
+
+        auto-calculate age.  Encrypted at rest like owner_name/external_id,
+        so the column stays TEXT even though it only ever holds 4 digits.
+        """
+        if "birth_year" not in get_columns(conn, "customers"):
+            conn.execute("ALTER TABLE customers ADD COLUMN birth_year TEXT")
+
+    @staticmethod
+    def _migration_011_customer_subsection(conn):
+        """Add 小段 (cadastral sub-section), stored right alongside 地段.
+
+        Plain TEXT and never encrypted, exactly like district/section/
+        land_number -- it is not one of ENCRYPTED_FIELDS in
+        customer_security.py.
+        """
+        if "subsection" not in get_columns(conn, "customers"):
+            conn.execute("ALTER TABLE customers ADD COLUMN subsection TEXT")
 
     @staticmethod
     def _migration_006_productivity_tables(conn):

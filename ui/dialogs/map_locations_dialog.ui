@@ -1,0 +1,290 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>mapLocationsDialogContent</class>
+ <widget class="QWidget" name="mapLocationsDialogContent">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1360</width>
+    <height>680</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>地圖與地號視覺化</string>
+  </property>
+  <property name="dialogSize" stdset="0">
+   <size>
+    <width>1360</width>
+    <height>680</height>
+   </size>
+  </property>
+  <layout class="QVBoxLayout" name="mapControlsLayout">
+   <property name="spacing">
+    <number>6</number>
+   </property>
+   <property name="leftMargin">
+    <number>9</number>
+   </property>
+   <property name="topMargin">
+    <number>9</number>
+   </property>
+   <property name="rightMargin">
+    <number>9</number>
+   </property>
+   <property name="bottomMargin">
+    <number>9</number>
+   </property>
+   <item>
+    <widget class="QLabel" name="introLabel">
+     <property name="text">
+      <string>下方已列出系統內所有地主；輸入地址後按「查座標」單筆定位，或用「全部自動查座標」一次處理所有還沒有座標的地主。</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="providerHintLabel">
+     <property name="text">
+      <string />
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="TableWidget" name="locationsTable">
+     <property name="selectionMode">
+      <enum>QAbstractItemView::SingleSelection</enum>
+     </property>
+     <property name="selectionBehavior">
+      <enum>QAbstractItemView::SelectRows</enum>
+     </property>
+     <column>
+      <property name="text">
+       <string>資料ID</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>地區</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>地段</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>小段</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>地號</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>姓名</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>緯度</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>經度</string>
+      </property>
+     </column>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="addressRow" stretch="0,1,0,0,0">
+     <property name="spacing">
+      <number>6</number>
+     </property>
+     <property name="leftMargin">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <property name="rightMargin">
+      <number>0</number>
+     </property>
+     <property name="bottomMargin">
+      <number>0</number>
+     </property>
+     <item>
+      <widget class="QLabel" name="addressLabel">
+       <property name="text">
+        <string>地址定位</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="LineEdit" name="addressInput">
+       <property name="placeholderText">
+        <string>例：桃園市桃園區泰成路75號</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PushButton" name="geocodeButton">
+       <property name="text">
+        <string>查座標</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PushButton" name="batchGeocodeButton">
+       <property name="text">
+        <string>全部自動查座標</string>
+       </property>
+       <property name="toolTip">
+        <string>依序查詢所有「有地址」但還沒有座標、以及先前自動查過（非手動輸入）的地主（沒有地址、只有地區/地段/地號的地主無法自動查詢，請補地址或手動輸入座標），外部服務有速率限制，資料多時會需要一段時間。</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PushButton" name="googleKeyButton">
+       <property name="text">
+        <string>設定 Google API 金鑰</string>
+       </property>
+       <property name="toolTip">
+        <string>設定 Google Maps Geocoding API 金鑰後，查座標會優先改用 Google（涵蓋較完整），留空可清除設定、改回使用免費的 Nominatim。</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="coordinateRow">
+     <property name="spacing">
+      <number>6</number>
+     </property>
+     <property name="leftMargin">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <property name="rightMargin">
+      <number>0</number>
+     </property>
+     <property name="bottomMargin">
+      <number>0</number>
+     </property>
+     <item>
+      <widget class="QLabel" name="customerIdLabel">
+       <property name="text">
+        <string>資料ID</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="LineEdit" name="customerIdEdit" />
+     </item>
+     <item>
+      <widget class="QLabel" name="latitudeLabel">
+       <property name="text">
+        <string>緯度</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="LineEdit" name="latitudeEdit" />
+     </item>
+     <item>
+      <widget class="QLabel" name="longitudeLabel">
+       <property name="text">
+        <string>經度</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="LineEdit" name="longitudeEdit" />
+     </item>
+    </layout>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="buttonRow" stretch="0,1,0,0">
+     <property name="spacing">
+      <number>6</number>
+     </property>
+     <property name="leftMargin">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <property name="rightMargin">
+      <number>0</number>
+     </property>
+     <property name="bottomMargin">
+      <number>0</number>
+     </property>
+     <item>
+      <widget class="PrimaryPushButton" name="saveButton">
+       <property name="text">
+        <string>儲存座標</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="buttonRowSpacer">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>0</width>
+         <height>0</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="PushButton" name="exportButton">
+       <property name="text">
+        <string>產生視覺化 HTML</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PushButton" name="closeButton">
+       <property name="text">
+        <string>關閉</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+ <customwidget>
+  <class>LineEdit</class>
+  <extends>QLineEdit</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>PrimaryPushButton</class>
+  <extends>QPushButton</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>PushButton</class>
+  <extends>QPushButton</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>TableWidget</class>
+  <extends>QTableWidget</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ </customwidgets>
+ <resources />
+ <connections />
+</ui>

@@ -3,7 +3,6 @@
 import json
 
 from customer_dialogs import ColumnVisibilityDialog
-from PySide6.QtWidgets import QDialog
 
 TABLE_COLUMNS = ()
 TABLE_WIDTHS = {}
@@ -168,14 +167,16 @@ class UiStateMixin:
             if self.table_view.isColumnHidden(index)
         }
         dialog = ColumnVisibilityDialog(TABLE_COLUMNS[1:], hidden_keys, self)
-        if dialog.exec() != QDialog.Accepted:
-            return
-        new_hidden = set(dialog.hidden_keys())
-        self.saving_table_preferences = True
-        try:
-            self.table_view.setColumnHidden(0, False)
-            for index, (key, _label) in enumerate(TABLE_COLUMNS[1:], start=1):
-                self.table_view.setColumnHidden(index, key in new_hidden)
-        finally:
-            self.saving_table_preferences = False
-        self.save_table_preferences()
+
+        def on_accepted():
+            new_hidden = set(dialog.hidden_keys())
+            self.saving_table_preferences = True
+            try:
+                self.table_view.setColumnHidden(0, False)
+                for index, (key, _label) in enumerate(TABLE_COLUMNS[1:], start=1):
+                    self.table_view.setColumnHidden(index, key in new_hidden)
+            finally:
+                self.saving_table_preferences = False
+            self.save_table_preferences()
+
+        self._show_non_modal_dialog(dialog, on_accepted=on_accepted)

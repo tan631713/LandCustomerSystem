@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import customer_theme
 import customer_ui_qt as app  # noqa: F401 - configures model dependencies
 from cryptography.fernet import Fernet
 from customer_land_tree import (
@@ -13,6 +14,7 @@ from customer_land_tree import (
 )
 from customer_models import CHECK_COLUMN, LandTreeProxyModel, RecordTableModel
 from customer_api.postgres_source import PostgreSQLCustomerDataSource
+from customer_desktop_support import DesktopSupportMixin
 from customer_record_workflows import RecordWorkflowMixin
 from customer_search_controller import SearchControllerMixin
 from customer_selection_workflows import SelectionWorkflowMixin
@@ -41,6 +43,7 @@ def record(
     owner_id,
     district="彰化縣員林市",
     section="中路段",
+    subsection="",
     land_number="1-3",
     area="100",
     owner_name="王大明",
@@ -58,6 +61,7 @@ def record(
         "ownership_id": record_id,
         "district": district,
         "section": section,
+        "subsection": subsection,
         "land_number": land_number,
         "area": area,
         "declared_value": "1000",
@@ -108,6 +112,7 @@ def database_row(
     owner_id,
     owner_name,
     section="中路段",
+    subsection="",
     land_number="1-3",
 ):
     return {
@@ -117,6 +122,7 @@ def database_row(
         "owner_id": owner_id,
         "district": "桃園市桃園區",
         "section": section,
+        "subsection": subsection,
         "registration_order": str(record_id),
         "land_number": land_number,
         "area": "100",
@@ -147,6 +153,7 @@ class _WorkflowHarness(
     RecordWorkflowMixin,
     SelectionWorkflowMixin,
     SearchControllerMixin,
+    DesktopSupportMixin,
 ):
     def __init__(self, rows):
         self.table_model = RecordTableModel(lambda *_args: None)
@@ -637,7 +644,9 @@ class LandTreeGroupingTests(unittest.TestCase):
         apply_land_tree_visual_style(tree, 30)
         self.assertFalse(tree.alternatingRowColors())
         stylesheet = tree.styleSheet()
-        self.assertIn("alternate-background-color: #2d2d2d", stylesheet)
+        base = customer_theme.token("paper")
+        self.assertIn(f"background-color: {base}", stylesheet)
+        self.assertIn(f"alternate-background-color: {base}", stylesheet)
         self.assertIn("QTreeView::item:selected", stylesheet)
         self.assertIn("min-height: 30px", stylesheet)
 
@@ -1251,6 +1260,34 @@ class LandTreeGroupingTests(unittest.TestCase):
 
         self.assertNotIn(1701, harness.user_expanded_land_ids)
         self.assertNotIn(1701, harness.search_expanded_land_ids)
+
+    def test_land_closed_during_search_stays_closed_after_save(self):
+        harness = _WorkflowHarness(
+            [
+                record(221, land_id=1801, owner_id=181, owner_name="王甲"),
+                record(222, land_id=1802, owner_id=182, owner_name="王乙"),
+            ]
+        )
+        harness.search_input.setText("王")
+        harness.restore_land_tree_view_state({}, search_auto_expand=True)
+        second = harness.table_model.index_for_group_state_id(1802)
+        harness.table_view.setExpanded(harness.proxy_table_index(second), False)
+        state = harness.capture_land_tree_view_state()
+
+        changed = [
+            record(221, land_id=1801, owner_id=181, owner_name="王甲已修改"),
+            record(222, land_id=1802, owner_id=182, owner_name="王乙"),
+        ]
+        harness.apply_record_rows(changed, 221, state)
+
+        first = harness.table_model.index_for_group_state_id(1801)
+        second = harness.table_model.index_for_group_state_id(1802)
+        self.assertTrue(
+            harness.table_view.isExpanded(harness.proxy_table_index(first))
+        )
+        self.assertFalse(
+            harness.table_view.isExpanded(harness.proxy_table_index(second))
+        )
 
 
 if __name__ == "__main__":

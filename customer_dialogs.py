@@ -3,17 +3,31 @@
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from PySide6.QtCore import Qt, QDate
+from PySide6.QtGui import QColor, QTextCursor
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QComboBox, QFileDialog, QFrame,
-    QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
+    QApplication, QCheckBox, QComboBox, QCompleter,
+    QFileDialog, QFrame,
+    QGridLayout, QHeaderView, QLabel, QLineEdit,
     QMessageBox, QPlainTextEdit, QPushButton, QScrollArea, QTableWidget,
     QTableWidgetItem, QTabWidget, QTextBrowser, QVBoxLayout, QWidget,
 )
 
+from qfluentwidgets import CheckBox as FluentCheckBox
+from qfluentwidgets import ComboBox as FluentComboBox
+from qfluentwidgets import LineEdit as FluentLineEdit
 from customer_responsive_dialog import ResponsiveDialog as QDialog
+from customer_ui_loader import (
+    chain_tab_order,
+    find_child,
+    install_ui,
+    put_in_slot,
+    size_like_unparented,
+)
 
+from customer_domain import parse_shared_land_rows
+from customer_theme import qcolor, token
+from customer_urban_plan_dialogs import ImportPlanChoice, ImportPlanResultSection
 from customer_quality import (
     QUALITY_RULE_OPTIONS,
     QUALITY_RULE_PRESETS,
@@ -27,7 +41,7 @@ FONT_SIZE_OPTIONS = ()
 DEFAULT_FONT_SIZE_KEY = "medium"
 ADVANCED_SEARCH_FIELDS = ()
 BATCH_EDITABLE_FIELDS = ()
-ROW_TEXT_COLOR = QColor("#f8fafc")
+ROW_TEXT_COLOR = qcolor("ink")
 get_operation_logs = lambda: []
 get_watchlist_entries = lambda: []
 replace_watchlist_entries = lambda entries: None
@@ -56,20 +70,20 @@ HELP_SECTIONS = [
         "批量新增",
         """
         <h2>同地號批量新增</h2>
-        <p>適合一次新增同地區、同地段、同地號的多位所有權人。</p>
+        <p>適合一次新增同地區、同地段（可再加小段）、同地號的多位所有權人。</p>
         <h3>上方共同欄位</h3>
         <ul>
-          <li>地區、地段、地號、面積、公告現值可一起填入。</li>
+          <li>地區、地段、小段、地號、面積、公告現值可一起填入；小段沒有的話可以留空。</li>
           <li>序號/登記次序可以手動輸入在每一列。</li>
         </ul>
         <h3>每列資料順序</h3>
-        <p><code>登記次序、姓名、身分證、地址、分子、分母、備註、出訪記錄</code></p>
+        <p><code>登記次序、姓名、身分證、地址、分子、分母、原因、備註、出訪記錄</code></p>
         <p>可用頓號 <code>、</code> 或逗號 <code>，</code> 分隔，也可從 Excel 複製貼上。</p>
         <h3>範例</h3>
         <p><code>15、王弘益、H100059743、桃園市桃園區大華九街34號、108、3360</code></p>
         <p><b>身分證可以空白：</b></p>
         <p><code>16、王小明、、桃園市桃園區中正路1號、1、2</code></p>
-        <p>如果只有前 6 欄，備註與出訪記錄會自動留空。</p>
+        <p>如果只有前 6 欄，原因、備註與出訪記錄會自動留空。</p>
         """,
     ),
     (
@@ -79,8 +93,7 @@ HELP_SECTIONS = [
         <ul>
           <li>可從「資料 → 匯入 .xlsx」匯入土地資料。</li>
           <li>匯入前會先預覽資料，並標示可能重複或格式異常的列。</li>
-          <li>可從「資料 → 匯出 Excel」匯出目前資料。</li>
-          <li>可從「資料 → 匯出勾選資料」只匯出勾選或目前選取的資料。</li>
+          <li>可從「資料 → 匯出選取資料」匯出勾選或目前選取的資料（一定要先勾選或選取，不能匯出全部）。</li>
         </ul>
         <p><b>提示：</b>匯出會尊重目前表格欄位順序與隱藏欄位設定。</p>
         """,
@@ -140,7 +153,7 @@ HELP_SECTIONS = [
           <li><b>通知中心：</b>集中查看今日到期及逾期的追蹤、案件和任務。</li>
           <li><b>匯入設定與報表：</b>保存 Excel 表頭對應及 Word 報表版面。</li>
           <li><b>智慧重複：</b>以身分證、地號、姓名、地址和序號計算相似度。</li>
-          <li><b>地圖：</b>保存座標、搜尋 OpenStreetMap，並產生離線土地分布網頁。</li>
+          <li><b>地圖：</b>保存座標、查詢地理位置，直接在視窗內顯示地圖（桃園市範圍內可離線顯示，執行 download_offline_map_tiles.bat 下載離線圖磚），也可產生土地分布網頁匯出。</li>
         </ul>
         """,
     ),
@@ -162,42 +175,46 @@ HELP_SECTIONS = [
 
 
 class HelpDialog(QDialog):
+    # Layout: ui/dialogs/help_dialog.ui; one tab per HELP_SECTIONS entry is added here.
+    ui_file = "dialogs/help_dialog.ui"
+    ui_object_names = ("helpTabs", "closeButton")
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("使用說明")
-        self.setModal(True)
-        self.resize(760, 560)
+        # Deliberately non-modal -- see show_help() in customer_window_ui.py.
+        content = install_ui(self, self.ui_file, self.ui_object_names)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 14, 14, 14)
-        layout.setSpacing(10)
-
-        intro = QLabel("土地資料系統快速上手")
-        intro.setStyleSheet("font-size: 16px; font-weight: 600;")
-        layout.addWidget(intro)
-
-        self.tabs = QTabWidget()
+        self.tabs = find_child(content, "helpTabs", QTabWidget)
         for title, html in HELP_SECTIONS:
             browser = QTextBrowser()
             browser.setOpenExternalLinks(False)
             browser.setHtml(html)
             self.tabs.addTab(browser, title)
-        layout.addWidget(self.tabs, 1)
 
-        close_button = QPushButton("關閉")
+        close_button = find_child(content, "closeButton", QPushButton)
         close_button.clicked.connect(self.accept)
-        button_row = QHBoxLayout()
-        button_row.addStretch(1)
-        button_row.addWidget(close_button)
-        layout.addLayout(button_row)
+        # The pages joined the Tab order after 關閉; move 關閉 back behind them.
+        if self.tabs.count():
+            QWidget.setTabOrder(self.tabs.widget(self.tabs.count() - 1), close_button)
 
 
 class DataQualityRulesDialog(QDialog):
+    # Layout: ui/dialogs/data_quality_rules_dialog.ui; one check box per
+    # QUALITY_RULE_OPTIONS entry is added to ruleCheckBoxesContainer here.
+    ui_file = "dialogs/data_quality_rules_dialog.ui"
+    ui_object_names = (
+        "presetCombo",
+        "presetHintLabel",
+        "ruleCheckBoxesContainer",
+        "selectAllButton",
+        "clearAllButton",
+        "cancelButton",
+        "startButton",
+    )
+
     def __init__(self, selected_rules=None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("選擇資料品質檢查項目")
         self.setModal(True)
-        self.setFixedSize(500, 430)
         selected = set(selected_rules or [key for key, _label in QUALITY_RULE_OPTIONS])
         self.rule_checkboxes = {}
         self.preset_rules = {
@@ -209,61 +226,40 @@ class DataQualityRulesDialog(QDialog):
             for preset_key, _label, _rule_keys, description in QUALITY_RULE_PRESETS
         }
         self._updating_preset = False
+        content = install_ui(self, self.ui_file, self.ui_object_names)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(10)
-
-        title = QLabel("請勾選這次要檢查的資料品質規則：")
-        title.setWordWrap(True)
-        title.setStyleSheet("font-size: 15px; font-weight: 600;")
-        layout.addWidget(title)
-
-        preset_row = QGridLayout()
-        preset_row.setHorizontalSpacing(8)
-        preset_row.addWidget(QLabel("快速模式"), 0, 0)
-        self.preset_combo = QComboBox()
+        self.preset_combo = find_child(content, "presetCombo", FluentComboBox)
         for preset_key, label, _rule_keys, _description in QUALITY_RULE_PRESETS:
-            self.preset_combo.addItem(label, preset_key)
-        self.preset_combo.addItem("自訂", "custom")
+            self.preset_combo.addItem(label, userData=preset_key)
+        self.preset_combo.addItem("自訂", userData="custom")
         self.preset_combo.currentIndexChanged.connect(self.apply_selected_preset)
-        preset_row.addWidget(self.preset_combo, 0, 1)
-        layout.addLayout(preset_row)
 
-        self.preset_hint_label = QLabel("")
-        self.preset_hint_label.setWordWrap(True)
-        layout.addWidget(self.preset_hint_label)
+        self.preset_hint_label = find_child(content, "presetHintLabel", QLabel)
 
+        rules_layout = find_child(content, "ruleCheckBoxesContainer", QWidget).layout()
         for rule_key, label in QUALITY_RULE_OPTIONS:
-            checkbox = QCheckBox(label)
+            checkbox = FluentCheckBox(label)
             checkbox.setChecked(rule_key in selected)
             checkbox.stateChanged.connect(self.update_preset_selection)
             self.rule_checkboxes[rule_key] = checkbox
-            layout.addWidget(checkbox)
+            rules_layout.addWidget(checkbox)
 
-        quick_row = QHBoxLayout()
-        select_all_button = QPushButton("全選")
+        select_all_button = find_child(content, "selectAllButton", QPushButton)
         select_all_button.clicked.connect(self.select_all)
-        clear_button = QPushButton("全不選")
+        clear_button = find_child(content, "clearAllButton", QPushButton)
         clear_button.clicked.connect(self.clear_all)
-        quick_row.addWidget(select_all_button)
-        quick_row.addWidget(clear_button)
-        quick_row.addStretch(1)
-        layout.addLayout(quick_row)
-
-        hint = QLabel("選擇會保存；下次執行資料品質檢查時會沿用。")
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
-
-        button_row = QHBoxLayout()
-        button_row.addStretch(1)
-        cancel_button = QPushButton("取消")
+        cancel_button = find_child(content, "cancelButton", QPushButton)
         cancel_button.clicked.connect(self.reject)
-        start_button = QPushButton("開始檢查")
+        start_button = find_child(content, "startButton", QPushButton)
         start_button.clicked.connect(self.accept)
-        button_row.addWidget(cancel_button)
-        button_row.addWidget(start_button)
-        layout.addLayout(button_row)
+        chain_tab_order([
+            self.preset_combo,
+            *self.rule_checkboxes.values(),
+            select_all_button,
+            clear_button,
+            cancel_button,
+            start_button,
+        ])
         self.update_preset_selection()
 
     def selected_rules(self):
@@ -335,6 +331,25 @@ class DataQualityRulesDialog(QDialog):
 
 
 class DataQualityDialog(QDialog):
+    # Layout: ui/dialogs/data_quality_dialog.ui.
+    ui_file = "dialogs/data_quality_dialog.ui"
+    ui_object_names = (
+        "summaryLabel",
+        "filterCombo",
+        "categorySummaryTable",
+        "issuesTable",
+        "copySummaryButton",
+        "exportSummaryButton",
+        "copyIssuesButton",
+        "exportIssuesButton",
+        "clearIgnoredButton",
+        "ignoreFilteredButton",
+        "ignoreSameCategoryButton",
+        "ignoreIssueButton",
+        "gotoIssueButton",
+        "closeButton",
+    )
+
     def __init__(
         self,
         issues,
@@ -353,13 +368,8 @@ class DataQualityDialog(QDialog):
         self.on_issue_ignored = on_issue_ignored
         self.ignored_count = int(ignored_count or 0)
         self.on_clear_ignored = on_clear_ignored
-        self.setWindowTitle("資料品質檢查")
         self.setModal(True)
-        self.resize(900, 520)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 14, 14, 14)
-        layout.setSpacing(10)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
 
         important_count = sum(1 for issue in self.issues if issue.severity == "重要")
         reminder_count = len(self.issues) - important_count
@@ -378,102 +388,59 @@ class DataQualityDialog(QDialog):
             )
         else:
             title_text = f"已檢查 {self.total_records} 筆資料，目前沒有發現明顯品質問題。"
-        self.summary_label = QLabel(title_text)
-        self.summary_label.setWordWrap(True)
-        self.summary_label.setStyleSheet("font-size: 15px; font-weight: 600;")
-        layout.addWidget(self.summary_label)
+        self.summary_label = find_child(content, "summaryLabel", QLabel)
+        self.summary_label.setText(title_text)
 
-        filter_row = QHBoxLayout()
-        filter_row.addWidget(QLabel("顯示"))
-        self.filter_combo = QComboBox()
-        self.filter_combo.addItem("全部問題", "all")
-        self.filter_combo.addItem("重要", "severity:重要")
-        self.filter_combo.addItem("提醒", "severity:提醒")
-        self.filter_combo.addItem("疑似重複", "category:疑似重複")
-        self.filter_combo.addItem("格式異常", "format")
-        self.filter_combo.addItem("姓名空白", "category:姓名空白")
-        self.filter_combo.addItem("地號缺漏", "category:地號缺漏")
-        self.filter_combo.addItem("分母為 0", "category:分母為 0")
+        self.filter_combo = find_child(content, "filterCombo", FluentComboBox)
+        self.filter_combo.addItem("全部問題", userData="all")
+        self.filter_combo.addItem("重要", userData="severity:重要")
+        self.filter_combo.addItem("提醒", userData="severity:提醒")
+        self.filter_combo.addItem("疑似重複", userData="category:疑似重複")
+        self.filter_combo.addItem("格式異常", userData="format")
+        self.filter_combo.addItem("姓名空白", userData="category:姓名空白")
+        self.filter_combo.addItem("地號缺漏", userData="category:地號缺漏")
+        self.filter_combo.addItem("分母為 0", userData="category:分母為 0")
         self.filter_combo.currentIndexChanged.connect(self.apply_filter)
         self.filter_combo.setEnabled(bool(self.issues))
-        filter_row.addWidget(self.filter_combo)
-        filter_row.addStretch(1)
-        layout.addLayout(filter_row)
 
-        self.category_summary_table = QTableWidget(0, 4)
-        self.category_summary_table.setHorizontalHeaderLabels(["類型", "重要", "提醒", "合計"])
-        self.category_summary_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.category_summary_table.setSelectionMode(QTableWidget.SingleSelection)
+        self.category_summary_table = find_child(content, "categorySummaryTable", QTableWidget)
         self.category_summary_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.category_summary_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.category_summary_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.category_summary_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        self.category_summary_table.verticalHeader().setVisible(False)
-        self.category_summary_table.setMaximumHeight(140)
         self.category_summary_table.itemClicked.connect(self.filter_by_summary_item)
+        size_like_unparented(self.category_summary_table)
         self.load_category_summary()
-        layout.addWidget(self.category_summary_table)
 
-        self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["資料ID", "程度", "類型", "問題", "建議處理"])
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SingleSelection)
+        self.table = find_child(content, "issuesTable", QTableWidget)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
-        self.table.setWordWrap(True)
         self.table.itemDoubleClicked.connect(self.activate_current_issue)
+        size_like_unparented(self.table)
         self.load_issues()
-        layout.addWidget(self.table, 1)
 
-        hint = QLabel("提示：雙擊問題列，或選取後按「前往選取資料」，可直接載入該筆資料進行修正。")
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
-
-        self.goto_button = QPushButton("前往選取資料")
+        self.goto_button = find_child(content, "gotoIssueButton", QPushButton)
         self.goto_button.clicked.connect(self.activate_current_issue)
-        self.goto_button.setEnabled(bool(self.filtered_issues))
-        self.ignore_button = QPushButton("確認忽略此問題")
+        self.ignore_button = find_child(content, "ignoreIssueButton", QPushButton)
         self.ignore_button.clicked.connect(self.ignore_current_issue)
-        self.ignore_button.setEnabled(bool(self.filtered_issues))
-        self.ignore_filtered_button = QPushButton("確認目前篩選")
+        self.ignore_filtered_button = find_child(content, "ignoreFilteredButton", QPushButton)
         self.ignore_filtered_button.clicked.connect(self.ignore_filtered_issues)
-        self.ignore_filtered_button.setEnabled(bool(self.filtered_issues))
-        self.ignore_same_category_button = QPushButton("確認同類型")
+        self.ignore_same_category_button = find_child(content, "ignoreSameCategoryButton", QPushButton)
         self.ignore_same_category_button.clicked.connect(self.ignore_same_category_issues)
-        self.ignore_same_category_button.setEnabled(bool(self.filtered_issues))
-        self.clear_ignored_button = QPushButton("清除已忽略")
+        self.clear_ignored_button = find_child(content, "clearIgnoredButton", QPushButton)
         self.clear_ignored_button.clicked.connect(self.clear_ignored_issues)
-        self.clear_ignored_button.setEnabled(self.ignored_count > 0)
-        self.copy_summary_button = QPushButton("複製摘要")
+        self.copy_summary_button = find_child(content, "copySummaryButton", QPushButton)
         self.copy_summary_button.clicked.connect(self.copy_summary)
-        self.copy_summary_button.setEnabled(bool(self.issues) or self.ignored_count > 0)
-        self.export_summary_button = QPushButton("匯出摘要 Excel")
+        self.export_summary_button = find_child(content, "exportSummaryButton", QPushButton)
         self.export_summary_button.clicked.connect(self.export_summary)
-        self.export_summary_button.setEnabled(bool(self.issues) or self.ignored_count > 0)
-        self.copy_button = QPushButton("複製目前清單")
+        self.copy_button = find_child(content, "copyIssuesButton", QPushButton)
         self.copy_button.clicked.connect(self.copy_current_issues)
-        self.copy_button.setEnabled(bool(self.filtered_issues))
-        self.export_button = QPushButton("匯出目前清單 Excel")
+        self.export_button = find_child(content, "exportIssuesButton", QPushButton)
         self.export_button.clicked.connect(self.export_issues)
-        self.export_button.setEnabled(bool(self.filtered_issues))
-        close_button = QPushButton("關閉")
-        close_button.clicked.connect(self.accept)
-        button_row = QHBoxLayout()
-        button_row.addWidget(self.copy_summary_button)
-        button_row.addWidget(self.export_summary_button)
-        button_row.addWidget(self.copy_button)
-        button_row.addWidget(self.export_button)
-        button_row.addWidget(self.clear_ignored_button)
-        button_row.addStretch(1)
-        button_row.addWidget(self.ignore_filtered_button)
-        button_row.addWidget(self.ignore_same_category_button)
-        button_row.addWidget(self.ignore_button)
-        button_row.addWidget(self.goto_button)
-        button_row.addWidget(close_button)
-        layout.addLayout(button_row)
+        find_child(content, "closeButton", QPushButton).clicked.connect(self.accept)
         self.update_action_buttons()
 
     def category_summary_counts(self):
@@ -525,7 +492,7 @@ class DataQualityDialog(QDialog):
                 item = QTableWidgetItem(value)
                 item.setData(Qt.UserRole, category)
                 if counts["重要"] > 0:
-                    item.setBackground(QColor("#5b2230"))
+                    item.setBackground(qcolor("watch"))
                     item.setForeground(ROW_TEXT_COLOR)
                 self.category_summary_table.setItem(row_number, column_number, item)
         self.category_summary_table.resizeRowsToContents()
@@ -534,7 +501,7 @@ class DataQualityDialog(QDialog):
         filter_value = f"category:{category}"
         index = self.filter_combo.findData(filter_value)
         if index < 0:
-            self.filter_combo.addItem(category, filter_value)
+            self.filter_combo.addItem(category, userData=filter_value)
             index = self.filter_combo.findData(filter_value)
         self.filter_combo.setCurrentIndex(index)
 
@@ -558,7 +525,7 @@ class DataQualityDialog(QDialog):
             for column_number, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 if issue.severity == "重要":
-                    item.setBackground(QColor("#5b2230"))
+                    item.setBackground(qcolor("watch"))
                     item.setForeground(ROW_TEXT_COLOR)
                 self.table.setItem(row_number, column_number, item)
         self.table.resizeRowsToContents()
@@ -829,18 +796,18 @@ class DataQualityDialog(QDialog):
 
 
 class DashboardDialog(QDialog):
+    # Layout: ui/dialogs/dashboard_dialog.ui; the rows are filled here.
+    ui_file = "dialogs/dashboard_dialog.ui"
+    ui_object_names = ("summaryLabel", "statsTable", "closeButton")
+
     def __init__(self, stats, parent=None):
         super().__init__(parent)
         self.stats = stats
-        self.setWindowTitle("資料統計儀表板")
-        self.setModal(True)
-        self.resize(760, 560)
+        # Deliberately non-modal -- see show_dashboard() in
+        # customer_productivity_workflows.py.
+        content = install_ui(self, self.ui_file, self.ui_object_names)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(10)
-
-        summary = QLabel(
+        find_child(content, "summaryLabel", QLabel).setText(
             " / ".join(
                 [
                     f"總筆數 {stats.get('total_records', 0)}",
@@ -853,27 +820,15 @@ class DashboardDialog(QDialog):
                 ]
             )
         )
-        summary.setWordWrap(True)
-        summary.setStyleSheet("font-size: 15px; font-weight: 600;")
-        layout.addWidget(summary)
 
-        self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["分類", "項目", "筆數", "補充"])
-        self.table.verticalHeader().setVisible(False)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table = find_child(content, "statsTable", QTableWidget)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        layout.addWidget(self.table, 1)
         self.load_rows()
 
-        close_button = QPushButton("關閉")
-        close_button.clicked.connect(self.accept)
-        button_row = QHBoxLayout()
-        button_row.addStretch(1)
-        button_row.addWidget(close_button)
-        layout.addLayout(button_row)
+        find_child(content, "closeButton", QPushButton).clicked.connect(self.accept)
 
     def load_rows(self):
         rows = []
@@ -908,41 +863,29 @@ class DashboardDialog(QDialog):
 
 
 class RecordHistoryDialog(QDialog):
+    # Layout: ui/dialogs/record_history_dialog.ui.
+    ui_file = "dialogs/record_history_dialog.ui"
+    ui_object_names = ("titleLabel", "historyTable", "closeButton")
+
     def __init__(self, logs, record_label="", parent=None):
         super().__init__(parent)
         self.logs = list(logs)
-        self.setWindowTitle("單筆修改歷史")
         self.setModal(True)
-        self.resize(860, 520)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(10)
+        if record_label:
+            find_child(content, "titleLabel", QLabel).setText(record_label)
 
-        title = QLabel(record_label or "目前選取資料的修改歷史")
-        title.setWordWrap(True)
-        title.setStyleSheet("font-size: 15px; font-weight: 600;")
-        layout.addWidget(title)
-
-        self.table = QTableWidget(0, 6)
-        self.table.setHorizontalHeaderLabels(["時間", "動作", "欄位", "修改前", "修改後", "資料ID"])
-        self.table.verticalHeader().setVisible(False)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table = find_child(content, "historyTable", QTableWidget)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
-        layout.addWidget(self.table, 1)
         self.load_rows()
 
-        close_button = QPushButton("關閉")
-        close_button.clicked.connect(self.accept)
-        button_row = QHBoxLayout()
-        button_row.addStretch(1)
-        button_row.addWidget(close_button)
-        layout.addLayout(button_row)
+        find_child(content, "closeButton", QPushButton).clicked.connect(self.accept)
 
     def load_rows(self):
         self.table.setRowCount(len(self.logs))
@@ -963,57 +906,44 @@ class RecordHistoryDialog(QDialog):
 class FollowUpReminderDialog(QDialog):
     STATUS_OPTIONS = ("未處理", "已聯絡", "待回覆", "完成")
 
+    # Layout: ui/dialogs/follow_up_reminder_dialog.ui.
+    ui_file = "dialogs/follow_up_reminder_dialog.ui"
+    ui_object_names = (
+        "titleLabel",
+        "dueDateEdit",
+        "statusCombo",
+        "noteEdit",
+        "clearReminderButton",
+        "cancelButton",
+        "saveButton",
+    )
+
     def __init__(self, record_label="", reminder=None, parent=None):
         super().__init__(parent)
         self.reminder = reminder
         self.delete_requested = False
-        self.setWindowTitle("追蹤提醒")
         self.setModal(True)
-        self.resize(460, 320)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
 
-        self.due_date_edit = QLineEdit()
-        self.due_date_edit.setPlaceholderText("YYYY-MM-DD，例如 2026-07-20")
+        self.due_date_edit = find_child(content, "dueDateEdit", QLineEdit)
         self.due_date_edit.setText(str((reminder or {}).get("due_date") or ""))
-        self.status_combo = QComboBox()
+        self.status_combo = find_child(content, "statusCombo", FluentComboBox)
         current_status = str((reminder or {}).get("status") or "未處理")
         for status in self.STATUS_OPTIONS:
-            self.status_combo.addItem(status, status)
+            self.status_combo.addItem(status, userData=status)
         status_index = self.status_combo.findData(current_status)
         self.status_combo.setCurrentIndex(status_index if status_index >= 0 else 0)
-        self.note_edit = QPlainTextEdit()
+        self.note_edit = find_child(content, "noteEdit", QPlainTextEdit)
         self.note_edit.setPlainText(str((reminder or {}).get("note") or ""))
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(10)
+        if record_label:
+            find_child(content, "titleLabel", QLabel).setText(record_label)
 
-        title = QLabel(record_label or "設定目前選取資料的追蹤提醒")
-        title.setWordWrap(True)
-        title.setStyleSheet("font-size: 15px; font-weight: 600;")
-        layout.addWidget(title)
-
-        form = QGridLayout()
-        form.addWidget(QLabel("下次追蹤日"), 0, 0)
-        form.addWidget(self.due_date_edit, 0, 1)
-        form.addWidget(QLabel("處理狀態"), 1, 0)
-        form.addWidget(self.status_combo, 1, 1)
-        form.addWidget(QLabel("備註"), 2, 0)
-        form.addWidget(self.note_edit, 2, 1)
-        layout.addLayout(form, 1)
-
-        button_row = QHBoxLayout()
-        clear_button = QPushButton("清除提醒")
+        clear_button = find_child(content, "clearReminderButton", QPushButton)
         clear_button.clicked.connect(self.request_delete)
         clear_button.setEnabled(reminder is not None)
-        cancel_button = QPushButton("取消")
-        cancel_button.clicked.connect(self.reject)
-        save_button = QPushButton("儲存")
-        save_button.clicked.connect(self.accept)
-        button_row.addWidget(clear_button)
-        button_row.addStretch(1)
-        button_row.addWidget(cancel_button)
-        button_row.addWidget(save_button)
-        layout.addLayout(button_row)
+        find_child(content, "cancelButton", QPushButton).clicked.connect(self.reject)
+        find_child(content, "saveButton", QPushButton).clicked.connect(self.accept)
 
     def values(self):
         return {
@@ -1041,46 +971,30 @@ class FollowUpReminderDialog(QDialog):
 
 
 class FollowUpListDialog(QDialog):
+    # Layout: ui/dialogs/follow_up_list_dialog.ui.
+    ui_file = "dialogs/follow_up_list_dialog.ui"
+    ui_object_names = ("titleLabel", "remindersTable", "closeButton")
+
     def __init__(self, reminders, parent=None, on_record_activated=None):
         super().__init__(parent)
         self.reminders = list(reminders)
         self.on_record_activated = on_record_activated
-        self.setWindowTitle("追蹤提醒清單")
-        self.setModal(True)
-        self.resize(860, 520)
+        # Deliberately non-modal -- see show_follow_up_list() in
+        # customer_productivity_workflows.py.
+        content = install_ui(self, self.ui_file, self.ui_object_names)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(10)
+        find_child(content, "titleLabel", QLabel).setText(
+            f"共有 {len(self.reminders)} 筆追蹤提醒；雙擊資料列可載入該筆資料。"
+        )
 
-        title = QLabel(f"共有 {len(self.reminders)} 筆追蹤提醒；雙擊資料列可載入該筆資料。")
-        title.setWordWrap(True)
-        title.setStyleSheet("font-size: 15px; font-weight: 600;")
-        layout.addWidget(title)
-
-        self.table = QTableWidget(0, 7)
-        self.table.setHorizontalHeaderLabels(["追蹤日", "狀態", "姓名", "地區", "地段", "地號", "備註"])
-        self.table.verticalHeader().setVisible(False)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SingleSelection)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table = find_child(content, "remindersTable", QTableWidget)
         self.table.itemDoubleClicked.connect(self.activate_current_record)
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.Stretch)
-        layout.addWidget(self.table, 1)
+        for column in range(7):
+            self.table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(7, QHeaderView.Stretch)
         self.load_rows()
 
-        close_button = QPushButton("關閉")
-        close_button.clicked.connect(self.accept)
-        button_row = QHBoxLayout()
-        button_row.addStretch(1)
-        button_row.addWidget(close_button)
-        layout.addLayout(button_row)
+        find_child(content, "closeButton", QPushButton).clicked.connect(self.accept)
 
     def load_rows(self):
         self.table.setRowCount(len(self.reminders))
@@ -1091,13 +1005,14 @@ class FollowUpListDialog(QDialog):
                 reminder.get("owner_name", ""),
                 reminder.get("district", ""),
                 reminder.get("section", ""),
+                reminder.get("subsection", ""),
                 reminder.get("land_number", ""),
                 reminder.get("note", ""),
             ]
             for column_number, value in enumerate(values):
                 item = QTableWidgetItem(str(value or ""))
                 if reminder.get("is_overdue") and reminder.get("status") != "完成":
-                    item.setBackground(QColor("#5b2230"))
+                    item.setBackground(qcolor("watch"))
                     item.setForeground(ROW_TEXT_COLOR)
                 self.table.setItem(row_number, column_number, item)
         self.table.resizeRowsToContents()
@@ -1117,40 +1032,349 @@ class FollowUpListDialog(QDialog):
         self.accept()
 
 
+def calendar_status_styles():
+    """Visit-status colours, resolved from the active theme each time they are used."""
+
+    return {
+        "scheduled": {"label": "已排定", "bg": qcolor("info_bg"), "text": qcolor("info_ink")},
+        "overdue": {"label": "已逾期", "bg": qcolor("watch"), "text": qcolor("seal")},
+        "completed": {"label": "已完成", "bg": qcolor("success_bg"), "text": qcolor("success_ink")},
+        "skipped": {"label": "已略過", "bg": qcolor("muted_bg"), "text": qcolor("muted_ink")},
+    }
+
+
+class _CalendarDayCell(QFrame):
+    """One clickable day box inside VisitCalendarDialog's month grid.
+
+    A plain QFrame subclass rather than a monkey-patched mousePressEvent
+    on a generic QWidget -- overriding the virtual method through proper
+    subclassing is the reliable way to make a non-button widget clickable
+    in Qt; assigning to the instance attribute directly is a common but
+    fragile shortcut.
+    """
+
+    def __init__(self, date_value, on_click):
+        super().__init__()
+        self.date_value = date_value
+        self._on_click = on_click
+
+    def mousePressEvent(self, event):
+        if self._on_click is not None:
+            self._on_click(self.date_value)
+        super().mousePressEvent(event)
+
+
+class VisitCalendarDialog(QDialog):
+    """行程月曆 -- replaces the old separate 每日外勤紀錄 and 未來排程 dialogs.
+
+    The user wanted a more intuitive way to see which landowners had been
+    added to a field-visit route than two side-by-side tables they had to
+    cross-reference by date themselves: a month calendar where each day
+    cell shows, at a glance, who is on it and how that item stands --
+    scheduled, overdue, completed, or skipped -- color-coded, with a
+    detail list below for the selected day. See
+    load_visit_calendar_items()/list_visit_calendar_items() (server and
+    repository side) for how the two old data sources (unresolved
+    schedule items, daily contact logs) are merged into this single list
+    without double-counting.
+
+    Works outside api_mode too, unlike the old 未來排程 (which used to
+    refuse to open at all without a server connection): local/SQLite mode
+    has no field-visit-route data, but still has contact_logs, so the
+    calendar just shows less there (see
+    CustomerRepository.list_visit_calendar_items()'s docstring) instead of
+    being unavailable outright.
+    """
+
+    # Layout: ui/dialogs/visit_calendar_dialog.ui; the day cells of calendarGrid
+    # are built here for each month.  Legend colours: ui/theme.qss.
+    ui_file = "dialogs/visit_calendar_dialog.ui"
+    ui_object_names = (
+        "previousMonthButton",
+        "monthLabel",
+        "nextMonthButton",
+        "mineOnlyCheckBox",
+        "refreshButton",
+        "calendarGrid",
+        "summaryLabel",
+        "detailTable",
+        "closeButton",
+    )
+
+    def __init__(self, window, parent=None, on_record_activated=None):
+        super().__init__(parent)
+        self.window = window
+        self.on_record_activated = on_record_activated
+        self.items_by_date = {}
+        self.selected_date = QDate.currentDate()
+        self.displayed_month = QDate(self.selected_date.year(), self.selected_date.month(), 1)
+        # Deliberately non-modal -- see the matching comment that used to
+        # be on DailyContactLogDialog/UpcomingFieldVisitsDialog and
+        # show_visit_calendar() in customer_productivity_workflows.py.
+        # The .ui opens it at 980 wide -- a narrow 7-column grid was cutting
+        # owner names off inside each day cell (user report: "行程月曆沒辦法
+        # 很好的看到地主名稱").
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+
+        self.prev_button = find_child(content, "previousMonthButton", QPushButton)
+        self.prev_button.clicked.connect(self.go_previous_month)
+        self.month_label = find_child(content, "monthLabel", QLabel)
+        self.next_button = find_child(content, "nextMonthButton", QPushButton)
+        self.next_button.clicked.connect(self.go_next_month)
+        # Defaults to unchecked (everyone's activity) -- same reasoning as
+        # the two dialogs this replaces: a team-wide activity review, not
+        # just a personal log.
+        self.mine_only_checkbox = find_child(content, "mineOnlyCheckBox", QCheckBox)
+        self.mine_only_checkbox.toggled.connect(self.refresh)
+        find_child(content, "refreshButton", QPushButton).clicked.connect(self.refresh)
+
+        self.grid_widget = find_child(content, "calendarGrid", QWidget)
+        self.grid_layout = self.grid_widget.layout()
+
+        self.summary_label = find_child(content, "summaryLabel", QLabel)
+
+        self.table = find_child(content, "detailTable", QTableWidget)
+        self.table.itemDoubleClicked.connect(self.activate_current_record)
+        for column in range(5):
+            self.table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Stretch)
+        size_like_unparented(self.table)
+
+        find_child(content, "closeButton", QPushButton).clicked.connect(self.accept)
+
+        self.refresh()
+
+    def go_previous_month(self):
+        self.displayed_month = self.displayed_month.addMonths(-1)
+        self.refresh()
+
+    def go_next_month(self):
+        self.displayed_month = self.displayed_month.addMonths(1)
+        self.refresh()
+
+    def refresh(self, *_args):
+        mine_only = self.mine_only_checkbox.isChecked()
+        year = self.displayed_month.year()
+        month = self.displayed_month.month()
+        start_date = QDate(year, month, 1)
+        end_date = QDate(year, month, start_date.daysInMonth())
+        try:
+            items = self.window.load_visit_calendar_items(
+                start_date.toString("yyyy-MM-dd"),
+                end_date.toString("yyyy-MM-dd"),
+                mine_only=mine_only,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "讀取失敗", str(exc))
+            items = []
+        self.items_by_date = {}
+        for item in items:
+            date_key = str(item.get("date") or "")
+            self.items_by_date.setdefault(date_key, []).append(item)
+        self.month_label.setText(start_date.toString("yyyy年M月"))
+        if self.selected_date.year() != year or self.selected_date.month() != month:
+            today = QDate.currentDate()
+            self.selected_date = today if (today.year() == year and today.month() == month) else start_date
+        total_count = len(items)
+        self.summary_label.setText(
+            f"{start_date.toString('yyyy年M月')} 共有 {total_count} 筆行程／紀錄；"
+            "點選日期可展開當天清單，雙擊清單列可載入該筆資料。"
+        )
+        self._rebuild_grid(start_date, end_date)
+        self._update_detail()
+
+    def _rebuild_grid(self, start_date, end_date):
+        while self.grid_layout.count():
+            child = self.grid_layout.takeAt(0)
+            widget = child.widget()
+            if widget is not None:
+                # setParent(None) detaches it from the screen immediately;
+                # takeAt() alone only unmanages it from the layout, and
+                # deleteLater() alone leaves it sitting at its old
+                # geometry, visible and overlapping the freshly-built
+                # cells, until the next event-loop pass actually runs the
+                # deferred delete. Both together avoid the ghost-widget
+                # overlap a plain deleteLater() produced when refresh()
+                # ran twice in close succession (e.g. navigating months
+                # quickly).
+                widget.setParent(None)
+                widget.deleteLater()
+
+        for column, label_text in enumerate(["日", "一", "二", "三", "四", "五", "六"]):
+            header_label = QLabel(label_text)
+            header_label.setAlignment(Qt.AlignCenter)
+            header_label.setStyleSheet(f"color: {token('ink2')}; font-size: 11px;")
+            self.grid_layout.addWidget(header_label, 0, column)
+
+        today = QDate.currentDate()
+        cursor = QDate(start_date)
+        row = 1
+        column = cursor.dayOfWeek() % 7
+        while cursor <= end_date:
+            cell = self._make_day_cell(QDate(cursor), today)
+            self.grid_layout.addWidget(cell, row, column)
+            column += 1
+            if column > 6:
+                column = 0
+                row += 1
+            cursor = cursor.addDays(1)
+
+    def _make_day_cell(self, date_value, today):
+        date_key = date_value.toString("yyyy-MM-dd")
+        items = self.items_by_date.get(date_key, [])
+
+        cell = _CalendarDayCell(date_value, self._select_day)
+        # Just tall enough for the date number plus two single-line name
+        # pills -- a cell that wraps a long name just grows taller for
+        # that one row on its own (QGridLayout sizes each row to its
+        # tallest cell), it doesn't need every row reserving room for it.
+        # Kept low deliberately: the calendar grid has no stretch factor
+        # (see the layout.addWidget(self.grid_widget) call below), so its
+        # total height is exactly this times 6 rows -- shrinking it is
+        # what actually gives the detail list below more room, not a
+        # stretch-factor change (grid_widget already yields all leftover
+        # space to self.table's stretch=1; the grid's minimum footprint
+        # was simply too tall to leave much of that space over).
+        cell.setMinimumHeight(48)
+        cell.setFrameShape(QFrame.StyledPanel)
+        is_selected = date_value == self.selected_date
+        is_today = date_value == today
+        # The chosen day is shown by its background; today gets a green
+        # outline and a day with overdue visits an amber one.
+        background = token("green_tint") if is_selected else token("field")
+        has_overdue = any(item.get("calendar_status") == "overdue" for item in items)
+        if is_today:
+            border = f"2px solid {token('green')}"
+        elif has_overdue:
+            border = f"2px solid {token('amber_ink')}"
+        else:
+            border = f"1px solid {token('rule')}"
+        cell.setStyleSheet(
+            f"QFrame {{ background: {background}; border: {border}; border-radius: 4px; }}"
+        )
+
+        cell_layout = QVBoxLayout(cell)
+        cell_layout.setContentsMargins(3, 2, 3, 2)
+        cell_layout.setSpacing(1)
+
+        date_label = QLabel(str(date_value.day()))
+        date_font = "font-weight: bold;" if date_value == today else ""
+        date_color = token("green") if date_value == today else token("ink")
+        date_label.setStyleSheet(f"color: {date_color}; font-size: 11px; {date_font}")
+        cell_layout.addWidget(date_label)
+
+        for item in items[:2]:
+            status_styles = calendar_status_styles()
+            style = status_styles.get(
+                item.get("calendar_status"), status_styles["scheduled"]
+            )
+            owner_name = str(item.get("owner_name") or "")
+            pill = QLabel(owner_name)
+            # Wrap instead of letting the grid column clip long names --
+            # a narrow 7-column-wide cell was cutting names off with no
+            # way to see the rest without clicking through to the detail
+            # list below. The tooltip is a second fallback for names that
+            # still don't fully fit even after wrapping and widening the
+            # dialog.
+            pill.setWordWrap(True)
+            pill.setToolTip(owner_name)
+            pill.setStyleSheet(
+                f"background: {style['bg'].name()}; color: {style['text'].name()};"
+                " border-radius: 3px; padding: 0px 4px; font-size: 12px;"
+            )
+            cell_layout.addWidget(pill)
+
+        if len(items) > 2:
+            more_label = QLabel(f"+{len(items) - 2} 筆")
+            more_label.setStyleSheet(f"color: {token('ink2')}; font-size: 10px;")
+            cell_layout.addWidget(more_label)
+
+        cell_layout.addStretch(1)
+        return cell
+
+    def _select_day(self, date_value):
+        self.selected_date = date_value
+        start_date = QDate(self.displayed_month.year(), self.displayed_month.month(), 1)
+        end_date = QDate(
+            self.displayed_month.year(), self.displayed_month.month(), start_date.daysInMonth()
+        )
+        self._rebuild_grid(start_date, end_date)
+        self._update_detail()
+
+    def _update_detail(self):
+        date_key = self.selected_date.toString("yyyy-MM-dd")
+        self.rows = self.items_by_date.get(date_key, [])
+        self.table.setRowCount(len(self.rows))
+        for row_number, item in enumerate(self.rows):
+            status_styles = calendar_status_styles()
+            style = status_styles.get(
+                item.get("calendar_status"), status_styles["scheduled"]
+            )
+            values = [
+                item.get("owner_name", ""),
+                item.get("district", ""),
+                item.get("section", ""),
+                item.get("subsection", ""),
+                item.get("land_number", ""),
+                style["label"],
+            ]
+            for column_number, value in enumerate(values):
+                cell = QTableWidgetItem(str(value or ""))
+                if column_number == 5:
+                    cell.setForeground(style["text"])
+                self.table.setItem(row_number, column_number, cell)
+        self.table.resizeRowsToContents()
+
+    def current_item(self):
+        row_number = self.table.currentRow()
+        if row_number < 0 or row_number >= len(self.rows):
+            return None
+        return self.rows[row_number]
+
+    def activate_current_record(self, *_args):
+        item = self.current_item()
+        if item is None:
+            # Diagnostic breadcrumb for a user report ("在行程月曆下我沒辦法
+            # 雙擊讀取資料") that could not be reproduced through the normal
+            # code paths -- if this ever fires for real, it pins the failure
+            # down to the double-click not resolving to a valid table row at
+            # all, rather than anything downstream in
+            # open_quality_issue_record(). See application-error.log.
+            from customer_error_handler import log_diagnostic_event
+
+            log_diagnostic_event(
+                "VisitCalendarDialog.activate_current_record",
+                f"current_item() returned None -- table.currentRow()="
+                f"{self.table.currentRow()}, len(self.rows)={len(self.rows)}",
+            )
+            return
+        if self.on_record_activated is not None:
+            self.on_record_activated(item.get("customer_id"))
+        self.accept()
+
+
 class ChangePasswordDialog(QDialog):
+    # Layout: ui/dialogs/change_password_dialog.ui.
+    ui_file = "dialogs/change_password_dialog.ui"
+    ui_object_names = (
+        "currentPasswordEdit",
+        "newPasswordEdit",
+        "confirmPasswordEdit",
+        "saveButton",
+    )
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("修改密碼")
         self.setModal(True)
-        self.setFixedSize(380, 220)
-
-        self.current_password_edit = QLineEdit()
-        self.current_password_edit.setEchoMode(QLineEdit.Password)
-        self.new_password_edit = QLineEdit()
-        self.new_password_edit.setEchoMode(QLineEdit.Password)
-        self.confirm_password_edit = QLineEdit()
-        self.confirm_password_edit.setEchoMode(QLineEdit.Password)
-
         self.create_layout()
 
     def create_layout(self):
-        layout = QGridLayout(self)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setHorizontalSpacing(10)
-        layout.setVerticalSpacing(8)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.current_password_edit = find_child(content, "currentPasswordEdit", QLineEdit)
+        self.new_password_edit = find_child(content, "newPasswordEdit", QLineEdit)
+        self.confirm_password_edit = find_child(content, "confirmPasswordEdit", QLineEdit)
 
-        layout.addWidget(QLabel("目前密碼"), 0, 0)
-        layout.addWidget(self.current_password_edit, 0, 1)
-
-        layout.addWidget(QLabel("新密碼"), 1, 0)
-        layout.addWidget(self.new_password_edit, 1, 1)
-
-        layout.addWidget(QLabel("確認新密碼"), 2, 0)
-        layout.addWidget(self.confirm_password_edit, 2, 1)
-
-        save_button = QPushButton("更新密碼")
-        save_button.clicked.connect(self.accept)
-        layout.addWidget(save_button, 3, 1, alignment=Qt.AlignRight)
+        find_child(content, "saveButton", QPushButton).clicked.connect(self.accept)
 
         self.confirm_password_edit.returnPressed.connect(self.accept)
         self.current_password_edit.setFocus()
@@ -1164,79 +1388,63 @@ class ChangePasswordDialog(QDialog):
 
 
 class FontSizeDialog(QDialog):
+    # Layout: ui/dialogs/font_size_dialog.ui.
+    ui_file = "dialogs/font_size_dialog.ui"
+    ui_object_names = ("fontSizeCombo", "applyButton")
+
     def __init__(self, current_key, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("字體大小")
         self.setModal(True)
-        self.setFixedSize(320, 150)
-
-        self.font_size_combo = QComboBox()
-        current_index = 0
-        for index, (key, label, _point_size) in enumerate(FONT_SIZE_OPTIONS):
-            self.font_size_combo.addItem(label, key)
-            if key == current_key:
-                current_index = index
-        self.font_size_combo.setCurrentIndex(current_index)
-
+        self.current_key = current_key
         self.create_layout()
 
     def create_layout(self):
-        layout = QGridLayout(self)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setHorizontalSpacing(10)
-        layout.setVerticalSpacing(8)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.font_size_combo = find_child(content, "fontSizeCombo", FluentComboBox)
+        current_index = 0
+        for index, (key, label, _point_size) in enumerate(FONT_SIZE_OPTIONS):
+            self.font_size_combo.addItem(label, userData=key)
+            if key == self.current_key:
+                current_index = index
+        self.font_size_combo.setCurrentIndex(current_index)
 
-        layout.addWidget(QLabel("字體大小"), 0, 0)
-        layout.addWidget(self.font_size_combo, 0, 1)
-
-        save_button = QPushButton("套用")
-        save_button.clicked.connect(self.accept)
-        layout.addWidget(save_button, 1, 1, alignment=Qt.AlignRight)
+        find_child(content, "applyButton", QPushButton).clicked.connect(self.accept)
 
     def selected_font_size_key(self):
         return self.font_size_combo.currentData() or DEFAULT_FONT_SIZE_KEY
 
 
 class ColumnVisibilityDialog(QDialog):
+    # Layout: ui/dialogs/column_visibility_dialog.ui; one check box per column
+    # is added to columnVisibilityContent here.
+    ui_file = "dialogs/column_visibility_dialog.ui"
+    ui_object_names = (
+        "columnVisibilityScrollArea",
+        "columnVisibilityContent",
+        "selectAllButton",
+        "saveButton",
+    )
+
     def __init__(self, columns, hidden_keys, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("欄位顯示")
         self.setModal(True)
-        self.resize(340, 420)
         self.checkboxes = {}
+        content = install_ui(self, self.ui_file, self.ui_object_names)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(8)
-
-        scroll_content = QWidget()
-        checkbox_layout = QVBoxLayout(scroll_content)
-        checkbox_layout.setContentsMargins(0, 0, 0, 0)
-        checkbox_layout.setSpacing(8)
-
+        checkbox_layout = find_child(content, "columnVisibilityContent", QWidget).layout()
         for key, label in columns:
-            checkbox = QCheckBox(label)
+            checkbox = FluentCheckBox(label)
             checkbox.setChecked(key not in hidden_keys)
             self.checkboxes[key] = checkbox
             checkbox_layout.addWidget(checkbox)
-
         checkbox_layout.addStretch(1)
-        self.scroll_area = QScrollArea()
-        self.scroll_area.setObjectName("columnVisibilityScrollArea")
-        self.scroll_area.setFrameShape(QFrame.NoFrame)
-        self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setWidget(scroll_content)
-        layout.addWidget(self.scroll_area, 1)
+        self.scroll_area = find_child(content, "columnVisibilityScrollArea", QScrollArea)
 
-        button_row = QHBoxLayout()
-        select_all_button = QPushButton("全部顯示")
+        select_all_button = find_child(content, "selectAllButton", QPushButton)
         select_all_button.clicked.connect(self.select_all)
-        button_row.addWidget(select_all_button)
-
-        save_button = QPushButton("儲存")
+        save_button = find_child(content, "saveButton", QPushButton)
         save_button.clicked.connect(self.accept)
-        button_row.addWidget(save_button)
-        layout.addLayout(button_row)
+        chain_tab_order([*self.checkboxes.values(), select_all_button, save_button])
 
     def select_all(self):
         for checkbox in self.checkboxes.values():
@@ -1247,33 +1455,35 @@ class ColumnVisibilityDialog(QDialog):
 
 
 class AdvancedSearchDialog(QDialog):
+    # Reserved criteria key for the exclude-keyword field -- deliberately
+    # not a real ADVANCED_SEARCH_FIELDS entry (those are all per-field
+    # "must contain" filters); this one field applies across every
+    # searchable column and means the opposite ("must NOT contain").
+    # CustomerRecordProcessor pops this key out of advanced_criteria before
+    # its normal per-field matching loop -- see its docstring.
+    EXCLUDE_KEYWORD_KEY = "_exclude_keyword"
+
+    # Layout: ui/dialogs/advanced_search_dialog.ui; one row per
+    # ADVANCED_SEARCH_FIELDS entry is added to advancedSearchContent here.
+    ui_file = "dialogs/advanced_search_dialog.ui"
+    ui_object_names = (
+        "advancedSearchScrollArea",
+        "advancedSearchContent",
+        "excludeInput",
+        "clearButton",
+        "applyButton",
+    )
+
     def __init__(self, criteria, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("進階搜尋")
         self.setModal(True)
-        self.resize(420, 460)
         self.inputs = {}
+        content = install_ui(self, self.ui_file, self.ui_object_names)
 
-        outer_layout = QVBoxLayout(self)
-        outer_layout.setContentsMargins(18, 18, 18, 18)
-        outer_layout.setSpacing(8)
-
-        hint = QLabel(
-            "同一欄可用「、」或「，」分隔多個值（任一符合）；"
-            "不同欄位之間必須全部符合。按 Enter 可移到下一欄。"
-        )
-        hint.setWordWrap(True)
-        outer_layout.addWidget(hint)
-
-        scroll_content = QWidget()
-        layout = QGridLayout(scroll_content)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setHorizontalSpacing(10)
-        layout.setVerticalSpacing(8)
-
+        layout = find_child(content, "advancedSearchContent", QWidget).layout()
         for row_index, (key, label) in enumerate(ADVANCED_SEARCH_FIELDS):
             layout.addWidget(QLabel(label), row_index, 0)
-            edit = QLineEdit()
+            edit = FluentLineEdit()
             edit.setPlaceholderText("多個值可用「、」或「，」分隔")
             edit.setText(str(criteria.get(key, "") or ""))
             self.inputs[key] = edit
@@ -1284,27 +1494,17 @@ class AdvancedSearchDialog(QDialog):
             edit.returnPressed.connect(
                 lambda current_index=index: self.focus_next_input(current_index)
             )
+        self.scroll_area = find_child(content, "advancedSearchScrollArea", QScrollArea)
 
-        layout.setColumnStretch(1, 1)
-        self.scroll_area = QScrollArea()
-        self.scroll_area.setObjectName("advancedSearchScrollArea")
-        self.scroll_area.setFrameShape(QFrame.NoFrame)
-        self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setWidget(scroll_content)
-        outer_layout.addWidget(self.scroll_area, 1)
+        self.exclude_input = find_child(content, "excludeInput", QLineEdit)
+        self.exclude_input.setText(str(criteria.get(self.EXCLUDE_KEYWORD_KEY, "") or ""))
+        self.inputs[self.EXCLUDE_KEYWORD_KEY] = self.exclude_input
 
-        button_row = QHBoxLayout()
-        clear_button = QPushButton("清除條件")
-        clear_button.setAutoDefault(False)
+        clear_button = find_child(content, "clearButton", QPushButton)
         clear_button.clicked.connect(self.clear_inputs)
-        button_row.addWidget(clear_button)
-        button_row.addStretch(1)
-
-        save_button = QPushButton("套用")
-        save_button.setAutoDefault(False)
+        save_button = find_child(content, "applyButton", QPushButton)
         save_button.clicked.connect(self.accept)
-        button_row.addWidget(save_button)
-        outer_layout.addLayout(button_row)
+        chain_tab_order([*self.input_order, self.exclude_input, clear_button, save_button])
 
     def focus_next_input(self, current_index):
         next_index = int(current_index) + 1
@@ -1327,85 +1527,129 @@ class AdvancedSearchDialog(QDialog):
 
 
 class ImportPreviewDialog(QDialog):
-    def __init__(self, records, column_map, duplicate_indexes, parent=None):
+    # Layout: ui/dialogs/import_preview_dialog.ui.  The table's columns follow
+    # the imported Excel columns; the 都市計畫 choice, when offered, takes the
+    # place of planChoiceSlot.
+    ui_file = "dialogs/import_preview_dialog.ui"
+    ui_object_names = (
+        "summaryLabel",
+        "planChoiceSlot",
+        "previewTable",
+        "importAllButton",
+        "skipDuplicatesButton",
+        "updateDuplicatesButton",
+        "cancelButton",
+    )
+
+    def __init__(
+        self,
+        records,
+        column_map,
+        duplicate_indexes,
+        parent=None,
+        *,
+        plans=None,
+        default_plan_id=0,
+    ):
         super().__init__(parent)
         self.records = records
         self.column_map = column_map
         self.duplicate_indexes = set(duplicate_indexes)
         self.import_mode = "all"
+        # `plans` is None unless the home server has 都市計畫; then the user
+        # says which plan this batch belongs to.
+        self.plan_choice = None
 
-        self.setWindowTitle("匯入預覽")
         self.setModal(True)
-        self.resize(1180, 620)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(10)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
 
         imported_labels = "、".join(label for _key, label in self.column_map)
         summary_lines = [
             f"共 {len(records)} 筆",
             f"對應欄位：{imported_labels}",
         ]
-        if self.duplicate_indexes:
+        matched = [record for record in records if record.get("_matched_by_record_id")]
+        if matched:
+            changed = sum(1 for record in matched if record.get("_has_changes"))
+            warned = sum(1 for record in matched if record.get("_import_warnings"))
+            unmatched = sum(1 for record in records if record.get("_unmatched_record_id"))
+            summary_lines.append(
+                f"依系統ID對到原資料 {len(matched)} 筆：將更新 {changed} 筆、"
+                f"無變更 {len(matched) - changed} 筆"
+                + (f"、有警告 {warned} 筆" if warned else "")
+            )
+            if unmatched:
+                summary_lines.append(f"系統ID不存在或重複 {unmatched} 筆：不會匯入")
+            summary_lines.append(
+                "有系統ID的資料一律更新原本那一筆，不會重複新增；空白欄位保留原值。"
+                "請先看「變更內容」欄確認。"
+            )
+        elif self.duplicate_indexes:
             summary_lines.append(f"偵測到 {len(self.duplicate_indexes)} 筆可能重複資料")
         else:
             summary_lines.append("未偵測到重複資料")
-        layout.addWidget(QLabel("\n".join(summary_lines)))
+        find_child(content, "summaryLabel", QLabel).setText("\n".join(summary_lines))
+        plan_slot = find_child(content, "planChoiceSlot", QWidget)
+        if plans is not None:
+            self.plan_choice = put_in_slot(
+                plan_slot, ImportPlanChoice(plans, default_plan_id, self)
+            )
+            # Built after the .ui table, but it still gets the first focus.
+            self.plan_choice.combo.setFocus()
+        else:
+            plan_slot.hide()
 
-        self.table = QTableWidget(0, len(self.column_map) + 1)
+        self.table = find_child(content, "previewTable", QTableWidget)
         headers = ["狀態", *[label for _key, label in self.column_map]]
+        self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)
-        self.table.verticalHeader().setVisible(False)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SingleSelection)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        for index in range(1, len(headers)):
+        for index in range(len(headers)):
             self.table.horizontalHeader().setSectionResizeMode(index, QHeaderView.ResizeToContents)
-        layout.addWidget(self.table, 1)
 
         self.load_preview_rows()
 
-        button_row = QHBoxLayout()
-        button_row.addStretch(1)
-
-        import_all_button = QPushButton("全部匯入")
-        import_all_button.clicked.connect(self.import_all)
-        button_row.addWidget(import_all_button)
-
+        find_child(content, "importAllButton", QPushButton).clicked.connect(self.import_all)
+        skip_button = find_child(content, "skipDuplicatesButton", QPushButton)
+        update_button = find_child(content, "updateDuplicatesButton", QPushButton)
         if self.duplicate_indexes:
-            skip_button = QPushButton("略過重複後匯入")
             skip_button.clicked.connect(self.import_skip_duplicates)
-            button_row.addWidget(skip_button)
-            update_button = QPushButton("更新既有並匯入")
             update_button.clicked.connect(self.import_update_duplicates)
-            button_row.addWidget(update_button)
-
-        cancel_button = QPushButton("取消")
-        cancel_button.clicked.connect(self.reject)
-        button_row.addWidget(cancel_button)
-        layout.addLayout(button_row)
+        else:
+            skip_button.hide()
+            update_button.hide()
+        find_child(content, "cancelButton", QPushButton).clicked.connect(self.reject)
 
     def load_preview_rows(self):
-        preview_records = self.records[:200]
+        # Every row, not the first 200: a corrected export of ~1000 records
+        # is reviewed here row by row before anything is written.
+        preview_records = self.records
         self.table.setRowCount(len(preview_records))
         field_keys = [key for key, _label in self.column_map]
         for row_index, record in enumerate(preview_records):
             is_duplicate = row_index in self.duplicate_indexes
             status_text = record.get("_duplicate_reason") or "將匯入"
             is_flagged = status_text != "將匯入"
+            if record.get("_matched_by_record_id"):
+                status_text = "系統ID相符：" + (
+                    "將更新" if record.get("_has_changes") else "無變更"
+                )
+                is_flagged = bool(record.get("_import_warnings"))
             status_item = QTableWidgetItem(status_text)
             if is_flagged:
-                status_item.setBackground(QColor("#fde68a"))
+                status_item.setBackground(qcolor("overdue"))
                 status_item.setForeground(ROW_TEXT_COLOR)
             self.table.setItem(row_index, 0, status_item)
             for column_offset, field_key in enumerate(field_keys, start=1):
                 item = QTableWidgetItem(str(record.get(field_key) or ""))
                 if is_flagged:
-                    item.setBackground(QColor("#fef3c7"))
+                    item.setBackground(qcolor("overdue"))
                     item.setForeground(ROW_TEXT_COLOR)
                 self.table.setItem(row_index, column_offset, item)
+
+    def plan_id(self):
+        """The chosen 都市計畫 id, 0 for none (or when plans are not offered)."""
+
+        return 0 if self.plan_choice is None else self.plan_choice.plan_id()
 
     def import_all(self):
         self.import_mode = "all"
@@ -1421,36 +1665,53 @@ class ImportPreviewDialog(QDialog):
 
 
 class ImportResultDialog(QDialog):
-    def __init__(self, summary_lines, detail_lines=None, error_rows=None, parent=None):
+    # Layout: ui/dialogs/import_result_dialog.ui; the 都市計畫 section, when
+    # there is one, takes the place of planSectionSlot.
+    ui_file = "dialogs/import_result_dialog.ui"
+    ui_object_names = (
+        "summaryLabel",
+        "planSectionSlot",
+        "detailsEdit",
+        "exportErrorsButton",
+        "closeButton",
+    )
+    PLAN_DIALOG_SIZE = (640, 640)
+
+    def __init__(
+        self,
+        summary_lines,
+        detail_lines=None,
+        error_rows=None,
+        parent=None,
+        *,
+        plan_summary=None,
+    ):
         super().__init__(parent)
-        self.setWindowTitle("匯入結果報表")
         self.setModal(True)
-        self.resize(520, 460)
         self.error_rows = error_rows or []
+        self.plan_section = None
+        content = install_ui(self, self.ui_file, self.ui_object_names)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(10)
+        find_child(content, "summaryLabel", QLabel).setText("\n".join(summary_lines))
+        plan_slot = find_child(content, "planSectionSlot", QWidget)
+        if plan_summary:
+            self.plan_section = put_in_slot(
+                plan_slot, ImportPlanResultSection(plan_summary, self)
+            )
+            self.resize(*self.PLAN_DIALOG_SIZE)
+        else:
+            plan_slot.hide()
 
-        summary = QLabel("\n".join(summary_lines))
-        summary.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        layout.addWidget(summary)
+        find_child(content, "detailsEdit", QPlainTextEdit).setPlainText(
+            "\n".join(detail_lines or ["本次沒有其他明細。"])
+        )
 
-        details = QPlainTextEdit()
-        details.setReadOnly(True)
-        details.setPlainText("\n".join(detail_lines or ["本次沒有其他明細。"]))
-        layout.addWidget(details, 1)
-
-        button_row = QHBoxLayout()
+        export_button = find_child(content, "exportErrorsButton", QPushButton)
         if self.error_rows:
-            export_button = QPushButton("匯出錯誤列")
             export_button.clicked.connect(self.export_error_rows)
-            button_row.addWidget(export_button)
-        button_row.addStretch(1)
-        close_button = QPushButton("關閉")
-        close_button.clicked.connect(self.accept)
-        button_row.addWidget(close_button)
-        layout.addLayout(button_row)
+        else:
+            export_button.hide()
+        find_child(content, "closeButton", QPushButton).clicked.connect(self.accept)
 
     def export_error_rows(self):
         file_path, _selected_filter = QFileDialog.getSaveFileName(
@@ -1472,39 +1733,33 @@ class ImportResultDialog(QDialog):
 
 
 class BatchEditDialog(QDialog):
+    # Layout: ui/dialogs/batch_edit_dialog.ui.
+    ui_file = "dialogs/batch_edit_dialog.ui"
+    ui_object_names = (
+        "checkedCountLabel",
+        "fieldCombo",
+        "valueEdit",
+        "clearValueButton",
+        "applyButton",
+    )
+
     def __init__(self, checked_count, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("批次修改")
         self.setModal(True)
-        self.resize(420, 260)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
 
-        self.field_combo = QComboBox()
+        self.field_combo = find_child(content, "fieldCombo", FluentComboBox)
         for key, label in BATCH_EDITABLE_FIELDS:
-            self.field_combo.addItem(label, key)
-        self.value_edit = QPlainTextEdit()
-        self.value_edit.setFixedHeight(100)
+            self.field_combo.addItem(label, userData=key)
+        self.value_edit = find_child(content, "valueEdit", QPlainTextEdit)
 
-        layout = QGridLayout(self)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setHorizontalSpacing(10)
-        layout.setVerticalSpacing(8)
-
-        layout.addWidget(QLabel(f"已勾選 {checked_count} 筆資料"), 0, 0, 1, 2)
-        layout.addWidget(QLabel("要修改的欄位"), 1, 0)
-        layout.addWidget(self.field_combo, 1, 1)
-        layout.addWidget(QLabel("新內容"), 2, 0)
-        layout.addWidget(self.value_edit, 2, 1)
-
-        button_row = QHBoxLayout()
-        clear_button = QPushButton("清空內容")
-        clear_button.clicked.connect(self.value_edit.clear)
-        button_row.addWidget(clear_button)
-        button_row.addStretch(1)
-
-        apply_button = QPushButton("套用")
-        apply_button.clicked.connect(self.accept)
-        button_row.addWidget(apply_button)
-        layout.addLayout(button_row, 3, 0, 1, 2)
+        find_child(content, "checkedCountLabel", QLabel).setText(
+            f"已勾選 {checked_count} 筆資料"
+        )
+        find_child(content, "clearValueButton", QPushButton).clicked.connect(
+            self.value_edit.clear
+        )
+        find_child(content, "applyButton", QPushButton).clicked.connect(self.accept)
 
     def values(self):
         return (
@@ -1514,91 +1769,142 @@ class BatchEditDialog(QDialog):
 
 
 class BatchEditPreviewDialog(QDialog):
+    # Layout: ui/dialogs/batch_edit_preview_dialog.ui.
+    ui_file = "dialogs/batch_edit_preview_dialog.ui"
+    ui_object_names = ("summaryLabel", "detailsEdit", "cancelButton", "applyButton")
+
     def __init__(self, field_label, new_value, preview_lines, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("批次修改預覽")
         self.setModal(True)
-        self.resize(560, 440)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(10)
-
-        summary = QLabel(
+        find_child(content, "summaryLabel", QLabel).setText(
             f"欄位：{field_label}\n"
             f"新內容：{new_value or '(清空)'}\n"
             f"預覽筆數：{len(preview_lines)}"
         )
-        layout.addWidget(summary)
-
-        details = QPlainTextEdit()
-        details.setReadOnly(True)
-        details.setPlainText("\n".join(preview_lines))
-        layout.addWidget(details, 1)
-
-        button_row = QHBoxLayout()
-        button_row.addStretch(1)
-        cancel_button = QPushButton("取消")
-        cancel_button.clicked.connect(self.reject)
-        button_row.addWidget(cancel_button)
-        apply_button = QPushButton("確認套用")
-        apply_button.clicked.connect(self.accept)
-        button_row.addWidget(apply_button)
-        layout.addLayout(button_row)
+        find_child(content, "detailsEdit", QPlainTextEdit).setPlainText(
+            "\n".join(preview_lines)
+        )
+        find_child(content, "cancelButton", QPushButton).clicked.connect(self.reject)
+        find_child(content, "applyButton", QPushButton).clicked.connect(self.accept)
 
 
 class SharedLandBatchDialog(QDialog):
-    def __init__(self, initial_values=None, parent=None):
+    REQUIRED_SHARED_FIELDS = ("district", "section", "land_number")
+
+    # Layout: ui/dialogs/shared_land_batch_dialog.ui (the 共用欄位 and 快速新增
+    # boxes included); the status line's colour follows the parse result here.
+    ui_file = "dialogs/shared_land_batch_dialog.ui"
+    SHARED_FIELD_KEYS = ("district", "section", "subsection", "land_number", "area", "declared_value")
+    QUICK_FIELD_KEYS = (
+        "owner_name",
+        "external_id",
+        "address",
+        "numerator",
+        "denominator",
+        "registration_reason",
+    )
+    ui_object_names = (
+        *(f"sharedEdit_{key}" for key in SHARED_FIELD_KEYS),
+        *(f"quickEdit_{key}" for key in QUICK_FIELD_KEYS),
+        "quickAddButton",
+        "pasteButton",
+        "rowsEdit",
+        "rowStatusLabel",
+        "cancelButton",
+        "previewButton",
+    )
+
+    def __init__(
+        self,
+        initial_values=None,
+        parent=None,
+        *,
+        district_options=None,
+        section_options=None,
+        subsection_options=None,
+    ):
         super().__init__(parent)
         initial_values = initial_values or {}
-        self.setWindowTitle("同地號批量新增")
         self.setModal(True)
-        self.resize(760, 520)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
 
         self.shared_inputs = {}
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(10)
-
-        shared_layout = QGridLayout()
-        shared_fields = (
-            ("district", "地區"),
-            ("section", "地段"),
-            ("land_number", "地號"),
-            ("area", "面積/m²"),
-            ("declared_value", "公告現值"),
-        )
-        for index, (key, label) in enumerate(shared_fields):
-            field_row = (index // 3) * 2
-            column = index % 3
-            edit = QLineEdit(str(initial_values.get(key) or ""))
+        completer_options = {
+            "district": district_options,
+            "section": section_options,
+            "subsection": subsection_options,
+        }
+        for key in self.SHARED_FIELD_KEYS:
+            edit = find_child(content, f"sharedEdit_{key}", QLineEdit)
+            edit.setText(str(initial_values.get(key) or ""))
+            options = completer_options.get(key)
+            if options:
+                completer = QCompleter(sorted(set(options)), edit)
+                completer.setCaseSensitivity(Qt.CaseInsensitive)
+                completer.setFilterMode(Qt.MatchContains)
+                edit.setCompleter(completer)
             self.shared_inputs[key] = edit
-            shared_layout.addWidget(QLabel(label), field_row, column)
-            shared_layout.addWidget(edit, field_row + 1, column)
-        layout.addLayout(shared_layout)
 
-        layout.addWidget(
-            QLabel(
-                "每行一筆，欄位順序：登記次序、姓名、身分證、地址、分子、分母、備註、出訪記錄。\n"
-                "可直接從 Excel 複製貼上（Tab 分隔），也接受逗號分隔；姓名為必填。"
+        self.quick_inputs = {
+            key: find_child(content, f"quickEdit_{key}", QLineEdit) for key in self.QUICK_FIELD_KEYS
+        }
+        find_child(content, "quickAddButton", QPushButton).clicked.connect(self.add_quick_row)
+        find_child(content, "pasteButton", QPushButton).clicked.connect(self.paste_from_clipboard)
+
+        self.rows_edit = find_child(content, "rowsEdit", QPlainTextEdit)
+        self.rows_edit.textChanged.connect(self.update_row_status)
+        self.row_status_label = find_child(content, "rowStatusLabel", QLabel)
+
+        find_child(content, "cancelButton", QPushButton).clicked.connect(self.reject)
+        find_child(content, "previewButton", QPushButton).clicked.connect(self.accept)
+
+    def add_quick_row(self):
+        name = self.quick_inputs["owner_name"].text().strip()
+        if not name:
+            self.quick_inputs["owner_name"].setFocus()
+            return
+        line = "\t".join(
+            self.quick_inputs[key].text().strip()
+            for key in (
+                "owner_name",
+                "external_id",
+                "address",
+                "numerator",
+                "denominator",
+                "registration_reason",
             )
         )
-        self.rows_edit = QPlainTextEdit()
-        self.rows_edit.setPlaceholderText(
-            "1\t王小明\tA123456789\t台北市中正區\t1\t2\t備註\t首次拜訪\n"
-            "2\t陳小華\tB123456789\t新北市板橋區\t1\t2"
-        )
-        layout.addWidget(self.rows_edit, 1)
+        existing = self.rows_edit.toPlainText()
+        self.rows_edit.setPlainText(f"{existing}\n{line}" if existing.strip() else line)
+        self.rows_edit.moveCursor(QTextCursor.End)
+        for edit in self.quick_inputs.values():
+            edit.clear()
+        self.quick_inputs["owner_name"].setFocus()
 
-        button_row = QHBoxLayout()
-        button_row.addStretch(1)
-        cancel_button = QPushButton("取消")
-        cancel_button.clicked.connect(self.reject)
-        button_row.addWidget(cancel_button)
-        preview_button = QPushButton("預覽")
-        preview_button.clicked.connect(self.accept)
-        button_row.addWidget(preview_button)
-        layout.addLayout(button_row)
+    def paste_from_clipboard(self):
+        text = QApplication.clipboard().text()
+        if text:
+            self.rows_edit.setPlainText(text)
+            self.rows_edit.moveCursor(QTextCursor.End)
+
+    def update_row_status(self):
+        text = self.rows_edit.toPlainText()
+        if not text.strip():
+            self.row_status_label.setText("尚未輸入任何資料。")
+            self.row_status_label.setStyleSheet("")
+            return
+        parsed_rows, errors = parse_shared_land_rows(text)
+        if errors:
+            extra = f"（另有 {len(errors) - 1} 項錯誤）" if len(errors) > 1 else ""
+            self.row_status_label.setText(
+                f"⚠ 已辨識 {len(parsed_rows)} 筆，{errors[0]}{extra}"
+            )
+            self.row_status_label.setStyleSheet(f"color: {token('amber_ink')};")
+        else:
+            self.row_status_label.setText(f"✓ 已辨識 {len(parsed_rows)} 筆，格式正確。")
+            self.row_status_label.setStyleSheet(f"color: {token('success_ink')};")
 
     def values(self):
         return (
@@ -1608,39 +1914,24 @@ class SharedLandBatchDialog(QDialog):
 
 
 class SavedSearchDialog(QDialog):
+    # Layout: ui/dialogs/saved_search_dialog.ui.
+    ui_file = "dialogs/saved_search_dialog.ui"
+    ui_object_names = ("searchesTable", "loadButton", "deleteButton", "closeButton")
+
     def __init__(self, saved_searches, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("常用搜尋條件")
         self.setModal(True)
-        self.resize(520, 420)
         self.saved_searches = list(saved_searches)
         self.selected_criteria = None
+        content = install_ui(self, self.ui_file, self.ui_object_names)
 
-        self.table = QTableWidget(0, 2)
-        self.table.setHorizontalHeaderLabels(["名稱", "條件摘要"])
+        self.table = find_child(content, "searchesTable", QTableWidget)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.table.verticalHeader().setVisible(False)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SingleSelection)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(10)
-        layout.addWidget(self.table, 1)
-
-        button_row = QHBoxLayout()
-        load_button = QPushButton("載入")
-        load_button.clicked.connect(self.load_selected)
-        button_row.addWidget(load_button)
-        delete_button = QPushButton("刪除")
-        delete_button.clicked.connect(self.delete_selected)
-        button_row.addWidget(delete_button)
-        button_row.addStretch(1)
-        close_button = QPushButton("關閉")
-        close_button.clicked.connect(self.reject)
-        button_row.addWidget(close_button)
-        layout.addLayout(button_row)
+        find_child(content, "loadButton", QPushButton).clicked.connect(self.load_selected)
+        find_child(content, "deleteButton", QPushButton).clicked.connect(self.delete_selected)
+        find_child(content, "closeButton", QPushButton).clicked.connect(self.reject)
 
         self.reload_rows()
 
@@ -1690,32 +1981,23 @@ class SavedSearchDialog(QDialog):
 
 
 class OperationLogDialog(QDialog):
+    # Layout: ui/dialogs/operation_log_dialog.ui.
+    ui_file = "dialogs/operation_log_dialog.ui"
+    ui_object_names = ("logsTable", "closeButton")
+
     def __init__(self, parent=None, rows=None):
         super().__init__(parent)
         self.rows = rows
-        self.setWindowTitle("操作記錄")
         self.setModal(True)
-        self.resize(860, 520)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
 
-        self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["時間", "類型", "摘要", "明細"])
+        self.table = find_child(content, "logsTable", QTableWidget)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
-        self.table.verticalHeader().setVisible(False)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SingleSelection)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(10)
-        layout.addWidget(self.table, 1)
-
-        close_button = QPushButton("關閉")
-        close_button.clicked.connect(self.accept)
-        layout.addWidget(close_button, alignment=Qt.AlignRight)
+        find_child(content, "closeButton", QPushButton).clicked.connect(self.accept)
 
         self.load_logs()
 
@@ -1732,45 +2014,27 @@ class OperationLogDialog(QDialog):
 
 
 class WatchlistDialog(QDialog):
+    # Layout: ui/dialogs/watchlist_dialog.ui.
+    ui_file = "dialogs/watchlist_dialog.ui"
+    ui_object_names = ("watchlistTable", "addButton", "deleteButton", "saveButton")
+
     def __init__(self, parent=None, repository=None):
         super().__init__(parent)
         self.repository = repository
-        self.setWindowTitle("注意名單管理")
         self.setModal(True)
-        self.resize(560, 420)
-
-        self.table = QTableWidget(0, 2)
-        self.table.setHorizontalHeaderLabels(["姓名", "備註"])
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.table.verticalHeader().setVisible(False)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SingleSelection)
 
         self.create_layout()
         self.load_entries()
 
     def create_layout(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(10)
-        layout.addWidget(self.table, 1)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.table = find_child(content, "watchlistTable", QTableWidget)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
 
-        button_row = QHBoxLayout()
-        add_button = QPushButton("新增")
-        add_button.clicked.connect(self.add_row)
-        button_row.addWidget(add_button)
-
-        delete_button = QPushButton("刪除")
-        delete_button.clicked.connect(self.delete_selected_row)
-        button_row.addWidget(delete_button)
-
-        button_row.addStretch(1)
-
-        save_button = QPushButton("儲存")
-        save_button.clicked.connect(self.save_entries)
-        button_row.addWidget(save_button)
-        layout.addLayout(button_row)
+        find_child(content, "addButton", QPushButton).clicked.connect(self.add_row)
+        find_child(content, "deleteButton", QPushButton).clicked.connect(self.delete_selected_row)
+        find_child(content, "saveButton", QPushButton).clicked.connect(self.save_entries)
 
     def load_entries(self):
         rows = (

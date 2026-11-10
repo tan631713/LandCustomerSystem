@@ -112,6 +112,20 @@ class DesktopApiClientTests(unittest.TestCase):
                 return FakeResponse(None)
             if path.path == "/api/v1/follow-ups":
                 return FakeResponse({"items": [{"id": 9, "next_follow_up": "2026-07-20"}]})
+            if path.path == "/api/v1/contact-logs":
+                query = parse_qs(path.query)
+                self.captured_contact_logs_query = query
+                return FakeResponse(
+                    {
+                        "items": [
+                            {
+                                "customer_id": 9,
+                                "owner_name": "王小明",
+                                "note": "現場拜訪",
+                            }
+                        ]
+                    }
+                )
             if path.path == "/api/v1/projects":
                 if request.method == "GET":
                     return FakeResponse(
@@ -198,6 +212,14 @@ class DesktopApiClientTests(unittest.TestCase):
         )
         self.assertTrue(self.client.delete_follow_up(9))
         self.assertEqual(self.client.list_follow_ups()[0]["id"], 9)
+        self.assertEqual(
+            self.client.list_contact_logs_by_date("2026-08-02", mine_only=True)[0][
+                "owner_name"
+            ],
+            "王小明",
+        )
+        self.assertEqual(self.captured_contact_logs_query["date"], ["2026-08-02"])
+        self.assertEqual(self.captured_contact_logs_query["mine_only"], ["true"])
         self.assertEqual(self.client.list_projects()[0]["id"], 8)
         self.assertEqual(self.client.save_project("整合案", "進行中", ""), 8)
         self.assertEqual(
@@ -515,6 +537,7 @@ class FakeRecordClient:
                 "id": record_id,
                 "district": "桃園區",
                 "section": "測試段",
+                "subsection": "",
                 "land_number": str(record_id),
                 "owner_name": owner_name,
                 "case_names": "",
@@ -636,6 +659,10 @@ class FakeRecordClient:
                 "follow_up_status": self.reminder.get("status") or "",
             }
         ]
+
+    def list_contact_logs_by_date(self, target_date, mine_only=False):
+        self.contact_logs_by_date_query = (target_date, mine_only)
+        return [{"customer_id": 2, "owner_name": "陳先生", "note": "現場拜訪"}]
 
     def list_tags(self):
         return [dict(tag) for tag in self.tags]
@@ -866,6 +893,7 @@ class DesktopApiRecordRepositoryTests(unittest.TestCase):
             {
                 "district": "中壢區",
                 "section": "青埔段",
+                "subsection": "",
                 "land_number": "200",
                 "owner_name": "陳先生",
                 "address": "測試地址",
@@ -959,6 +987,13 @@ class DesktopApiRecordRepositoryTests(unittest.TestCase):
             repository.get_follow_up_reminder(2)["status"], "待回覆"
         )
         self.assertEqual(repository.list_follow_up_reminders()[0]["customer_id"], 2)
+        self.assertEqual(
+            repository.list_contact_logs_by_date("2026-08-02", mine_only=True)[0][
+                "owner_name"
+            ],
+            "陳先生",
+        )
+        self.assertEqual(client.contact_logs_by_date_query, ("2026-08-02", True))
         self.assertEqual(repository.delete_follow_up_reminder(2), 1)
         self.assertEqual(client.follow_up_deleted, [2])
 
@@ -1058,6 +1093,187 @@ class DesktopApiRecordRepositoryTests(unittest.TestCase):
         self.assertEqual(repository.verify_managed_attachments()[0]["integrity_status"], "正常")
         self.assertEqual(repository.delete_custom_field(4), 1)
         self.assertEqual(repository.delete_text_template(11), 1)
+
+
+class CachingRecordClient:
+    """Just enough of the home-server client to watch what a save downloads."""
+
+    def __init__(self):
+        self.list_all_calls = 0
+        self.get_record_calls = []
+        self.watchlist_calls = 0
+        self.watchlist = [{"name": "王大明", "note": "注意"}]
+        self.server_overrides = {}
+        self.fail_get_record = False
+        self.next_id = 100
+        self.rows = [
+            self._row(3, land_id=10, land_number="100", owner_name="丙", external_id="C300"),
+            self._row(2, land_id=10, land_number="100", owner_name="乙", external_id="B200"),
+            self._row(1, land_id=20, land_number="200", owner_name="甲", external_id=""),
+        ]
+
+    @staticmethod
+    def _row(record_id, *, land_id, land_number, owner_name, external_id):
+        return {
+            "id": record_id, "ownership_id": record_id, "land_id": land_id, "owner_id": record_id,
+            "district": "桃園區", "section": "測試段", "subsection": "", "registration_order": "",
+            "land_number": land_number, "area": "100", "declared_value": "5000",
+            "numerator": "1", "denominator": "2", "ping": "", "total_declared_value": "",
+            "owner_name": owner_name, "name": owner_name, "external_id": external_id,
+            "address": "舊地址", "registration_reason": "", "note": "舊備註", "visit_log": "",
+            "birth_year": "1960", "updated_at": "2026-01-01",
+        }
+
+    def list_all_records(self, **_kwargs):
+        self.list_all_calls += 1
+        return [dict(row) for row in self.rows]
+
+    def get_record(self, record_id):
+        self.get_record_calls.append(int(record_id))
+        if self.fail_get_record:
+            raise DesktopApiConnectionError("offline")
+        row = dict(next(item for item in self.rows if item["id"] == int(record_id)))
+        row.update(self.server_overrides.get(int(record_id), {}))
+        return row
+
+    def replace_record_with_history(self, record_id, values, change_logs):
+        for row in self.rows:
+            if row["id"] == int(record_id):
+                row.update(values)
+        return int(record_id)
+
+    def replace_record(self, record_id, values):
+        return self.replace_record_with_history(record_id, values, [])
+
+    def create_record(self, values):
+        self.next_id += 1
+        row = self._row(
+            self.next_id, land_id=30, land_number=values.get("land_number", ""),
+            owner_name=values.get("owner_name", ""), external_id=values.get("external_id", ""),
+        )
+        row.update(values)
+        self.rows.insert(0, row)
+        return self.next_id
+
+    def list_watchlist(self):
+        self.watchlist_calls += 1
+        return [dict(row) for row in self.watchlist]
+
+    def replace_watchlist(self, entries):
+        self.watchlist = [dict(row) for row in entries]
+        return len(self.watchlist)
+
+
+class RecordCacheAfterSaveTests(unittest.TestCase):
+    """A save must not throw the cached record list away and download it all again."""
+
+    def setUp(self):
+        self.client = CachingRecordClient()
+        self.fernet = make_fernet(Fernet.generate_key())
+        self.repository = DesktopApiRecordRepository(self.client, self.fernet)
+        self.assertEqual(self.repository.count_customers(), 3)  # loads the cache once
+
+    def save(self, record_id, **changes):
+        current = next(row for row in self.client.rows if row["id"] == record_id)
+        values = {key: current.get(key, "") for key, _label in LAND_FIELDS}
+        values.update(changes)
+        return self.repository.save_customer_with_change_logs(
+            encrypt_record(self.fernet, values), record_id, []
+        )
+
+    def cached(self, record_id):
+        return next(row for row in self.repository._all_rows() if row["id"] == record_id)
+
+    def test_saving_updates_the_cached_row_without_downloading_the_list_again(self):
+        before = list(self.repository._all_rows())
+        revision = self.repository.data_revision
+        self.save(2, note="新備註")
+        self.assertEqual(self.client.list_all_calls, 1)
+        self.assertEqual(self.cached(2)["note"], "新備註")
+        self.assertGreater(self.repository.data_revision, revision)  # decrypt caches restart
+        # Rows are replaced, never edited in place: a search running in the
+        # background keeps reading the snapshot it already took.
+        self.assertEqual(next(row for row in before if row["id"] == 2)["note"], "舊備註")
+        self.assertIs(self.cached(1), next(row for row in before if row["id"] == 1))
+        self.assertEqual(self.repository.pop_reconcile_ids(), [])
+
+    def test_shared_land_values_follow_to_every_row_of_the_same_land(self):
+        self.save(2, area="250", declared_value="9000")
+        self.assertEqual((self.cached(3)["area"], self.cached(3)["declared_value"]), ("250", "9000"))
+        self.assertEqual(self.cached(1)["area"], "100")  # a different land is untouched
+
+    def test_moving_a_record_to_another_land_or_owner_asks_for_the_servers_version(self):
+        self.save(2, note="只改備註")
+        self.assertEqual(self.repository.pop_reconcile_ids(), [])
+        self.save(2, address="新地址")  # has an ID number, so the owner is the same
+        self.assertEqual(self.repository.pop_reconcile_ids(), [])
+        self.save(2, land_number="101")
+        self.assertEqual(self.repository.pop_reconcile_ids(), [2])
+        self.save(2, external_id="B999")
+        self.assertEqual(self.repository.pop_reconcile_ids(), [2])
+        self.save(1, address="另一個地址")  # no ID number: name + address identify the owner
+        self.assertEqual(self.repository.pop_reconcile_ids(), [1])
+        self.assertEqual(self.repository.pop_reconcile_ids(), [])
+
+    def test_reconcile_stores_the_server_version_and_reports_whether_it_changed(self):
+        self.save(2, land_number="101")
+        self.client.server_overrides[2] = {"land_id": 99, "owner_id": 77}
+        self.assertTrue(self.repository.reconcile_record(2))
+        self.assertEqual((self.cached(2)["land_id"], self.cached(2)["owner_id"]), (99, 77))
+        self.assertFalse(self.repository.reconcile_record(2))  # nothing new the second time
+        self.assertEqual(self.client.get_record_calls, [2, 2])
+        self.assertEqual(self.client.list_all_calls, 1)
+
+    def test_a_blank_optional_field_is_cleared_in_the_cache_like_on_the_server(self):
+        self.save(2, birth_year="")
+        self.assertIsNone(self.cached(2)["birth_year"])
+
+    def test_saving_before_the_list_was_loaded_just_reloads_next_time(self):
+        repository = DesktopApiRecordRepository(self.client, self.fernet)
+        values = {key: "" for key, _label in LAND_FIELDS}
+        values.update(owner_name="甲", note="x")
+        repository.save_customer_with_change_logs(encrypt_record(self.fernet, values), 1, [])
+        self.assertIsNone(repository._rows)
+        self.assertEqual(repository.count_customers(), 3)
+
+    def test_a_new_record_is_fetched_and_inserted_without_downloading_the_list(self):
+        values = {key: "" for key, _label in LAND_FIELDS}
+        values.update(district="桃園區", land_number="300", owner_name="新地主")
+        new_id = self.repository.save_customer(encrypt_record(self.fernet, values))
+        self.assertEqual(self.client.list_all_calls, 1)
+        self.assertEqual(self.client.get_record_calls, [new_id])
+        self.assertEqual([row["id"] for row in self.repository._all_rows()][0], new_id)
+        self.assertEqual(self.repository.count_customers(), 4)
+
+    def test_if_the_new_record_cannot_be_fetched_the_next_read_reloads_everything(self):
+        self.client.fail_get_record = True
+        values = {key: "" for key, _label in LAND_FIELDS}
+        values.update(district="桃園區", land_number="300", owner_name="新地主")
+        self.repository.save_customer(encrypt_record(self.fernet, values))
+        self.assertIsNone(self.repository._rows)
+        self.assertEqual(self.repository.count_customers(), 4)
+        self.assertEqual(self.client.list_all_calls, 2)
+
+    def test_watchlist_copy_is_reused_until_it_expires_or_is_replaced(self):
+        now = [1000.0]
+        self.repository._clock = lambda: now[0]
+        self.assertEqual(self.repository.find_watchlist_match_cached(" 王 大明 ")["note"], "注意")
+        self.assertIsNone(self.repository.find_watchlist_match_cached("李小華"))
+        self.assertEqual(self.client.watchlist_calls, 1)
+        now[0] += 119
+        self.repository.get_watchlist_entries_cached()
+        self.assertEqual(self.client.watchlist_calls, 1)
+        now[0] += 2  # older than two minutes: fetched again
+        self.repository.get_watchlist_entries_cached()
+        self.assertEqual(self.client.watchlist_calls, 2)
+        # The plain methods (used by the editing dialog) always ask the server.
+        self.repository.get_watchlist_entries()
+        self.repository.find_watchlist_match("王大明")
+        self.assertEqual(self.client.watchlist_calls, 4)
+        # Replacing the list forgets the copy.
+        self.repository.replace_watchlist_entries([{"name": "李小華", "note": "新"}])
+        self.assertEqual(self.repository.find_watchlist_match_cached("李小華")["note"], "新")
+        self.assertEqual(self.client.watchlist_calls, 5)
 
 
 if __name__ == "__main__":

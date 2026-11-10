@@ -21,6 +21,7 @@ from customer_security import ENCRYPTED_FIELDS, decrypt_value, encrypt_record, m
 RECORD_SEARCH_FIELDS = (
     "district",
     "section",
+    "subsection",
     "registration_order",
     "land_number",
     "owner_name",
@@ -162,6 +163,10 @@ class CustomerDataSource(Protocol):
     def delete_follow_up(self, user: AuthenticatedUser, record_id: int) -> bool: ...
 
     def list_follow_ups(self, user: AuthenticatedUser, limit: int = 500) -> list[dict]: ...
+
+    def list_contact_logs_by_date(
+        self, user: AuthenticatedUser, target_date: str, mine_only: bool = False
+    ) -> list[dict]: ...
 
     def list_projects(self, user: AuthenticatedUser) -> list[dict]: ...
 
@@ -389,4 +394,7 @@ def _filter_records(records, *, query="", filters=None):
 def _encrypted_record(user, values):
     plain = {key: values.get(key) for key, _label in LAND_FIELDS}
     plain["name"] = plain.get("owner_name") or ""
+    # birth_year rides along outside LAND_FIELDS on purpose -- see
+    # customer_repository.customer_data_columns for why.
+    plain["birth_year"] = values.get("birth_year")
     return encrypt_record(make_fernet(user.data_key), plain)

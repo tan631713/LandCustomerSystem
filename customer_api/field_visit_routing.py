@@ -30,6 +30,10 @@ class RouteCandidate:
     priority: int = 0
     route_order: int | None = None
     is_order_locked: bool = False
+    # Items sharing a group key are one physical stop (for example several
+    # land shares held by the same owner).  They are kept next to each other
+    # so the field worker visits that address once.
+    group_key: object | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,6 +159,11 @@ def _validate_candidates(
             raise ValueError("priority must be an integer")
         if candidate.route_order is not None and candidate.route_order <= 0:
             raise ValueError("route_order must be a positive integer or None")
+        if candidate.group_key is not None and (
+            isinstance(candidate.group_key, bool)
+            or not isinstance(candidate.group_key, (int, str))
+        ):
+            raise ValueError("group_key must be an integer, a string or None")
         _coordinate(candidate)
     return normalized
 
@@ -236,6 +245,49 @@ def _automatic_order(
     return ordered
 
 
+def _cluster_groups(
+    ordered: list[RouteCandidate],
+    lead_group: object | None = None,
+) -> list[RouteCandidate]:
+    """Pull later members of a stop group up behind the first member.
+
+    Postponed and active members are clustered separately so that a postponed
+    visit never jumps ahead of the day's remaining plan.  ``lead_group`` moves
+    that group's members to the front (used when the current item is kept
+    first and its companions should follow immediately).
+    """
+
+    def cluster_key(candidate: RouteCandidate):
+        if candidate.group_key is None:
+            return None
+        return (candidate.group_key, candidate.status == "postponed")
+
+    members: dict[object, list[RouteCandidate]] = {}
+    for candidate in ordered:
+        key = cluster_key(candidate)
+        if key is not None:
+            members.setdefault(key, []).append(candidate)
+
+    result: list[RouteCandidate] = []
+    emitted: set[int] = set()
+    if lead_group is not None:
+        for key, group in members.items():
+            if key[0] == lead_group and not key[1]:
+                for candidate in group:
+                    result.append(candidate)
+                    emitted.add(candidate.item_id)
+    for candidate in ordered:
+        if candidate.item_id in emitted:
+            continue
+        key = cluster_key(candidate)
+        group = members.get(key) if key is not None else None
+        for member in group or [candidate]:
+            if member.item_id not in emitted:
+                result.append(member)
+                emitted.add(member.item_id)
+    return result
+
+
 def _merge_locked_positions(
     automatic: list[RouteCandidate],
     locked: list[RouteCandidate],
@@ -293,6 +345,8 @@ def optimize_route(
     4. Higher numeric priorities are planned before lower priorities.
     5. Postponed items are planned after other coordinate-bearing items.
     6. Items without coordinates are placed last.
+    7. Unlocked items sharing a ``group_key`` are kept consecutive, starting
+       where the group's first member was planned.
     """
 
     start = validate_coordinate(current_latitude, current_longitude)
@@ -330,7 +384,10 @@ def optimize_route(
     automatic_candidates = [
         candidate for candidate in eligible if not candidate.is_order_locked
     ]
-    automatic = _automatic_order(automatic_candidates, start_for_automatic)
+    automatic = _cluster_groups(
+        _automatic_order(automatic_candidates, start_for_automatic),
+        lead_group=forced_first.group_key if forced_first is not None else None,
+    )
     ordered = _merge_locked_positions(automatic, locked, forced_first)
     ordered_ids = [candidate.item_id for candidate in ordered]
     if (

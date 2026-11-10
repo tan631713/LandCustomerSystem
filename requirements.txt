@@ -1,5 +1,13 @@
+# PySide6 pulls in PySide6-Addons automatically, which includes
+# QtWebEngineWidgets (embedded map view, customer_productivity.py's
+# MapLocationsDialog) -- no separate package needed.
 PySide6==6.11.1
 cryptography==49.0.0
 openpyxl==3.1.5
 qrcode[pil]==8.2
 Pillow==12.2.0
+# Fluent (Windows 11 style) widgets for the desktop client -- GPLv3 edition;
+# the owner confirmed their own use needs no commercial licence (2026-11-02).
+PySide6-Fluent-Widgets==1.11.3
+PySideSix-Frameless-Window==0.8.2
+darkdetect==0.8.0

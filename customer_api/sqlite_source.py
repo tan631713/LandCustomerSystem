@@ -8,6 +8,7 @@ from customer_api.sqlite_projects import SQLiteProjectMixin
 from customer_api.sqlite_records import SQLiteRecordMixin
 from customer_api.sqlite_remote_operations import SQLiteRemoteOperationMixin
 from customer_api.sqlite_tags import SQLiteTagMixin
+from customer_api.sqlite_urban_plans import SQLiteUrbanPlanMixin
 from customer_api.types import AuthenticatedUser
 from customer_database import CustomerDatabase
 from customer_fields import LAND_FIELDS
@@ -19,6 +20,7 @@ class SQLiteCustomerDataSource(
     SQLiteCollaborationMixin,
     SQLiteProjectMixin,
     SQLiteTagMixin,
+    SQLiteUrbanPlanMixin,
     SQLiteAttachmentMixin,
     SQLiteDesktopFeatureMixin,
     SQLiteRemoteOperationMixin,

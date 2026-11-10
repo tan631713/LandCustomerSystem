@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>duplicateFinderDialogContent</class>
+ <widget class="QWidget" name="duplicateFinderDialogContent">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>900</width>
+    <height>520</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>智慧重複資料檢查</string>
+  </property>
+  <property name="dialogSize" stdset="0">
+   <size>
+    <width>900</width>
+    <height>520</height>
+   </size>
+  </property>
+  <layout class="QVBoxLayout" name="duplicateFinderLayout">
+   <property name="spacing">
+    <number>6</number>
+   </property>
+   <property name="leftMargin">
+    <number>11</number>
+   </property>
+   <property name="topMargin">
+    <number>11</number>
+   </property>
+   <property name="rightMargin">
+    <number>11</number>
+   </property>
+   <property name="bottomMargin">
+    <number>11</number>
+   </property>
+   <item>
+    <widget class="QLabel" name="introLabel">
+     <property name="text">
+      <string>分數綜合身分證、地號、姓名、地址與序號；合併前仍會顯示既有合併預覽。</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="TableWidget" name="pairsTable">
+     <property name="selectionMode">
+      <enum>QAbstractItemView::SingleSelection</enum>
+     </property>
+     <property name="selectionBehavior">
+      <enum>QAbstractItemView::SelectRows</enum>
+     </property>
+     <column>
+      <property name="text">
+       <string>左ID</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>右ID</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>相似度</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>判斷原因</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>左資料</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>右資料</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>狀態</string>
+      </property>
+     </column>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="buttonRow" stretch="0,0,1,0">
+     <property name="spacing">
+      <number>6</number>
+     </property>
+     <property name="leftMargin">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <property name="rightMargin">
+      <number>0</number>
+     </property>
+     <property name="bottomMargin">
+      <number>0</number>
+     </property>
+     <item>
+      <widget class="PrimaryPushButton" name="mergeButton">
+       <property name="text">
+        <string>合併選取組合</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PushButton" name="ignoreButton">
+       <property name="text">
+        <string>忽略此組</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="buttonRowSpacer">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>0</width>
+         <height>0</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="PushButton" name="closeButton">
+       <property name="text">
+        <string>關閉</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+ <customwidget>
+  <class>PrimaryPushButton</class>
+  <extends>QPushButton</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>PushButton</class>
+  <extends>QPushButton</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>TableWidget</class>
+  <extends>QTableWidget</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ </customwidgets>
+ <resources />
+ <connections />
+</ui>

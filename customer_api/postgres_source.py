@@ -6,11 +6,13 @@ from customer_api.postgres_collaboration import PostgreSQLCollaborationMixin
 from customer_api.postgres_desktop_features import PostgreSQLDesktopFeatureMixin
 from customer_api.postgres_field_visits import PostgreSQLFieldVisitMixin
 from customer_api.postgres_owner_contacts import PostgreSQLOwnerContactMixin
+from customer_api.postgres_owner_match import PostgreSQLOwnerMatchMixin
 from customer_api.postgres_projects import PostgreSQLProjectMixin
 from customer_api.postgres_records import PostgreSQLRecordMixin
 from customer_api.postgres_remote_operations import PostgreSQLRemoteOperationMixin
 from customer_api.postgres_schema import ensure_postgres_schema
 from customer_api.postgres_tags import PostgreSQLTagMixin
+from customer_api.postgres_urban_plans import PostgreSQLUrbanPlanMixin
 from customer_api.types import AuthenticatedUser
 from customer_security import derive_encryption_key, make_fernet, verify_password
 
@@ -20,10 +22,12 @@ class PostgreSQLCustomerDataSource(
     PostgreSQLCollaborationMixin,
     PostgreSQLProjectMixin,
     PostgreSQLTagMixin,
+    PostgreSQLUrbanPlanMixin,
     PostgreSQLAttachmentMixin,
     PostgreSQLDesktopFeatureMixin,
     PostgreSQLFieldVisitMixin,
     PostgreSQLOwnerContactMixin,
+    PostgreSQLOwnerMatchMixin,
     PostgreSQLRemoteOperationMixin,
 ):
     backend_name = "postgresql"
@@ -34,13 +38,16 @@ class PostgreSQLCustomerDataSource(
                ownership.id AS ownership_id,
                land.id AS land_id,
                owner.id AS owner_id,
-               land.district, land.section, ownership.registration_order,
+               land.district, land.section, land.subsection,
+               land.urban_plan_id, urban_plan.name AS urban_plan_name,
+               ownership.registration_order,
                land.land_number, land.area, land.declared_value,
                ownership.numerator, ownership.denominator, ownership.ping,
                ownership.total_declared_value,
                COALESCE(ownership.owner_name_override, owner.owner_name) AS owner_name,
                COALESCE(ownership.external_id_override, owner.external_id) AS external_id,
                COALESCE(ownership.address_override, owner.address) AS address,
+               owner.birth_year,
                ownership.registration_reason, ownership.note,
                ownership.visit_log,
                COALESCE(ownership.owner_name_override, owner.owner_name) AS name,
@@ -117,6 +124,7 @@ class PostgreSQLCustomerDataSource(
         FROM ownerships ownership
         JOIN owners owner ON owner.id = ownership.owner_id
         JOIN lands land ON land.id = ownership.land_id
+        LEFT JOIN urban_plans urban_plan ON urban_plan.id = land.urban_plan_id
         LEFT JOIN follow_up_reminders reminder ON reminder.ownership_id = ownership.id
     """
 
@@ -147,11 +155,13 @@ class PostgreSQLCustomerDataSource(
                 "SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations"
             ).fetchone()
             count_row = conn.execute("SELECT COUNT(*) AS count FROM ownerships").fetchone()
+            account_row = conn.execute("SELECT COUNT(*) AS count FROM users").fetchone()
         return {
             "status": "ok",
             "backend": self.backend_name,
             "schema_version": int(schema_row["version"]),
             "record_count": int(count_row["count"]),
+            "account_count": int(account_row["count"]),
         }
 
     def authenticate(self, username, password):

@@ -524,14 +524,17 @@ class PostgreSQLRemoteOperationMixin:
             for row in conn.execute(
                 """
                 SELECT reminder.ownership_id AS id, reminder.due_date, reminder.status,
-                       land.district, land.section, land.land_number
+                       land.district, land.section, land.subsection, land.land_number
                 FROM follow_up_reminders reminder
                 JOIN ownerships ownership ON ownership.id=reminder.ownership_id
                 JOIN lands land ON land.id=ownership.land_id
                 WHERE reminder.status <> '完成' AND reminder.due_date <= %s
                 """, (today_text,),
             ).fetchall():
-                label = " ".join(str(row[key] or "") for key in ("district", "section", "land_number"))
+                label = " ".join(
+                    str(row[key] or "")
+                    for key in ("district", "section", "subsection", "land_number")
+                )
                 entries.append((f"follow_up:{row['id']}:{row['due_date']}", "追蹤", "地主追蹤到期", label, "逾期" if str(row["due_date"]) < str(today_text) else "提醒", "ownership", row["id"]))
             for table, category, related_type in (("projects", "案件", "project"), ("project_tasks", "任務", "project_task")):
                 title_col = "title"

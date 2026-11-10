@@ -6,13 +6,9 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QAbstractItemView,
     QCheckBox,
     QDialogButtonBox,
-    QFormLayout,
-    QGridLayout,
     QHeaderView,
-    QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -20,10 +16,14 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
-    QVBoxLayout,
 )
 
+from qfluentwidgets import PushButton as FluentPushButton
+
+from customer_fluent import set_custom_style
 from customer_responsive_dialog import ResponsiveDialog as QDialog
+from customer_theme import token
+from customer_ui_loader import find_child, install_ui
 
 from customer_messages import (
     backup_failure_message,
@@ -102,90 +102,61 @@ def format_storage_size(size_bytes):
 
 
 class BackupStatusDialog(QDialog):
+    # Layout: ui/dialogs/backup_status_dialog.ui; each xxxValue label is filled here.
+    ui_file = "dialogs/backup_status_dialog.ui"
+    ui_object_names = (
+        "databaseValue", "integrityValue", "backupCountValue", "compressedCountValue",
+        "totalSizeValue", "latestTimeValue", "latestFileValue", "directoryValue",
+        "guidanceValue", "buttonBox",
+    )
+
     def __init__(self, status, backup_directory, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("備份狀態")
-        self.setModal(True)
-        self.setMinimumWidth(520)
-
-        layout = QVBoxLayout(self)
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(14)
-        grid.setVerticalSpacing(10)
-        rows = [
-            ("資料庫狀態", "正常" if status.database_healthy else "異常"),
-            ("完整性檢查", status.database_message),
-            ("備份檔案數量", str(status.backup_count)),
-            ("ZIP 壓縮備份", str(status.compressed_count)),
-            ("備份佔用空間", format_storage_size(status.total_bytes)),
-            (
-                "最近備份時間",
-                status.latest_backup_time.strftime("%Y-%m-%d %H:%M:%S")
-                if status.latest_backup_time
-                else "尚無備份",
-            ),
-            (
-                "最近備份檔案",
-                str(status.latest_backup_path) if status.latest_backup_path else "—",
-            ),
-            ("備份資料夾", str(backup_directory)),
-            ("建議處理", backup_status_guidance(status)),
-        ]
-        for row_index, (label, value) in enumerate(rows):
-            label_widget = QLabel(label)
-            label_widget.setStyleSheet("font-weight: 600;")
-            value_widget = QLabel(value)
-            value_widget.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            value_widget.setWordWrap(True)
-            grid.addWidget(label_widget, row_index, 0)
-            grid.addWidget(value_widget, row_index, 1)
-        layout.addLayout(grid)
-        buttons = QDialogButtonBox(QDialogButtonBox.Close)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        # Deliberately non-modal -- see show_backup_status() below.
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        values = {
+            "databaseValue": "正常" if status.database_healthy else "異常",
+            "integrityValue": status.database_message,
+            "backupCountValue": str(status.backup_count),
+            "compressedCountValue": str(status.compressed_count),
+            "totalSizeValue": format_storage_size(status.total_bytes),
+            "latestTimeValue": status.latest_backup_time.strftime("%Y-%m-%d %H:%M:%S")
+            if status.latest_backup_time
+            else "尚無備份",
+            "latestFileValue": str(status.latest_backup_path) if status.latest_backup_path else "—",
+            "directoryValue": str(backup_directory),
+            "guidanceValue": backup_status_guidance(status),
+        }
+        for object_name, value in values.items():
+            find_child(content, object_name, QLabel).setText(value)
+        find_child(content, "buttonBox", QDialogButtonBox).rejected.connect(self.reject)
 
 
 class BackupManagementDialog(QDialog):
+    # Layout: ui/dialogs/backup_management_dialog.ui.
+    ui_file = "dialogs/backup_management_dialog.ui"
+    ui_object_names = (
+        "compressCheckBox",
+        "retentionDaysSpin",
+        "maxCountSpin",
+        "hintLabel",
+        "buttonBox",
+    )
+
     def __init__(self, *, compress_backups, retention_days, max_count, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("備份管理")
         self.setModal(True)
-        self.setMinimumWidth(540)
         self.requested_action = "save"
+        content = install_ui(self, self.ui_file, self.ui_object_names)
 
-        layout = QVBoxLayout(self)
-        description = QLabel(
-            "系統每 6 小時檢查一次，跨日會建立每日備份並依下列規則整理。"
-            "無論設定為何，最新 3 份備份都不會被自動刪除。"
-        )
-        description.setWordWrap(True)
-        layout.addWidget(description)
-
-        form = QFormLayout()
-        self.compress_checkbox = QCheckBox("新備份使用 ZIP，並自動壓縮既有 .db 備份")
+        self.compress_checkbox = find_child(content, "compressCheckBox", QCheckBox)
         self.compress_checkbox.setChecked(bool(compress_backups))
-        form.addRow("壓縮", self.compress_checkbox)
-
-        self.retention_days_spin = QSpinBox()
-        self.retention_days_spin.setRange(0, 3650)
-        self.retention_days_spin.setSuffix(" 天")
-        self.retention_days_spin.setSpecialValueText("不依天數清除")
+        self.retention_days_spin = find_child(content, "retentionDaysSpin", QSpinBox)
         self.retention_days_spin.setValue(int(retention_days))
-        form.addRow("保留期限", self.retention_days_spin)
-
-        self.max_count_spin = QSpinBox()
-        self.max_count_spin.setRange(3, 9999)
-        self.max_count_spin.setSuffix(" 份")
+        self.max_count_spin = find_child(content, "maxCountSpin", QSpinBox)
         self.max_count_spin.setValue(max(3, int(max_count)))
-        form.addRow("最多保留", self.max_count_spin)
-        layout.addLayout(form)
 
-        hint = QLabel("立即清理只會刪除系統在 backups 資料夾中建立的 customers-*.db / *.zip。")
-        hint.setWordWrap(True)
-        hint.setStyleSheet("color: #94a3b8;")
-        layout.addWidget(hint)
-
-        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons = find_child(content, "buttonBox", QDialogButtonBox)
         buttons.button(QDialogButtonBox.Save).setText("儲存並執行")
         compress_button = buttons.addButton("立即壓縮既有備份", QDialogButtonBox.ActionRole)
         clean_button = buttons.addButton("立即清理舊備份", QDialogButtonBox.ActionRole)
@@ -193,7 +164,6 @@ class BackupManagementDialog(QDialog):
         buttons.rejected.connect(self.reject)
         compress_button.clicked.connect(lambda: self._accept_action("compress"))
         clean_button.clicked.connect(lambda: self._accept_action("clean"))
-        layout.addWidget(buttons)
 
     def _accept_action(self, action):
         self.requested_action = action
@@ -210,6 +180,13 @@ class BackupManagementDialog(QDialog):
 class ServerBackupTargetsDialog(QDialog):
     """Manage paths that are resolved and written by the home server."""
 
+    # Layout: ui/dialogs/server_backup_targets_dialog.ui.
+    ui_file = "dialogs/server_backup_targets_dialog.ui"
+    ui_object_names = (
+        "targetsTable", "nameEdit", "pathEdit", "enabledCheckBox",
+        "newButton", "saveButton", "deleteButton", "syncButton", "closeButton",
+    )
+
     def __init__(
         self,
         repository,
@@ -223,56 +200,21 @@ class ServerBackupTargetsDialog(QDialog):
         self.retention_days = int(retention_days)
         self.max_count = int(max_count)
         self.rows = []
-        self.setWindowTitle("家中伺服器異地備份")
-        self.resize(900, 560)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
 
-        layout = QVBoxLayout(self)
-        note = QLabel(
-            "此處路徑是家中伺服器上的資料夾，不是公司筆電。可輸入外接硬碟 "
-            "E:\\土地備份，或家中主機已掛載的 NAS 路徑。同步後會驗證 SHA-256。"
-        )
-        note.setWordWrap(True)
-        layout.addWidget(note)
-
-        self.table = QTableWidget(0, 6)
-        self.table.setHorizontalHeaderLabels(
-            ["ID", "名稱", "家中主機路徑", "啟用", "最後成功", "錯誤"]
-        )
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table = find_child(content, "targetsTable", QTableWidget)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.table.itemSelectionChanged.connect(self.load_selected)
-        layout.addWidget(self.table)
 
-        form = QFormLayout()
-        self.name_edit = QLineEdit()
-        self.name_edit.setPlaceholderText("例如：家中外接硬碟")
-        self.path_edit = QLineEdit()
-        self.path_edit.setPlaceholderText(r"例如 E:\土地備份 或 \\NAS\土地備份")
-        self.enabled_checkbox = QCheckBox("啟用")
-        self.enabled_checkbox.setChecked(True)
-        form.addRow("名稱", self.name_edit)
-        form.addRow("家中主機路徑", self.path_edit)
-        form.addRow("狀態", self.enabled_checkbox)
-        layout.addLayout(form)
+        self.name_edit = find_child(content, "nameEdit", QLineEdit)
+        self.path_edit = find_child(content, "pathEdit", QLineEdit)
+        self.enabled_checkbox = find_child(content, "enabledCheckBox", QCheckBox)
 
-        buttons = QHBoxLayout()
-        new_button = QPushButton("清空新增")
-        save_button = QPushButton("新增／更新")
-        delete_button = QPushButton("刪除")
-        sync_button = QPushButton("立即建立並同步")
-        close_button = QPushButton("關閉")
-        new_button.clicked.connect(self.clear_form)
-        save_button.clicked.connect(self.save_target)
-        delete_button.clicked.connect(self.delete_target)
-        sync_button.clicked.connect(self.sync_targets)
-        close_button.clicked.connect(self.accept)
-        for button in (new_button, save_button, delete_button):
-            buttons.addWidget(button)
-        buttons.addStretch(1)
-        buttons.addWidget(sync_button)
-        buttons.addWidget(close_button)
-        layout.addLayout(buttons)
+        find_child(content, "newButton", QPushButton).clicked.connect(self.clear_form)
+        find_child(content, "saveButton", QPushButton).clicked.connect(self.save_target)
+        find_child(content, "deleteButton", QPushButton).clicked.connect(self.delete_target)
+        find_child(content, "syncButton", QPushButton).clicked.connect(self.sync_targets)
+        find_child(content, "closeButton", QPushButton).clicked.connect(self.accept)
         self.refresh()
 
     def selected_row(self):
@@ -366,24 +308,16 @@ class ServerBackupTargetsDialog(QDialog):
 class ServerBackupRestoreDialog(QDialog):
     CONFIRMATION_TEXT = "還原家中伺服器"
 
+    # Layout: ui/dialogs/server_backup_restore_dialog.ui.
+    ui_file = "dialogs/server_backup_restore_dialog.ui"
+    ui_object_names = ("backupsTable", "confirmationEdit", "buttonBox")
+
     def __init__(self, backups, parent=None):
         super().__init__(parent)
         self.rows = [dict(row) for row in backups if row.get("status") == "ok"]
-        self.setWindowTitle("還原家中伺服器備份")
-        self.resize(820, 480)
-        layout = QVBoxLayout(self)
-        warning = QLabel(
-            "還原會取代家中伺服器的 PostgreSQL 正式資料與納管附件。系統會先自動建立"
-            "還原前安全備份，完成後所有裝置必須重新登入。"
-        )
-        warning.setWordWrap(True)
-        layout.addWidget(warning)
-        self.table = QTableWidget(len(self.rows), 5)
-        self.table.setHorizontalHeaderLabels(
-            ["備份檔", "建立時間", "資料筆數", "附件數", "大小"]
-        )
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        content = install_ui(self, self.ui_file, self.ui_object_names)
+        self.table = find_child(content, "backupsTable", QTableWidget)
+        self.table.setRowCount(len(self.rows))
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         for row_index, row in enumerate(self.rows):
             values = (
@@ -395,20 +329,17 @@ class ServerBackupRestoreDialog(QDialog):
             )
             for column, value in enumerate(values):
                 self.table.setItem(row_index, column, QTableWidgetItem(str(value)))
-        layout.addWidget(self.table)
-        self.confirmation_edit = QLineEdit()
+        self.confirmation_edit = find_child(content, "confirmationEdit", QLineEdit)
         self.confirmation_edit.setPlaceholderText(
             f"請完整輸入：{self.CONFIRMATION_TEXT}"
         )
-        layout.addWidget(self.confirmation_edit)
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons = find_child(content, "buttonBox", QDialogButtonBox)
         self.restore_button = buttons.button(QDialogButtonBox.Ok)
         self.restore_button.setText("開始還原")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         self.table.itemSelectionChanged.connect(self.update_restore_button)
         self.confirmation_edit.textChanged.connect(self.update_restore_button)
-        layout.addWidget(buttons)
         if self.rows:
             self.table.selectRow(0)
         self.update_restore_button()
@@ -432,7 +363,7 @@ class BackupStatusMixin:
     BACKUP_MAINTENANCE_INTERVAL_MS = 6 * 60 * 60 * 1000
 
     def setup_backup_status(self):
-        self.backup_status_button = QPushButton("檢查備份中…")
+        self.backup_status_button = FluentPushButton("檢查備份中…")
         self.backup_status_button.setFlat(True)
         self.backup_status_button.setToolTip("查看資料庫與備份狀態")
         self.backup_status_button.clicked.connect(self.show_backup_status)
@@ -506,10 +437,11 @@ class BackupStatusMixin:
         self.backup_status = status
         if getattr(self, "backup_status_button", None) is not None:
             self.backup_status_button.setText(status.short_text)
-            color = "#86efac" if status.healthy else "#fbbf24"
+            color = token("success_ink") if status.healthy else token("amber_ink")
             if not status.database_healthy:
-                color = "#f87171"
-            self.backup_status_button.setStyleSheet(f"color: {color}; padding: 2px 8px;")
+                color = token("seal")
+            # A Fluent button keeps its own style sheet; add the colour to it.
+            set_custom_style(self.backup_status_button, f"PushButton {{ color: {color}; }}")
         if show_warning and not status.healthy:
             self.statusBar().showMessage(
                 backup_status_warning_message(status),
@@ -524,7 +456,13 @@ class BackupStatusMixin:
             if getattr(self, "api_mode", False)
             else self.database.backup_directory
         )
-        BackupStatusDialog(status, backup_directory, self).exec()
+        self._show_non_modal_report_dialog(
+            "_backup_status_dialog",
+            BackupStatusDialog,
+            status,
+            backup_directory,
+            self,
+        )
 
     def backup_now(self):
         if getattr(self, "api_mode", False):

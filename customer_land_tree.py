@@ -13,6 +13,7 @@ LAND_PARENT_SORT_FIELDS = {
     "rowid",
     "district",
     "section",
+    "subsection",
     "land_number",
     "full_land_number",
     "area",
@@ -68,6 +69,7 @@ def full_land_number(record):
     parts = [
         str(raw.get("district") or "").strip(),
         str(raw.get("section") or "").strip(),
+        str(raw.get("subsection") or "").strip(),
         str(raw.get("land_number") or "").strip(),
     ]
     text = " ".join(part for part in parts if part)
@@ -177,6 +179,8 @@ def _parent_sort_key(group, field):
         return str(raw.get("district") or "").casefold()
     if field == "section":
         return str(raw.get("section") or "").casefold()
+    if field == "subsection":
+        return str(raw.get("subsection") or "").casefold()
     if field in {"land_number", "full_land_number"}:
         return normalized_land_number_key(raw.get("land_number"))
     if field == "area":
@@ -189,6 +193,7 @@ def _parent_sort_key(group, field):
     return (
         str(raw.get("district") or "").casefold(),
         str(raw.get("section") or "").casefold(),
+        str(raw.get("subsection") or "").casefold(),
         normalized_land_number_key(raw.get("land_number")),
         group.land_id or 0,
     )

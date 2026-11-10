@@ -3,15 +3,18 @@
 from customer_models import (
     CHECK_COLUMN,
     LandTreeProxyModel,
+    NODE_KIND_ROLE,
     RecordTableModel,
     TAGS_ROLE,
 )
+from customer_flow_layout import FlowLayout
 from customer_tag_display import safe_tag_qcolor, tag_text_qcolor
-from PySide6.QtCore import QRect, QSize, Qt
+from customer_theme import heading_font, qcolor, token
+from customer_ui_loader import find_child, load_ui
+from PySide6.QtCore import QRect, QRectF, QSize, Qt
 from PySide6.QtGui import QAction, QKeySequence, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QHBoxLayout,
     QHeaderView,
     QLabel,
     QMenu,
@@ -20,21 +23,25 @@ from PySide6.QtWidgets import (
     QStyledItemDelegate,
     QStyleOptionViewItem,
     QTreeView,
+    QVBoxLayout,
+    QWidget,
 )
 
 
-def apply_land_tree_visual_style(tree, row_height=28):
+def apply_land_tree_visual_style(tree, row_height=34):
     """Apply a uniform structural colour while preserving semantic model colours."""
 
     row_height = max(20, int(row_height))
     tree.setAlternatingRowColors(False)
     tree.setStyleSheet(
-        "QTreeView { background-color: #2d2d2d; alternate-background-color: #2d2d2d; }"
+        f"QTreeView {{ background-color: {token('paper')};"
+        f" alternate-background-color: {token('paper')}; }}"
         "QTreeView::item {"
         f" min-height: {row_height}px;"
-        " border-bottom: 1px solid #374151;"
+        f" border-bottom: 1px solid {token('row_rule')};"
         " }"
-        "QTreeView::item:selected { background-color: #365d8d; color: #ffffff; }"
+        f"QTreeView::item:selected {{ background-color: {token('sel')};"
+        f" color: {token('ink')}; }}"
     )
 
 
@@ -43,7 +50,7 @@ class _TreeVerticalHeaderAdapter:
 
     def __init__(self, tree):
         self.tree = tree
-        self.default_size = 28
+        self.default_size = 34
 
     def setVisible(self, _visible):
         return None
@@ -81,6 +88,18 @@ class LandTreeView(QTreeView):
     def verticalHeader(self):
         return self._vertical_header_adapter
 
+    def drawRow(self, painter, option, index):
+        super().drawRow(painter, option, index)
+        # A land (top-level) row opens a new group: rule it off from the rows above.
+        if index.isValid() and not index.parent().isValid() and index.row() > 0:
+            painter.save()
+            try:
+                painter.setPen(qcolor("rule_strong"))
+                top = option.rect.top()
+                painter.drawLine(option.rect.left(), top, option.rect.right(), top)
+            finally:
+                painter.restore()
+
 
 class TagPillDelegate(QStyledItemDelegate):
     """Paint complete tag metadata as readable, individually coloured pills."""
@@ -89,8 +108,29 @@ class TagPillDelegate(QStyledItemDelegate):
     PILL_SPACING = 5
     VERTICAL_PADDING = 3
 
-    def paint(self, painter, option, index):
+    @staticmethod
+    def _visible_tags(option, index):
+        """Tags to actually draw for this cell.
+
+        A land group's header row shows its aggregated tags as a summary
+        while collapsed. Once expanded, its child row(s) directly beneath
+        already show those same tags, so the header suppresses its own
+        pills to avoid painting the identical tag twice.
+        """
+
         tags = list(index.data(TAGS_ROLE) or [])
+        if tags and index.data(NODE_KIND_ROLE) == "land":
+            view = option.widget
+            # QTreeView tracks expansion against the column-0 index; asking
+            # about any other column's index always reports collapsed.
+            if isinstance(view, QAbstractItemView) and view.isExpanded(
+                index.siblingAtColumn(0)
+            ):
+                return []
+        return tags
+
+    def paint(self, painter, option, index):
+        tags = self._visible_tags(option, index)
         if not tags:
             super().paint(painter, option, index)
             return
@@ -145,7 +185,7 @@ class TagPillDelegate(QStyledItemDelegate):
 
     def sizeHint(self, option, index):
         base = super().sizeHint(option, index)
-        tags = list(index.data(TAGS_ROLE) or [])
+        tags = self._visible_tags(option, index)
         if not tags:
             return base
         metrics = option.fontMetrics
@@ -156,6 +196,95 @@ class TagPillDelegate(QStyledItemDelegate):
         ) + self.PILL_SPACING * max(0, len(tags) - 1)
         height = max(base.height(), metrics.height() + self.VERTICAL_PADDING * 2 + 4)
         return QSize(width, height)
+
+
+class ShareBarDelegate(QStyledItemDelegate):
+    """Land rows: "N 位" plus a small bar, one segment per owner's share.
+
+    Child (ownership) rows are painted normally.  Data is read through the
+    public model API (group_for_index); a share with a non-positive numerator
+    or denominator is skipped.
+    """
+
+    BAR_WIDTH = 64
+    BAR_HEIGHT = 6
+    SEGMENT_GAP = 1
+
+    def __init__(self, source_model_for, parent=None):
+        super().__init__(parent)
+        # Maps a view index (proxy) to ``(source_model, source_index)``.
+        self._source_model_for = source_model_for
+        self.selected_owner_id = lambda: None
+
+    def _segments(self, index):
+        resolved = self._source_model_for(index)
+        if resolved is None:
+            return None
+        model, source_index = resolved
+        if index.data(NODE_KIND_ROLE) != "land":
+            return None
+        group = model.group_for_index(source_index)
+        if group is None:
+            return None
+        from customer_domain import parse_number
+
+        segments = []
+        for record in group.records:
+            raw = record.get("raw") or {}
+            numerator = parse_number(raw.get("numerator"))
+            denominator = parse_number(raw.get("denominator"))
+            if numerator is None or denominator is None or numerator <= 0 or denominator <= 0:
+                continue
+            segments.append((int(record["id"]), numerator / denominator))
+        return segments
+
+    def paint(self, painter, option, index):
+        segments = self._segments(index)
+        if segments is None:
+            super().paint(painter, option, index)
+            return
+        base = QStyleOptionViewItem(option)
+        self.initStyleOption(base, index)
+        base.text = ""
+        style = base.widget.style() if base.widget else None
+        if style is not None:
+            style.drawControl(QStyle.CE_ItemViewItem, base, painter, base.widget)
+        painter.save()
+        try:
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            painter.setClipRect(option.rect)
+            text = f"{index.data(Qt.DisplayRole) or 0} 位"
+            text_rect = QRect(option.rect)
+            text_rect.setLeft(option.rect.left() + 8)
+            painter.setPen(qcolor("ink"))
+            painter.drawText(text_rect, int(Qt.AlignLeft | Qt.AlignVCenter), text)
+            if not segments:
+                return
+            bar_left = option.rect.right() - self.BAR_WIDTH - 8
+            if bar_left <= option.rect.left() + painter.fontMetrics().horizontalAdvance(text) + 14:
+                return
+            total = max(1.0, sum(share for _id, share in segments))
+            top = option.rect.center().y() - self.BAR_HEIGHT // 2
+            selected_id = self.selected_owner_id()
+            palette = ("seg1", "seg2", "seg3")
+            x = float(bar_left)
+            other = 0
+            for position, (record_id, share) in enumerate(segments):
+                width = self.BAR_WIDTH * share / total
+                gap = self.SEGMENT_GAP if position < len(segments) - 1 else 0
+                if record_id == selected_id:
+                    color = qcolor("green")
+                else:
+                    color = qcolor(palette[other % len(palette)])
+                    other += 1
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(color)
+                painter.drawRoundedRect(
+                    QRectF(x, top, max(1.0, width - gap), self.BAR_HEIGHT), 2, 2
+                )
+                x += width
+        finally:
+            painter.restore()
 
 
 def _build_record_table(self, parent_layout, TABLE_COLUMNS, TABLE_WIDTHS):
@@ -173,6 +302,18 @@ def _build_record_table(self, parent_layout, TABLE_COLUMNS, TABLE_WIDTHS):
     self.table_view.configure_tag_delegate(
         self.tag_pill_delegate,
         self.table_column_indexes["tag_names"],
+    )
+    self.share_bar_delegate = ShareBarDelegate(
+        lambda proxy_index: (
+            (self.table_model, self.source_table_index(proxy_index))
+            if proxy_index.isValid()
+            else None
+        ),
+        self.table_view,
+    )
+    self.share_bar_delegate.selected_owner_id = lambda: self.selected_record_id
+    self.table_view.setItemDelegateForColumn(
+        self.table_column_indexes["owner_count"], self.share_bar_delegate
     )
     self.table_view.setSelectionBehavior(QAbstractItemView.SelectRows)
     self.table_view.setSelectionMode(QAbstractItemView.ExtendedSelection)
@@ -217,27 +358,112 @@ def _build_record_table(self, parent_layout, TABLE_COLUMNS, TABLE_WIDTHS):
     self.table_view.expanded.connect(self.on_land_group_expanded)
     self.table_view.collapsed.connect(self.on_land_group_collapsed)
 
-    parent_layout.addWidget(self.table_view)
-    paging = QHBoxLayout()
-    self.expand_all_button = QPushButton("全部展開")
-    self.expand_all_button.clicked.connect(self.expand_all_land_groups)
-    paging.addWidget(self.expand_all_button)
-    self.collapse_all_button = QPushButton("全部收合")
-    self.collapse_all_button.clicked.connect(self.collapse_all_land_groups)
-    paging.addWidget(self.collapse_all_button)
-    paging.addStretch(1)
-    self.land_count_label = QLabel("土地 0 筆｜地主／所有權資料 0 筆")
-    paging.addWidget(self.land_count_label)
-    self.previous_land_page_button = QPushButton("上一頁")
+    # Row 2 (檢視 / 輸入到 / 全部展開 / 全部收合) sits above the list; the list
+    # itself is a stack of the land tree and the 都市計畫 tree.
+    self.build_urban_plan_row(parent_layout)
+    _build_batch_bar(self, parent_layout)
+    self.build_urban_plan_stack(parent_layout)
+    # Layout: ui/main/list_footer.ui; colours (legend swatches too): ui/theme.qss.
+    footer = load_ui(
+        LIST_FOOTER_UI_FILE,
+        required_names=(
+            "landCountLabel",
+            "previousPageButton",
+            "landPageLabel",
+            "nextPageButton",
+            *(object_name for object_name, _label, _token in ROW_COLOR_LEGEND),
+        ),
+    )
+    # The count may be clipped on a narrow list; the legend and pager may not.
+    self.land_count_label = find_child(footer, "landCountLabel", QLabel)
+    self.previous_land_page_button = find_child(footer, "previousPageButton", QPushButton)
     self.previous_land_page_button.clicked.connect(self.previous_land_page)
-    paging.addWidget(self.previous_land_page_button)
-    self.land_page_label = QLabel("第 1 / 1 頁")
-    paging.addWidget(self.land_page_label)
-    self.next_land_page_button = QPushButton("下一頁")
+    self.land_page_label = find_child(footer, "landPageLabel", QLabel)
+    self.next_land_page_button = find_child(footer, "nextPageButton", QPushButton)
     self.next_land_page_button.clicked.connect(self.next_land_page)
-    paging.addWidget(self.next_land_page_button)
-    parent_layout.addLayout(paging)
+    parent_layout.addWidget(footer)
 
+
+LIST_FOOTER_UI_FILE = "main/list_footer.ui"
+BATCH_BAR_UI_FILE = "main/batch_bar.ui"
+
+# (object name, label, background token) for the swatches under the list.
+ROW_COLOR_LEGEND = (
+    ("legendChecked", "已勾選", "checked"),
+    ("legendWatchlist", "注意名單", "watch"),
+    ("legendOverdue", "追蹤逾期", "overdue"),
+    ("legendNote", "有備註", "note"),
+)
+
+
+# Bar button text -> key of the existing QAction it triggers (see _wire_batch_bar).
+BATCH_BAR_BUTTONS = (
+    ("加入今日行程", "field_visit_action", True),
+    ("加入案件", "assign_case_action", True),
+    ("批量設定標籤", "batch_tags_action", True),
+    ("批次修改", "batch_edit_action", True),
+    ("匯出選取", "export_selected_action", False),
+)
+
+
+def _build_batch_bar(self, parent_layout):
+    """The strip above the list that appears while rows are checked.
+
+    The label and buttons come from ui/main/batch_bar.ui (colours: ui/theme.qss);
+    they are arranged by a FlowLayout here, which wraps to a second row on a
+    narrow list or a large font instead of squeezing the button labels.
+    """
+
+    keys = [key for _text, key, _modifies in BATCH_BAR_BUTTONS] + ["clear_checked_action"]
+    bar = load_ui(
+        BATCH_BAR_UI_FILE,
+        required_names=["batchBarCount", *(f"batchBar_{key}" for key in keys)],
+    )
+    layout = FlowLayout(bar, margins=(12, 8, 12, 8), h_spacing=6, v_spacing=6)
+    self.batch_bar_count_label = find_child(bar, "batchBarCount", QLabel)
+    font = self.batch_bar_count_label.font()
+    font.setBold(True)
+    self.batch_bar_count_label.setFont(font)
+    layout.addWidget(self.batch_bar_count_label)
+    self.batch_bar_buttons = {}
+    for key in keys:
+        button = find_child(bar, f"batchBar_{key}", QPushButton)
+        layout.addWidget(button)
+        self.batch_bar_buttons[key] = button
+    bar.hide()
+    self.batch_bar = bar
+    self.batch_bar_actions = {}
+    parent_layout.addWidget(bar)
+
+
+def _wire_batch_bar(self, actions):
+    """Connect the bar's buttons to the existing menu actions (no new logic)."""
+
+    for key, button in self.batch_bar_buttons.items():
+        action = actions.get(key)
+        if action is None:
+            continue
+        self.batch_bar_actions[key] = action
+        button.clicked.connect(lambda _checked=False, act=action: act.trigger())
+        action.changed.connect(self.update_batch_bar)
+    self.update_batch_bar()
+
+
+
+def _limit_to_server(self, action):
+    """都市計畫 lives on the home server: the standalone database has none."""
+
+    api_mode = bool(getattr(self, "api_mode", False))
+    action.setEnabled(api_mode)
+    if not api_mode:
+        action.setStatusTip("都市計畫需要連線到家中伺服器")
+    return action
+
+
+def _urban_plan_action(self, text):
+    action = QAction(text, self)
+    action.triggered.connect(self.set_urban_plan_for_selection)
+    return _limit_to_server(self, action)
 
 
 def _build_record_menu(self):
@@ -275,6 +501,8 @@ def _build_record_menu(self):
     context_batch_tags_action = QAction("批量設定標籤", self)
     context_batch_tags_action.triggered.connect(self.batch_edit_customer_tags)
     self.record_menu.addAction(context_batch_tags_action)
+    context_urban_plan_action = _urban_plan_action(self, "設定都市計畫…")
+    self.record_menu.addAction(context_urban_plan_action)
     context_contact_action = QAction("聯絡紀錄", self)
     context_contact_action.triggered.connect(self.manage_contact_logs)
     self.record_menu.addAction(context_contact_action)
@@ -307,6 +535,8 @@ def _build_record_menu(self):
     uncheck_land_action = QAction("取消勾選此土地全部地主／持分", self)
     uncheck_land_action.triggered.connect(self.uncheck_selected_rows)
     self.land_menu.addAction(uncheck_land_action)
+    self.land_menu.addSeparator()
+    self.land_menu.addAction(_urban_plan_action(self, "設定都市計畫…"))
 
     self.api_preview_context_actions = (
         context_case_manage_action,
@@ -346,12 +576,12 @@ def _build_data_menu(self):
     import_profiles_action = QAction("Excel 匯入設定檔", self)
     import_profiles_action.triggered.connect(self.manage_import_profiles)
     self.data_menu.addAction(import_profiles_action)
-    export_action = QAction("匯出 Excel", self)
-    export_action.triggered.connect(self.export_xlsx)
-    self.data_menu.addAction(export_action)
     export_selected_action = QAction("匯出選取資料", self)
     export_selected_action.triggered.connect(self.export_selected_xlsx)
     self.data_menu.addAction(export_selected_action)
+    mail_duplicate_tag_action = QAction("設定寄信重複偵測標籤", self)
+    mail_duplicate_tag_action.triggered.connect(self.configure_mail_duplicate_tag)
+    self.data_menu.addAction(mail_duplicate_tag_action)
     export_selected_word_action = QAction("匯出選取 Word", self)
     export_selected_word_action.triggered.connect(self.export_selected_word)
     self.data_menu.addAction(export_selected_word_action)
@@ -366,13 +596,14 @@ def _build_data_menu(self):
         batch_add_action,
         import_action,
         import_profiles_action,
-        export_action,
         export_selected_action,
+        mail_duplicate_tag_action,
         export_selected_word_action,
         report_templates_action,
         share_mobile_action,
     )
     self.api_preview_unavailable_data_actions = ()
+    return {name: value for name, value in locals().items() if name.endswith("_action")}
 
 
 
@@ -394,9 +625,9 @@ def _build_single_record_menu(self):
     single_record_menu = QMenu("單筆資料工具", self.tools_menu)
     self.tools_menu.addMenu(single_record_menu)
     self.tool_submenus["單筆資料工具"] = single_record_menu
-    toggle_external_id_action = QAction("顯示/隱藏身分證", self)
-    toggle_external_id_action.triggered.connect(self.toggle_external_id_visibility)
-    single_record_menu.addAction(toggle_external_id_action)
+    self.toggle_external_id_action = QAction("顯示/隱藏身分證", self)
+    self.toggle_external_id_action.triggered.connect(self.toggle_external_id_visibility)
+    single_record_menu.addAction(self.toggle_external_id_action)
     follow_up_action = QAction("設定追蹤提醒", self)
     follow_up_action.triggered.connect(self.edit_follow_up_reminder)
     single_record_menu.addAction(follow_up_action)
@@ -471,6 +702,8 @@ def _build_batch_menu(self):
     batch_tags_action = QAction("批量設定標籤", self)
     batch_tags_action.triggered.connect(self.batch_edit_customer_tags)
     batch_menu.addAction(batch_tags_action)
+    batch_urban_plan_action = _urban_plan_action(self, "批量設定都市計畫")
+    batch_menu.addAction(batch_urban_plan_action)
     batch_custom_values_action = QAction("批量設定自訂欄位", self)
     batch_custom_values_action.triggered.connect(self.batch_edit_custom_values)
     batch_menu.addAction(batch_custom_values_action)
@@ -488,6 +721,10 @@ def _build_management_menu(self):
     tag_manage_action = QAction("標籤管理", self)
     tag_manage_action.triggered.connect(self.manage_tags)
     management_menu.addAction(tag_manage_action)
+    urban_plan_manage_action = QAction("都市計畫管理", self)
+    urban_plan_manage_action.triggered.connect(self.manage_urban_plans)
+    _limit_to_server(self, urban_plan_manage_action)
+    management_menu.addAction(urban_plan_manage_action)
     custom_field_manage_action = QAction("自訂欄位管理", self)
     custom_field_manage_action.triggered.connect(self.manage_custom_fields)
     management_menu.addAction(custom_field_manage_action)
@@ -505,6 +742,9 @@ def _build_report_menu(self):
     follow_up_list_action = QAction("追蹤提醒清單", self)
     follow_up_list_action.triggered.connect(self.show_follow_up_list)
     report_menu.addAction(follow_up_list_action)
+    visit_calendar_action = QAction("行程月曆", self)
+    visit_calendar_action.triggered.connect(self.show_visit_calendar)
+    report_menu.addAction(visit_calendar_action)
     health_check_action = QAction("系統健康檢查", self)
     health_check_action.triggered.connect(self.show_health_check)
     report_menu.addAction(health_check_action)
@@ -600,9 +840,17 @@ def _build_settings_menu(self):
     font_size_action = QAction("字體大小", self)
     font_size_action.triggered.connect(self.change_font_size)
     self.settings_menu.addAction(font_size_action)
+    theme_action = QAction("外觀主題", self)
+    theme_action.triggered.connect(self.change_theme)
+    self.settings_menu.addAction(theme_action)
     column_visibility_action = QAction("欄位顯示", self)
     column_visibility_action.triggered.connect(self.change_column_visibility)
     self.settings_menu.addAction(column_visibility_action)
+    self.privacy_mask_action = QAction("測試", self)
+    self.privacy_mask_action.setCheckable(True)
+    self.privacy_mask_action.setChecked(self.privacy_mask_enabled)
+    self.privacy_mask_action.toggled.connect(self.toggle_privacy_mask_mode)
+    self.settings_menu.addAction(self.privacy_mask_action)
     self.readonly_mode_action = QAction("唯讀模式", self)
     self.readonly_mode_action.setCheckable(True)
     self.readonly_mode_action.setChecked(self.is_readonly_mode())
@@ -649,7 +897,7 @@ def _configure_api_action_groups(self, actions):
         actions["advanced_search_action"],
         actions["save_search_action"],
         actions["load_search_action"],
-        actions["toggle_external_id_action"],
+        self.toggle_external_id_action,
         actions["follow_up_action"],
         actions["record_history_action"],
         actions["contact_log_action"],
@@ -677,6 +925,7 @@ def _configure_api_action_groups(self, actions):
         actions["data_quality_action"],
         actions["dashboard_action"],
         actions["follow_up_list_action"],
+        actions["visit_calendar_action"],
         actions["health_check_action"],
         actions["duplicate_action"],
         actions["map_action"],
@@ -695,7 +944,9 @@ def _configure_api_action_groups(self, actions):
         actions["watchlist_action"],
         actions["operation_log_action"],
         actions["font_size_action"],
+        actions["theme_action"],
         actions["column_visibility_action"],
+        self.privacy_mask_action,
         self.readonly_mode_action,
         actions["attachment_check_action"],
         actions["help_action"],
@@ -723,7 +974,9 @@ def _configure_api_action_groups(self, actions):
 def build_customer_table_ui(self, parent_layout, TABLE_COLUMNS, TABLE_WIDTHS):
     _build_record_table(self, parent_layout, TABLE_COLUMNS, TABLE_WIDTHS)
     _build_record_menu(self)
-    _build_data_menu(self)
+    data_actions = _build_data_menu(self)
     actions = _build_tools_menu(self)
+    actions.update(data_actions)
     actions.update(_build_settings_menu(self))
     _configure_api_action_groups(self, actions)
+    _wire_batch_bar(self, actions)

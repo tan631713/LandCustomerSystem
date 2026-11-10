@@ -42,8 +42,8 @@ class ContactRepository:
             """
             INSERT INTO contacts (
                 name, external_id, mobile_phone, home_phone, registered_address,
-                contact_address, work_address, identity_note, notes
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                contact_address, work_address, birth_year, identity_note, notes
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
             (
@@ -54,6 +54,7 @@ class ContactRepository:
                 values["registered_address"] or None,
                 values["contact_address"] or None,
                 values["work_address"] or None,
+                values.get("birth_year") or None,
                 values["identity_note"] or None,
                 values["notes"] or None,
             ),
@@ -66,7 +67,8 @@ class ContactRepository:
                 """
                 SELECT id, name, external_id, mobile_phone, home_phone,
                        registered_address, contact_address, work_address,
-                       identity_note, notes, is_active, created_at, updated_at
+                       birth_year, identity_note, notes, is_active,
+                       created_at, updated_at
                 FROM contacts WHERE id = %s
                 """,
                 (int(contact_id),),
@@ -90,6 +92,7 @@ class ContactRepository:
             values["registered_address"] or None,
             values["contact_address"] or None,
             values["work_address"] or None,
+            values.get("birth_year") or None,
             values["identity_note"] or None,
             values["notes"] or None,
             int(contact_id),
@@ -104,7 +107,7 @@ class ContactRepository:
                 name = %s, external_id = %s,
                 mobile_phone = %s, home_phone = %s,
                 registered_address = %s, contact_address = %s,
-                work_address = %s, identity_note = %s, notes = %s,
+                work_address = %s, birth_year = %s, identity_note = %s, notes = %s,
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = %s{expected_clause}
             RETURNING id
@@ -131,6 +134,7 @@ class ContactRepository:
                    contact.mobile_phone,
                    contact.home_phone, contact.registered_address,
                    contact.contact_address, contact.work_address,
+                   contact.birth_year,
                    contact.identity_note, contact.notes,
                    contact.is_active, contact.created_at, contact.updated_at,
                    COUNT(DISTINCT relation.owner_id)
@@ -197,6 +201,7 @@ class ContactRepository:
                    contact.mobile_phone,
                    contact.home_phone, contact.registered_address,
                    contact.contact_address, contact.work_address,
+                   contact.birth_year,
                    contact.identity_note, contact.notes,
                    contact.is_active, contact.created_at, contact.updated_at,
                    COUNT(DISTINCT relation.owner_id)
@@ -287,6 +292,7 @@ class OwnerContactRelationRepository:
                relation.relationship_note, contact.mobile_phone,
                contact.home_phone, contact.registered_address,
                contact.contact_address, contact.work_address,
+               contact.birth_year,
                contact.identity_note, relation.is_primary,
                relation.sort_order, contact.notes AS contact_notes,
                relation.notes AS relation_notes, relation.is_active,

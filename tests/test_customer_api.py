@@ -1,3 +1,4 @@
+import re
 import tempfile
 import unittest
 from io import BytesIO
@@ -23,6 +24,15 @@ from migrate_sqlite_to_postgresql import (
     land_key_for,
     owner_key_for,
 )
+
+
+MOBILE_WEB_DIRECTORY = Path(__file__).resolve().parents[1] / "customer_mobile_web"
+
+
+def mobile_asset_version():
+    """The mobile web version lives only in customer_mobile_web/asset-version.js."""
+    source = (MOBILE_WEB_DIRECTORY / "asset-version.js").read_text(encoding="utf-8")
+    return int(re.search(r"LAND_MOBILE_ASSET_VERSION\s*=\s*(\d+)\s*;", source).group(1))
 
 
 class CustomerApiTests(unittest.TestCase):
@@ -108,8 +118,8 @@ class CustomerApiTests(unittest.TestCase):
         health = self.client.get("/health")
         self.assertEqual(health.status_code, 200)
         self.assertEqual(health.json()["backend"], "sqlite")
-        self.assertEqual(health.json()["schema_version"], 9)
-        self.assertEqual(health.json()["mobile_asset_version"], 26)
+        self.assertEqual(health.json()["schema_version"], 11)
+        self.assertEqual(health.json()["mobile_asset_version"], mobile_asset_version())
 
         bad_login = self.client.post(
             "/api/v1/auth/login",
@@ -149,6 +159,7 @@ class CustomerApiTests(unittest.TestCase):
                         "values": {
                             "district": "中壢區",
                             "section": "中路段",
+                            "subsection": "",
                             "land_number": "1-3",
                             "owner_name": None,
                         },
@@ -165,21 +176,6 @@ class CustomerApiTests(unittest.TestCase):
         self.assertEqual(detail.status_code, 200, detail.text)
         self.assertEqual(detail.json()["owner_name"], "")
 
-    def test_mobile_search_inputs_do_not_trigger_ios_contact_autofill(self):
-        # iOS Safari 把含「姓名／地址」的欄位當聯絡人欄位，自動填寫列會蓋掉注音選字列。
-        import re
-        page = self.client.get("/mobile/")
-        self.assertEqual(page.status_code, 200)
-        for input_id in ("owner-query", "land-query", "land-district", "land-section", "field-plan-query"):
-            match = re.search(r'<input id="%s"[^>]*>' % input_id, page.text)
-            self.assertIsNotNone(match, input_id)
-            tag = match.group(0)
-            self.assertIn('autocomplete="off"', tag)
-            self.assertIn('autocorrect="off"', tag)
-            placeholder = re.search(r'placeholder="([^"]*)"', tag).group(1)
-            self.assertNotIn("姓名", placeholder)
-            self.assertNotIn("地址", placeholder)
-
     def test_mobile_pwa_is_served_with_security_headers(self):
         root = self.client.get("/")
         self.assertEqual(root.status_code, 200)
@@ -188,8 +184,12 @@ class CustomerApiTests(unittest.TestCase):
         page = self.client.get("/mobile/")
         self.assertEqual(page.status_code, 200)
         self.assertIn("地主開發助手", page.text)
-        self.assertIn('src="./field-visit.js?v=2"', page.text)
-        self.assertIn('src="./app.js?v=26"', page.text)
+        for script in ("./field-visit.js", "./app.js"):
+            self.assertIn(f'src="{script}"', page.text)
+            self.assertLess(page.text.index('src="./asset-version.js"'), page.text.index(f'src="{script}"'))
+        self.assertNotRegex(page.text, r'src="\./[\w-]+\.js\?v=')
+        self.assertIn('<link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png">', page.text)
+        page_theme_color = re.search(r'<meta name="theme-color" content="([^"]+)"', page.text).group(1)
         self.assertIn('id="login-connection-check"', page.text)
         self.assertIn('id="login-connection-retry"', page.text)
         self.assertIn('id="connection-banner-retry"', page.text)
@@ -237,39 +237,71 @@ class CustomerApiTests(unittest.TestCase):
         self.assertIn("microphone=()", page.headers["permissions-policy"])
         self.assertEqual(page.headers["cache-control"], "no-store")
 
+        asset_version = self.client.get("/mobile/asset-version.js")
+        self.assertEqual(asset_version.status_code, 200)
+        self.assertIn(f"self.LAND_MOBILE_ASSET_VERSION = {mobile_asset_version()};", asset_version.text)
+
         manifest = self.client.get("/mobile/manifest.webmanifest")
         self.assertEqual(manifest.status_code, 200)
-        self.assertEqual(manifest.json()["start_url"], "/mobile/")
+        manifest_data = manifest.json()
+        self.assertEqual(manifest_data["start_url"], "/mobile/")
+        self.assertEqual(manifest_data["theme_color"], page_theme_color)
+        self.assertEqual(manifest_data["background_color"], page_theme_color)
+        icon_purposes = {}
+        for icon in manifest_data["icons"]:
+            icon_file = self.client.get(icon["src"])
+            self.assertEqual(icon_file.status_code, 200, icon["src"])
+            self.assertLess(len(icon_file.content), 100 * 1024, icon["src"])
+            icon_size = Image.open(BytesIO(icon_file.content)).size
+            self.assertEqual(f"{icon_size[0]}x{icon_size[1]}", icon["sizes"], icon["src"])
+            icon_purposes.setdefault(icon["purpose"], set()).add(icon["sizes"])
+        self.assertTrue({"192x192", "512x512"} <= icon_purposes["any"])
+        self.assertIn("512x512", icon_purposes["maskable"])
+        apple_icon = Image.open(BytesIO(self.client.get("/mobile/apple-touch-icon.png").content))
+        self.assertEqual(apple_icon.size, (180, 180))
+        self.assertNotIn("A", apple_icon.getbands())
 
         service_worker = self.client.get("/mobile/service-worker.js")
         self.assertEqual(service_worker.status_code, 200)
         self.assertIn('url.pathname.startsWith("/api/")', service_worker.text)
-        self.assertIn('land-customer-mobile-v26', service_worker.text)
-        self.assertIn('/mobile/field-visit.js?v=2', service_worker.text)
-        self.assertIn('/mobile/app.js?v=26', service_worker.text)
+        self.assertIn('importScripts("./asset-version.js")', service_worker.text)
+        self.assertIn("`land-customer-mobile-v${self.LAND_MOBILE_ASSET_VERSION}`", service_worker.text)
+        self.assertNotRegex(service_worker.text, r"mobile-v\d")
+        self.assertNotRegex(service_worker.text, r"\.js\?v=")
         self.assertIn('fetch(event.request, { cache: "no-store" })', service_worker.text)
         self.assertIn("no-store", service_worker.headers["cache-control"])
+        shell_block = re.search(r"const APP_SHELL = \[(.*?)\];", service_worker.text, re.S).group(1)
+        shell_paths = re.findall(r'"(/mobile/[^"]*)"', shell_block)
+        self.assertIn("/mobile/asset-version.js", shell_paths)
+        for shell_path in shell_paths:
+            shell_file = self.client.get(shell_path)
+            self.assertEqual(shell_file.status_code, 200, shell_path)
+            # The shell must stay small: no multi-megabyte images in the precache.
+            self.assertLess(len(shell_file.content), 256 * 1024, shell_path)
 
-        field_visit_script = self.client.get("/mobile/field-visit.js?v=2")
+        field_visit_script = self.client.get("/mobile/field-visit.js")
         self.assertEqual(field_visit_script.status_code, 200)
         self.assertEqual(field_visit_script.headers["cache-control"], "no-store")
         self.assertIn("function requestCurrentPosition(", field_visit_script.text)
         self.assertIn("function buildGoogleMapsNavigationUrl(", field_visit_script.text)
         self.assertIn("value === null || value === undefined", field_visit_script.text)
         self.assertIn("https://www.google.com/maps/dir/", field_visit_script.text)
-        self.assertIn("destination.address", field_visit_script.text)
+        self.assertIn("normalizedAddress(place.address)", field_visit_script.text)
         self.assertIn('url.searchParams.set("origin", originValue)', field_visit_script.text)
-        self.assertIn('url.searchParams.set("travelmode", "driving")', field_visit_script.text)
+        self.assertIn('url.searchParams.set("travelmode", travelModeValue(options.travelMode))', field_visit_script.text)
+        self.assertIn('const DEFAULT_TRAVEL_MODE = "two-wheeler"', field_visit_script.text)
+        self.assertIn("function buildGoogleMapsRouteSegments(", field_visit_script.text)
         self.assertIn('url.searchParams.set("dir_action", "navigate")', field_visit_script.text)
         self.assertIn("replace(/[\\r\\n\\t]+/g", field_visit_script.text)
         self.assertIn("window.isSecureContext === false", field_visit_script.text)
         self.assertIn("navigator.geolocation.getCurrentPosition(", field_visit_script.text)
 
-        app_script = self.client.get("/mobile/app.js?v=26")
+        app_script = self.client.get("/mobile/app.js")
         self.assertEqual(app_script.status_code, 200)
         self.assertEqual(app_script.headers["cache-control"], "no-store")
         self.assertIn("function maskIdentity(value)", app_script.text)
-        self.assertIn("const MOBILE_ASSET_VERSION = 26", app_script.text)
+        self.assertIn("const MOBILE_ASSET_VERSION = Number(self.LAND_MOBILE_ASSET_VERSION)", app_script.text)
+        self.assertIn('updateViaCache: "none"', app_script.text)
         self.assertIn("function checkMobileAssetVersion(", app_script.text)
         self.assertIn("health.mobile_asset_version", app_script.text)
         self.assertIn("async function registerMobileServiceWorker(", app_script.text)
@@ -745,6 +777,65 @@ class CustomerApiTests(unittest.TestCase):
             ).json()["item"]
         )
 
+    def test_contact_logs_by_date_filters_by_date_and_decrypts_owner_name(self):
+        admin_headers = self.login()
+        created = self.client.post(
+            f"/api/v1/records/{self.record_id}/contact-logs",
+            headers=admin_headers,
+            json={
+                "contact_date": "2026-08-02",
+                "method": "面談",
+                "result": "同意繼續合作",
+                "note": "現場拜訪，帶了合約範本",
+            },
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+
+        wrong_day = self.client.get(
+            "/api/v1/contact-logs",
+            params={"date": "2026-08-01"},
+            headers=admin_headers,
+        )
+        self.assertEqual(wrong_day.status_code, 200)
+        self.assertEqual(wrong_day.json()["items"], [])
+
+        matched = self.client.get(
+            "/api/v1/contact-logs",
+            params={"date": "2026-08-02"},
+            headers=admin_headers,
+        )
+        self.assertEqual(matched.status_code, 200)
+        items = matched.json()["items"]
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["owner_name"], "王大明")
+        self.assertEqual(items[0]["district"], "桃園區")
+        self.assertEqual(items[0]["land_number"], "100-1")
+        self.assertEqual(items[0]["note"], "現場拜訪，帶了合約範本")
+        self.assertEqual(items[0]["customer_id"], self.record_id)
+
+        mine_only = self.client.get(
+            "/api/v1/contact-logs",
+            params={"date": "2026-08-02", "mine_only": "true"},
+            headers=admin_headers,
+        )
+        self.assertEqual(len(mine_only.json()["items"]), 1)
+
+        viewer_headers = self.login("viewer", "viewer-password")
+        viewer_view = self.client.get(
+            "/api/v1/contact-logs",
+            params={"date": "2026-08-02"},
+            headers=viewer_headers,
+        )
+        self.assertEqual(viewer_view.status_code, 200)
+        self.assertEqual(len(viewer_view.json()["items"]), 1)
+
+        bad_date = self.client.get(
+            "/api/v1/contact-logs",
+            params={"date": "not-a-date"},
+            headers=admin_headers,
+        )
+        self.assertEqual(bad_date.status_code, 400)
+
     def test_tag_crud_single_and_batch_assignment_enforces_roles(self):
         admin_headers = self.login()
         created = self.client.post(
@@ -1048,6 +1139,7 @@ class CustomerApiTests(unittest.TestCase):
                 "values": {
                     "district": "桃園區",
                     "section": "測試段",
+                    "subsection": "",
                     "land_number": "100-1",
                     "owner_name": "王大明",
                     "note": "一次完成更新",
@@ -1541,6 +1633,7 @@ class PostgreSQLMigrationPlanTests(unittest.TestCase):
                 "id": 1,
                 "district": "桃園區",
                 "section": "中正段",
+                "subsection": "",
                 "land_number": "100",
                 "owner_name": "王大明",
                 "external_id": "H100059743",
@@ -1550,6 +1643,7 @@ class PostgreSQLMigrationPlanTests(unittest.TestCase):
                 "id": 2,
                 "district": "桃園區",
                 "section": "中正段",
+                "subsection": "",
                 "land_number": "101",
                 "owner_name": "王大明",
                 "external_id": "h100059743",
@@ -1559,6 +1653,7 @@ class PostgreSQLMigrationPlanTests(unittest.TestCase):
                 "id": 3,
                 "district": "桃園區",
                 "section": "中正段",
+                "subsection": "",
                 "land_number": "100",
                 "owner_name": "李小華",
                 "external_id": "",

@@ -790,9 +790,11 @@ def apply_migration(
                 row = pg_conn.execute(
                     """
                     INSERT INTO lands (
-                        land_key, district, section, land_number, area, declared_value
-                    ) VALUES (%s, %s, %s, %s, %s, %s)
+                        land_key, district, section, subsection, land_number, area,
+                        declared_value
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (land_key) DO UPDATE SET
+                        subsection = EXCLUDED.subsection,
                         area = EXCLUDED.area,
                         declared_value = EXCLUDED.declared_value,
                         updated_at = CURRENT_TIMESTAMP
@@ -802,6 +804,7 @@ def apply_migration(
                         land_key,
                         record.get("district") or "",
                         record.get("section") or "",
+                        record.get("subsection") or "",
                         record.get("land_number") or "",
                         record.get("area"),
                         record.get("declared_value"),

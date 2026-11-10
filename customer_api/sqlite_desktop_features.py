@@ -105,6 +105,14 @@ class SQLiteDesktopFeatureMixin:
         )
         return int(record_id)
 
+    def list_previously_exported_record_ids(self, user, record_ids):
+        del user
+        return sorted(self.repository.list_previously_exported_customer_ids(record_ids))
+
+    def mark_records_exported_to_excel(self, user, record_ids):
+        del user
+        self.repository.mark_customers_exported_to_excel(record_ids)
+
     def ignored_duplicate_pairs(self, user):
         del user
         return sorted(self.repository.ignored_duplicate_pairs())

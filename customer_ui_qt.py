@@ -1,3 +1,4 @@
+import gc
 import json
 import os
 import sqlite3
@@ -45,6 +46,7 @@ from customer_dialogs import (
     DataQualityRulesDialog,
     OperationLogDialog,
     RecordHistoryDialog,
+    VisitCalendarDialog,
     WatchlistDialog,
     configure_dialogs,
 )
@@ -53,7 +55,6 @@ from customer_extra_dialogs import (
     AttachmentDialog,
     BatchCustomerCustomValuesDialog,
     BatchCustomerTagsDialog,
-    CaseManagementDialog,
     CaseSelectDialog,
     ContactLogDialog,
     CustomFieldManagementDialog,
@@ -79,6 +80,7 @@ from customer_domain import (
 )
 from customer_excel import ExcelService
 from customer_export_controller import ExportControllerMixin, configure_export_controller
+from customer_owner_match_ui import OwnerMatchWorkflowMixin
 from customer_health import SystemHealthCheckService
 from customer_import_controller import ImportControllerMixin, configure_import_controller
 from customer_desktop import open_local_path
@@ -104,6 +106,7 @@ from customer_messages import (
     restore_success_message,
     startup_backup_notice,
 )
+from customer_land_header import LandHeaderMixin
 from customer_models import RecordTableModel, configure_table_model
 from customer_quality import (
     DEFAULT_QUALITY_RULE_KEYS,
@@ -132,6 +135,7 @@ from customer_productivity import (
 from customer_preferences import decode_table_preferences, encode_table_preferences, sanitize_saved_searches
 from customer_search_controller import SearchControllerMixin, configure_search_controller
 from customer_selection_workflows import SelectionWorkflowMixin
+from customer_urban_plan_workflows import UrbanPlanWorkflowMixin
 from customer_search_presets import SearchPresetMixin, configure_search_presets
 from customer_table_ui import build_customer_table_ui
 from customer_ui_state import UiStateMixin, configure_ui_state
@@ -139,6 +143,16 @@ from customer_version import (
     desktop_client_version_label,
     full_version_text,
     version_label,
+)
+import customer_fluent
+from customer_theme import (
+    active_theme_key,
+    activate_theme,
+    build_app_stylesheet,
+    configure_storage as configure_theme_storage,
+    load_bundled_fonts,
+    qcolor,
+    theme_tokens,
 )
 from customer_window_ui import DesktopWindowMixin
 from customer_settings_workflows import SettingsWorkflowMixin
@@ -175,6 +189,39 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+
+# Python's cyclic garbage collector can run its collection pass at any
+# allocation point, including deep inside PySide6/shiboken's C++ callback
+# handling for a QThread's cross-thread queued signal delivery (search,
+# Excel import, and offsite-backup workers all use this pattern -- see
+# customer_search_controller.py, customer_import_controller.py, and
+# customer_productivity_workflows.py). If a collection happens to land while
+# such a callback is mid-flight, PySide6 can crash with a Windows access
+# violation; this was reproduced reliably by running the full desktop test
+# suite (disabling the collector made it disappear across many repeated
+# runs, while every other mitigation attempted on the app's own thread
+# lifecycle left it unchanged). Reference counting still reclaims ordinary
+# objects immediately without the collector; only reference *cycles* would
+# accumulate, so periodic_gc_collect() below reclaims those explicitly, but
+# only while no background QThread could be in flight.
+gc.disable()
+
+
+def periodic_gc_collect(window):
+    """Run a manual collection pass, but only when it's actually safe to.
+
+    Never called while a search, Excel import, or offsite-backup QThread
+    might still be delivering a queued cross-thread signal -- see the
+    gc.disable() comment above.
+    """
+    if window.record_searches:
+        return
+    if getattr(window, "excel_thread", None) is not None:
+        return
+    if getattr(window, "offsite_backup_thread", None) is not None:
+        return
+    gc.collect()
 
 
 def get_app_dir():
@@ -225,6 +272,7 @@ SELECTED_RECORD_SETTING_KEY = "selected_record_id"
 IGNORED_QUALITY_ISSUES_SETTING_KEY = "ignored_quality_issue_signatures"
 QUALITY_RULES_SETTING_KEY = "quality_rule_keys"
 READONLY_MODE_SETTING_KEY = "readonly_mode"
+PRIVACY_MASK_SETTING_KEY = "privacy_mask_enabled"
 BACKUP_COMPRESSION_SETTING_KEY = "backup_compression_enabled"
 BACKUP_RETENTION_DAYS_SETTING_KEY = "backup_retention_days"
 BACKUP_MAX_COUNT_SETTING_KEY = "backup_max_count"
@@ -234,12 +282,12 @@ FONT_SIZE_OPTIONS = [
     ("large", "大", 13),
     ("xlarge", "特大", 15),
 ]
-ROW_COLOR_CHECKED = QColor("#1e3a5f")
-ROW_COLOR_WATCHLIST = QColor("#5b2230")
-ROW_COLOR_OVERDUE = QColor("#7c2d12")
-ROW_COLOR_NOTE = QColor("#564113")
-ROW_TEXT_COLOR = QColor("#f8fafc")
-SEARCH_HIGHLIGHT_COLOR = QColor("#6b4f1d")
+ROW_COLOR_CHECKED = qcolor("checked")
+ROW_COLOR_WATCHLIST = qcolor("watch")
+ROW_COLOR_OVERDUE = qcolor("overdue")
+ROW_COLOR_NOTE = qcolor("note")
+ROW_TEXT_COLOR = qcolor("ink")
+SEARCH_HIGHLIGHT_COLOR = qcolor("mark")
 
 
 MANAGEMENT_FIELDS = [
@@ -281,6 +329,7 @@ FILTERABLE_FIELDS = [
     ("all", "全部欄位"),
     ("district", "地區"),
     ("section", "地段"),
+    ("subsection", "小段"),
     ("registration_order", "序號"),
     ("land_number", "地號"),
     ("owner_name", "姓名"),
@@ -296,6 +345,7 @@ SORTABLE_FIELDS = [
     ("rowid", "系統ID"),
     ("district", "地區"),
     ("section", "地段"),
+    ("subsection", "小段"),
     ("registration_order", "序號"),
     ("land_number", "地號"),
     ("area", "面積/m2"),
@@ -321,17 +371,19 @@ SORTABLE_FIELDS = [
 TABLE_BATCH_SIZE = 100
 ASYNC_SEARCH_THRESHOLD = 500
 SELECTION_SAVE_DELAY_MS = 300
+GC_COLLECT_INTERVAL_MS = 10 * 60 * 1000
 
 TABLE_WIDTHS = {
     "checked": 52,
     "rowid": 68,
     "full_land_number": 250,
-    "owner_count": 78,
+    "owner_count": 128,
     "ownership_count": 88,
     "land_use": 130,
     "status_summary": 170,
     "district": 95,
     "section": 100,
+    "subsection": 100,
     "registration_order": 82,
     "land_number": 105,
     "area": 84,
@@ -364,6 +416,7 @@ TABLE_WIDTHS = {
 ADVANCED_SEARCH_FIELDS = [
     ("district", "地區"),
     ("section", "地段"),
+    ("subsection", "小段"),
     ("registration_order", "序號"),
     ("land_number", "地號"),
     ("owner_name", "姓名"),
@@ -378,6 +431,7 @@ ADVANCED_SEARCH_FIELDS = [
 BATCH_EDITABLE_FIELDS = [
     ("district", "地區"),
     ("section", "地段"),
+    ("subsection", "小段"),
     ("registration_order", "序號"),
     ("land_number", "地號"),
     ("area", "面積/m2"),
@@ -431,6 +485,9 @@ def get_setting(setting_key, default=None):
 
 def set_setting(setting_key, setting_value):
     return REPOSITORY.set_setting(setting_key, setting_value)
+
+
+configure_theme_storage(get_setting, set_setting)
 
 
 def _setting_integer(setting_key, default, minimum):
@@ -525,144 +582,13 @@ def apply_font_size(app, font_size_key):
     font = QFont(app.font())
     font.setPointSize(point_size)
     app.setFont(font)
+    customer_fluent.set_font_point_size(point_size)
     return font
 
 
 def apply_app_style(app):
-    app.setStyleSheet(
-        """
-        QWidget {
-            background-color: #232323;
-            color: #f3f4f6;
-            selection-background-color: #365d8d;
-            selection-color: #f9fafb;
-        }
-        QFrame#formFrame {
-            background-color: #262626;
-            border: 1px solid #343434;
-            border-radius: 10px;
-        }
-        QFrame#listFrame {
-            background-color: transparent;
-            border: none;
-        }
-        QMainWindow, QDialog {
-            background-color: #232323;
-        }
-        QLabel {
-            color: #e5e7eb;
-        }
-        QLineEdit, QPlainTextEdit, QComboBox, QTableView, QTreeView, QTableWidget {
-            background-color: #2d2d2d;
-            color: #f9fafb;
-            border: 1px solid #454545;
-            border-radius: 6px;
-        }
-        QLineEdit, QComboBox {
-            min-height: 28px;
-            padding: 4px 8px;
-        }
-        QPlainTextEdit {
-            padding: 6px 8px;
-        }
-        QLineEdit:focus, QPlainTextEdit:focus, QComboBox:focus, QTableView:focus, QTreeView:focus, QTableWidget:focus {
-            border: 1px solid #6ea8ff;
-        }
-        QLineEdit[readOnly="true"], QPlainTextEdit[readOnly="true"] {
-            background-color: #262626;
-            color: #cbd5e1;
-        }
-        QPushButton {
-            background-color: #3a3a3a;
-            color: #f9fafb;
-            border: 1px solid #565656;
-            border-radius: 6px;
-            padding: 6px 14px;
-            min-height: 30px;
-        }
-        QPushButton:hover {
-            background-color: #464646;
-            border-color: #6b7280;
-        }
-        QPushButton:pressed {
-            background-color: #2f2f2f;
-        }
-        QComboBox::drop-down {
-            border: none;
-            width: 22px;
-        }
-        QComboBox QAbstractItemView, QMenu {
-            background-color: #2c2c2c;
-            color: #f9fafb;
-            border: 1px solid #454545;
-            selection-background-color: #365d8d;
-            selection-color: #ffffff;
-            outline: none;
-        }
-        QMenu::item {
-            padding: 7px 18px;
-            border-radius: 4px;
-        }
-        QMenu::item:selected {
-            background-color: #365d8d;
-        }
-        QMenu::separator {
-            height: 1px;
-            background: #424242;
-            margin: 6px 10px;
-        }
-        QHeaderView::section {
-            background-color: #353535;
-            color: #f3f4f6;
-            border: 1px solid #4a4a4a;
-            padding: 6px 8px;
-            font-weight: 600;
-        }
-        QTableView {
-            gridline-color: #3e3e3e;
-            alternate-background-color: #292929;
-        }
-        QTreeView {
-            background-color: #2d2d2d;
-            alternate-background-color: #2d2d2d;
-        }
-        QTableView::item {
-            padding: 4px 6px;
-        }
-        QTableView::item:selected, QTreeView::item:selected, QTableWidget::item:selected {
-            background-color: #88addc;
-            color: #111827;
-        }
-        QScrollBar:vertical, QScrollBar:horizontal {
-            background: #262626;
-            border: none;
-            margin: 0px;
-        }
-        QScrollBar:vertical {
-            width: 12px;
-        }
-        QScrollBar:horizontal {
-            height: 12px;
-        }
-        QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
-            background: #555555;
-            border-radius: 5px;
-            min-height: 28px;
-            min-width: 28px;
-        }
-        QScrollBar::handle:hover {
-            background: #6b7280;
-        }
-        QScrollBar::add-line, QScrollBar::sub-line, QScrollBar::add-page, QScrollBar::sub-page {
-            background: none;
-            border: none;
-        }
-        QSplitter::handle {
-            background-color: #303030;
-            width: 1px;
-        }
-        """
-    )
+    app.setStyleSheet(build_app_stylesheet(theme_tokens()))
+    customer_fluent.apply_fluent_theme(active_theme_key(), app.font().pointSize())
 
 
 def init_watchlist_db(conn):
@@ -797,6 +723,34 @@ configure_search_presets(
     SET_SETTING=set_setting,
     ENCODE_PREFERENCES=encode_table_preferences,
 )
+def refresh_theme_constants():
+    """Re-inject the row colours once the saved theme has been activated."""
+
+    global ROW_COLOR_CHECKED, ROW_COLOR_WATCHLIST, ROW_COLOR_OVERDUE
+    global ROW_COLOR_NOTE, ROW_TEXT_COLOR, SEARCH_HIGHLIGHT_COLOR
+    ROW_COLOR_CHECKED = qcolor("checked")
+    ROW_COLOR_WATCHLIST = qcolor("watch")
+    ROW_COLOR_OVERDUE = qcolor("overdue")
+    ROW_COLOR_NOTE = qcolor("note")
+    ROW_TEXT_COLOR = qcolor("ink")
+    SEARCH_HIGHLIGHT_COLOR = qcolor("mark")
+    configure_dialogs(ROW_TEXT_COLOR=ROW_TEXT_COLOR)
+    configure_table_model(
+        ROW_COLOR_CHECKED=ROW_COLOR_CHECKED,
+        ROW_COLOR_WATCHLIST=ROW_COLOR_WATCHLIST,
+        ROW_COLOR_OVERDUE=ROW_COLOR_OVERDUE,
+        ROW_COLOR_NOTE=ROW_COLOR_NOTE,
+        ROW_TEXT_COLOR=ROW_TEXT_COLOR,
+        SEARCH_HIGHLIGHT_COLOR=SEARCH_HIGHLIGHT_COLOR,
+    )
+    configure_search_controller(
+        ROW_COLOR_CHECKED=ROW_COLOR_CHECKED,
+        ROW_COLOR_WATCHLIST=ROW_COLOR_WATCHLIST,
+        ROW_COLOR_OVERDUE=ROW_COLOR_OVERDUE,
+        ROW_COLOR_NOTE=ROW_COLOR_NOTE,
+    )
+
+
 configure_export_controller(
     APP_DIR=APP_DIR,
     TABLE_COLUMNS=TABLE_COLUMNS,
@@ -976,6 +930,9 @@ def configure_api_authentication(api_client):
 
 
 class LandApp(
+    OwnerMatchWorkflowMixin,
+    UrbanPlanWorkflowMixin,
+    LandHeaderMixin,
     DesktopSupportMixin,
     DesktopStateMixin,
     DesktopWindowMixin,
@@ -1005,6 +962,7 @@ class LandApp(
         self.admin_username = ADMIN_USERNAME
         self.advanced_search_setting_key = ADVANCED_SEARCH_SETTING_KEY
         self.readonly_setting_key = READONLY_MODE_SETTING_KEY
+        self.privacy_mask_setting_key = PRIVACY_MASK_SETTING_KEY
         self.record_repository = record_repository or self.repository
         self.data_access = DesktopDataAccess(self.repository, self.record_repository)
         self.api_mode = bool(api_mode)
@@ -1041,6 +999,7 @@ class LandApp(
         self.startup_backup_path = startup_backup_path
         self.selected_record_id = None
         self.checked_record_ids = set()
+        self._saved_state_record_id = None
         self.persisted_selection_snapshot = None
         self.restore_selection_state()
         self.persisted_selection_snapshot = self.selection_state_snapshot()
@@ -1054,6 +1013,10 @@ class LandApp(
         self.field_widgets = {}
         self.show_full_external_id = False
         self.current_external_id_plain = ""
+        self.privacy_mask_enabled = (
+            self.repository.get_setting(self.privacy_mask_setting_key, "0") == "1"
+        )
+        self.current_owner_name_plain = ""
         self.advanced_search_criteria = decode_table_preferences(get_setting(ADVANCED_SEARCH_SETTING_KEY, "")) or {}
         self.saving_table_preferences = False
 
@@ -1095,14 +1058,34 @@ class LandApp(
         self.management_summary_label = None
         self.show_checked_only_action = None
         self.readonly_mode_action = None
+        self.privacy_mask_action = None
         self.excel_thread = None
         self.excel_worker = None
         self.record_search_request_id = 0
         self.record_searches = {}
+        # (target_id, tree_state, search_auto_expand) for each in-flight
+        # record_searches request id -- see start_record_search()'s signal
+        # connections for why this is kept separate from record_searches.
+        self._record_search_context = {}
         self.offsite_backup_thread = None
         self.offsite_backup_worker = None
 
+        # The process-wide collector is off (see the gc.disable() comment
+        # at the top of this module); reclaim reference cycles manually on
+        # an interval, but only at moments no background QThread could be
+        # mid-signal -- periodic_gc_collect() checks that itself.
+        self.gc_collect_timer = QTimer(self)
+        self.gc_collect_timer.setInterval(GC_COLLECT_INTERVAL_MS)
+        self.gc_collect_timer.timeout.connect(
+            lambda: periodic_gc_collect(self)
+        )
+        self.gc_collect_timer.start()
+
+        self.init_urban_plan_state()
         self.create_layout()
+        self.init_urban_plans()
+        self.apply_owner_contacts_tab_visibility()
+        self.apply_external_id_button_availability()
         if self.api_mode:
             self.configure_api_mode_ui()
             self.setup_notification_status()
@@ -1111,8 +1094,24 @@ class LandApp(
             self.setup_backup_status()
             self.setup_notification_status()
             self.setup_offsite_backup()
-        self.refresh_records()
+        # Last, so the version label ends up right of the backup/notification buttons.
+        self.create_status_bar_content()
+        # Apply the saved font size (which touches the tree view's
+        # stylesheet and triggers Qt to synchronously walk every row for
+        # layout recomputation) BEFORE refresh_records() populates any
+        # data. For a large database, refresh_records() sets a preview into
+        # the table model and starts a background search thread; a report
+        # from real use showed the stylesheet-triggered walk landing while
+        # that background thread's queued "results ready" signal was
+        # already pending delivery, so the walk was reading QModelIndex
+        # objects into _TreeNode instances the model had already replaced
+        # via beginResetModel()/endResetModel() -- an
+        # AttributeError: '_TreeNode' object has no attribute 'kind' from
+        # a stale internalPointer(). Doing this while the tree is still
+        # empty removes the race entirely; row content plays no part in
+        # font-size/row-height application.
         self.apply_saved_font_size()
+        self.refresh_records()
         if self.startup_backup_path:
             QTimer.singleShot(0, self.show_startup_backup_notice)
 
@@ -1137,6 +1136,10 @@ def main():
     if APP_ICON_PATH.exists():
         app.setWindowIcon(QIcon(str(APP_ICON_PATH)))
     app.setStyle("Fusion")
+    # The saved theme is read once, here; the colours stay fixed for this run.
+    activate_theme()
+    refresh_theme_constants()
+    load_bundled_fonts()
     apply_font_size(app, get_saved_font_size_key())
     apply_app_style(app)
     api_client = None

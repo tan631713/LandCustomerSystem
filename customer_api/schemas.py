@@ -267,6 +267,7 @@ class RecordWrite(BaseModel):
 
     district: str = Field(min_length=1, max_length=100)
     section: str = Field(min_length=1, max_length=100)
+    subsection: str | None = Field(default=None, max_length=100)
     registration_order: str | None = Field(default=None, max_length=100)
     land_number: str = Field(min_length=1, max_length=100)
     area: str | None = Field(default=None, max_length=80)
@@ -281,10 +282,19 @@ class RecordWrite(BaseModel):
     registration_reason: str | None = Field(default=None, max_length=500)
     note: str | None = Field(default=None, max_length=5000)
     visit_log: str | None = Field(default=None, max_length=10000)
+    birth_year: str | None = Field(default=None, max_length=4)
+    # None keeps the land's urban plan, 0 clears it, an id moves the land there.
+    urban_plan_id: int | None = Field(default=None, ge=0)
+    # New records only: the existing owner picked in the desktop's
+    # "可能是同一位地主" list.  The ownership is attached to that owner
+    # instead of resolving one from name/ID/address (edits ignore it).
+    owner_id: int | None = Field(default=None, ge=1)
 
     @field_validator("*", mode="before")
     @classmethod
     def normalize_text_values(cls, value, info: ValidationInfo):
+        if info.field_name in {"urban_plan_id", "owner_id"}:
+            return None if value in (None, "") else value
         if value is None:
             if info.field_name == "owner_name":
                 return ""
@@ -306,6 +316,12 @@ class RecordWrite(BaseModel):
                 raise ValueError(f"{field_name} must be numeric")
         if self.denominator not in (None, "") and parse_number(self.denominator) == 0:
             raise ValueError("denominator must not be zero")
+        if self.birth_year not in (None, ""):
+            if not self.birth_year.isdigit() or len(self.birth_year) != 4:
+                raise ValueError("birth_year must be a 4-digit Gregorian year")
+            year = int(self.birth_year)
+            if not (1900 <= year <= datetime.now().year):
+                raise ValueError("birth_year is out of range")
         return self
 
     def normalized_values(self):
@@ -352,6 +368,23 @@ class RecordImportBatch(BaseModel):
 
     source_file_name: str = Field(default="import.xlsx", min_length=1, max_length=260)
     items: list[ImportRecordItem] = Field(min_length=1, max_length=5000)
+    urban_plan_id: int | None = Field(default=None, ge=1)
+
+
+class UrbanPlanWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=100)
+
+
+class UrbanPlanAssignment(BaseModel):
+    """Put lands into a plan (urban_plan_id null/0 releases them to 未分類)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    land_ids: list[int] = Field(min_length=1, max_length=5000)
+    urban_plan_id: int | None = Field(default=None, ge=0)
+    only_unassigned: bool = True
 
 
 class RecordChangeLogItem(BaseModel):
@@ -439,6 +472,12 @@ class RecordLocationWrite(BaseModel):
     source: str = Field(default="manual", min_length=1, max_length=80)
 
 
+class ExcelExportMark(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    record_ids: list[int] = Field(min_length=1, max_length=5000)
+
+
 class FieldVisitRouteCreate(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -504,6 +543,10 @@ class FieldVisitStatusUpdate(BaseModel):
     longitude: float | None = Field(default=None, ge=-180, le=180)
     note: str = Field(default="", max_length=5000)
     postponed_until: datetime | None = None
+    contact_date: date | None = None
+    # The field worker confirmed that the GPS was taken at this landowner's
+    # address; it is stored only for land shares that have no location yet.
+    save_location: bool = False
 
     @model_validator(mode="after")
     def validate_coordinate_pair(self):

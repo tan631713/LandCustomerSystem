@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>existingContactPickerDialogContent</class>
+ <widget class="QWidget" name="existingContactPickerDialogContent">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>760</width>
+    <height>360</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>選擇既有關係人</string>
+  </property>
+  <property name="dialogSize" stdset="0">
+   <size>
+    <width>760</width>
+    <height>360</height>
+   </size>
+  </property>
+  <layout class="QVBoxLayout" name="existingContactPickerLayout" stretch="0,1,0">
+   <property name="spacing">
+    <number>6</number>
+   </property>
+   <property name="leftMargin">
+    <number>11</number>
+   </property>
+   <property name="topMargin">
+    <number>11</number>
+   </property>
+   <property name="rightMargin">
+    <number>11</number>
+   </property>
+   <property name="bottomMargin">
+    <number>11</number>
+   </property>
+   <item>
+    <widget class="QLabel" name="promptLabel">
+     <property name="text">
+      <string>請選擇要沿用的既有關係人；系統不會自動合併資料。</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QWidget" name="contactTableSlot" native="true" />
+   </item>
+   <item>
+    <widget class="DialogButtonBox" name="buttonBox">
+     <property name="standardButtons">
+      <set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok</set>
+     </property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+ <customwidget>
+  <class>DialogButtonBox</class>
+  <extends>QDialogButtonBox</extends>
+  <header>customer_fluent</header>
+ </customwidget>
+ </customwidgets>
+ <resources />
+ <connections />
+</ui>

@@ -63,7 +63,11 @@ class SQLiteRecordMixin:
             self.repository.log_operation("API刪除資料", f"資料 ID {record_id}")
         return deleted
 
-    def import_records(self, user, items, source_file_name="import.xlsx"):
+    def import_records(
+        self, user, items, source_file_name="import.xlsx", urban_plan_id=None
+    ):
+        if urban_plan_id is not None:
+            raise ValueError("單機版資料來源不支援都市計畫，請連線至家中伺服器。")
         items = [dict(item) for item in items]
         update_ids = [
             int(item["record_id"])

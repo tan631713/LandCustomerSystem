@@ -18,6 +18,7 @@ class ContactWrite(BaseModel):
     registered_address: str = Field(default="", max_length=500)
     contact_address: str = Field(default="", max_length=500)
     work_address: str = Field(default="", max_length=500)
+    birth_year: str = Field(default="", max_length=4)
     identity_note: str = Field(default="", max_length=300)
     notes: str = Field(default="", max_length=2000)
 
@@ -27,6 +28,17 @@ class ContactWrite(BaseModel):
         if value is None:
             return None
         return normalize_taiwan_identity(value)
+
+    @field_validator("birth_year")
+    @classmethod
+    def validate_birth_year(cls, value):
+        if not value:
+            return ""
+        if not value.isdigit() or len(value) != 4:
+            raise ValueError("birth_year must be a 4-digit Gregorian year")
+        if not (1900 <= int(value) <= datetime.now().year):
+            raise ValueError("birth_year is out of range")
+        return value
 
 
 class OwnerRelationWrite(BaseModel):

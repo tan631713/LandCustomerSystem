@@ -181,6 +181,62 @@ class FieldVisitRoutingTests(unittest.TestCase):
 
         self.assertLess(time.perf_counter() - total_started, 5.0)
 
+    def test_same_group_items_stay_together(self):
+        # Owner 7 holds two land shares whose saved coordinates differ a bit;
+        # both shares must still be visited as one stop.
+        route = optimize_route(
+            [
+                RouteCandidate(1, 25.010, 121.5, group_key=7),
+                RouteCandidate(2, 25.020, 121.5),
+                RouteCandidate(3, 25.030, 121.5, group_key=7),
+            ],
+            25.0,
+            121.5,
+        )
+        self.assertEqual([item.item_id for item in route], [1, 3, 2])
+
+    def test_same_group_without_coordinates_is_kept_together(self):
+        route = optimize_route(
+            [
+                RouteCandidate(1, 25.01, 121.5),
+                RouteCandidate(2, route_order=2, group_key=9),
+                RouteCandidate(3, route_order=3),
+                RouteCandidate(4, route_order=4, group_key=9),
+            ],
+            25.0,
+            121.5,
+        )
+        self.assertEqual([item.item_id for item in route], [1, 2, 4, 3])
+
+    def test_current_item_group_follows_current_item(self):
+        route = optimize_route(
+            [
+                RouteCandidate(1, 25.05, 121.5, status="in_progress", group_key=3),
+                RouteCandidate(2, 25.049, 121.5),
+                RouteCandidate(3, route_order=3, group_key=3),
+            ],
+            25.0,
+            121.5,
+            keep_current_item_id=1,
+        )
+        self.assertEqual([item.item_id for item in route], [1, 3, 2])
+
+    def test_postponed_group_member_is_not_pulled_forward(self):
+        route = optimize_route(
+            [
+                RouteCandidate(1, 25.01, 121.5, group_key=5),
+                RouteCandidate(2, 25.02, 121.5),
+                RouteCandidate(3, 25.01, 121.5, status="postponed", group_key=5),
+            ],
+            25.0,
+            121.5,
+        )
+        self.assertEqual([item.item_id for item in route], [1, 2, 3])
+
+    def test_invalid_group_key_is_rejected(self):
+        with self.assertRaises(ValueError):
+            optimize_route([RouteCandidate(1, 25.0, 121.5, group_key=1.5)], 25.0, 121.5)
+
 
 if __name__ == "__main__":
     unittest.main()

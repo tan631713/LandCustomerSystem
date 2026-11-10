@@ -1,0 +1,406 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ownerContactGroup</class>
+ <widget class="QGroupBox" name="ownerContactGroup">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>648</width>
+    <height>589</height>
+   </rect>
+  </property>
+  <property name="title">
+   <string>關係人共用資料</string>
+  </property>
+  <layout class="QFormLayout" name="ownerContactForm">
+   <property name="horizontalSpacing">
+    <number>6</number>
+   </property>
+   <property name="verticalSpacing">
+    <number>6</number>
+   </property>
+   <property name="leftMargin">
+    <number>9</number>
+   </property>
+   <property name="topMargin">
+    <number>9</number>
+   </property>
+   <property name="rightMargin">
+    <number>9</number>
+   </property>
+   <property name="bottomMargin">
+    <number>9</number>
+   </property>
+   <item row="0" column="0">
+    <widget class="QLabel" name="nameLabel">
+     <property name="text">
+      <string>姓名 *</string>
+     </property>
+    </widget>
+   </item>
+   <item row="0" column="1">
+    <widget class="LineEdit" name="nameEdit" />
+   </item>
+   <item row="1" column="1">
+    <widget class="QLabel" name="matchHint">
+     <property name="text">
+      <string />
+     </property>
+    </widget>
+   </item>
+   <item row="2" column="1">
+    <widget class="QWidget" name="matchTableSlot" native="true" />
+   </item>
+   <item row="3" column="1">
+    <layout class="QHBoxLayout" name="matchActionsRow" stretch="0,1">
+     <property name="spacing">
+      <number>6</number>
+     </property>
+     <property name="leftMargin">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <property name="rightMargin">
+      <number>0</number>
+     </property>
+     <property name="bottomMargin">
+      <number>0</number>
+     </property>
+     <item>
+      <widget class="PushButton" name="useMatchButton">
+       <property name="text">
+        <string>使用選取的既有資料</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="matchActionsSpacer">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>0</width>
+         <height>0</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+    </layout>
+   </item>
+   <item row="4" column="0" colspan="2">
+    <layout class="QHBoxLayout" name="linkBannerRow" stretch="1,0">
+     <property name="spacing">
+      <number>6</number>
+     </property>
+     <property name="leftMargin">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <property name="rightMargin">
+      <number>0</number>
+     </property>
+     <property name="bottomMargin">
+      <number>0</number>
+     </property>
+     <item>
+      <widget class="QLabel" name="linkBanner">
+       <property name="text">
+        <string />
+       </property>
+       <property name="wordWrap">
+        <bool>true</bool>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PushButton" name="unlinkButton">
+       <property name="text">
+        <string>改為手動輸入新資料</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item row="5" column="0">
+    <widget class="QLabel" name="externalIdLabel">
+     <property name="text">
+      <string>身分證字號</string>
+     </property>
+    </widget>
+   </item>
+   <item row="5" column="1">
+    <layout class="QHBoxLayout" name="identityRow" stretch="1,0">
+     <property name="spacing">
+      <number>6</number>
+     </property>
+     <property name="leftMargin">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <property name="rightMargin">
+      <number>0</number>
+     </property>
+     <property name="bottomMargin">
+      <number>0</number>
+     </property>
+     <item>
+      <widget class="LineEdit" name="externalIdEdit">
+       <property name="maxLength">
+        <number>100</number>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PushButton" name="identityButton">
+       <property name="text">
+        <string>👁 隱藏</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item row="6" column="0">
+    <widget class="QLabel" name="mobileLabel">
+     <property name="text">
+      <string>手機</string>
+     </property>
+    </widget>
+   </item>
+   <item row="6" column="1">
+    <widget class="LineEdit" name="mobileEdit" />
+   </item>
+   <item row="7" column="0">
+    <widget class="QLabel" name="homeLabel">
+     <property name="text">
+      <string>市話</string>
+     </property>
+    </widget>
+   </item>
+   <item row="7" column="1">
+    <widget class="LineEdit" name="homeEdit" />
+   </item>
+   <item row="8" column="0">
+    <widget class="QLabel" name="registeredAddressLabel">
+     <property name="text">
+      <string>戶籍地址</string>
+     </property>
+    </widget>
+   </item>
+   <item row="8" column="1">
+    <widget class="LineEdit" name="registeredAddressEdit" />
+   </item>
+   <item row="9" column="0">
+    <widget class="QLabel" name="contactAddressLabel">
+     <property name="text">
+      <string>聯絡地址</string>
+     </property>
+    </widget>
+   </item>
+   <item row="9" column="1">
+    <widget class="LineEdit" name="contactAddressEdit" />
+   </item>
+   <item row="10" column="0">
+    <widget class="QLabel" name="workAddressLabel">
+     <property name="text">
+      <string>工作地址</string>
+     </property>
+    </widget>
+   </item>
+   <item row="10" column="1">
+    <widget class="LineEdit" name="workAddressEdit" />
+   </item>
+   <item row="11" column="0">
+    <widget class="QLabel" name="birthYearLabel">
+     <property name="text">
+      <string>出生西元年</string>
+     </property>
+    </widget>
+   </item>
+   <item row="11" column="1">
+    <layout class="QHBoxLayout" name="birthYearRow" stretch="1,0,1">
+     <property name="spacing">
+      <number>6</number>
+     </property>
+     <property name="leftMargin">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <property name="rightMargin">
+      <number>0</number>
+     </property>
+     <property name="bottomMargin">
+      <number>0</number>
+     </property>
+     <item>
+      <widget class="LineEdit" name="birthYearEdit">
+       <property name="maxLength">
+        <number>4</number>
+       </property>
+       <property name="placeholderText">
+        <string>例如 1965</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLabel" name="ageLabel">
+       <property name="text">
+        <string>年齡</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="LineEdit" name="ageEdit">
+       <property name="readOnly">
+        <bool>true</bool>
+       </property>
+       <property name="placeholderText">
+        <string>由出生西元年計算</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item row="12" column="0">
+    <widget class="QLabel" name="identityNoteLabel">
+     <property name="text">
+      <string>身分補充</string>
+     </property>
+    </widget>
+   </item>
+   <item row="12" column="1">
+    <widget class="LineEdit" name="identityNoteEdit" />
+   </item>
+   <item row="13" column="0">
+    <widget class="QLabel" name="notesLabel">
+     <property name="text">
+      <string>人員備註</string>
+     </property>
+    </widget>
+   </item>
+   <item row="13" column="1">
+    <widget class="PlainTextEdit" name="notesEdit">
+     <property name="minimumSize">
+      <size>
+       <width>0</width>
+       <height>80</height>
+      </size>
+     </property>
+     <property name="maximumSize">
+      <size>
+       <width>16777215</width>
+       <height>80</height>
+      </size>
+     </property>
+    </widget>
+   </item>
+   <item row="14" column="0">
+    <widget class="QLabel" name="helpersLabel">
+     <property name="text">
+      <string>快速填入</string>
+     </property>
+    </widget>
+   </item>
+   <item row="14" column="1">
+    <layout class="QHBoxLayout" name="helpersRow" stretch="0,0,0,1">
+     <property name="spacing">
+      <number>6</number>
+     </property>
+     <property name="leftMargin">
+      <number>0</number>
+     </property>
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <property name="rightMargin">
+      <number>0</number>
+     </property>
+     <property name="bottomMargin">
+      <number>0</number>
+     </property>
+     <item>
+      <widget class="PushButton" name="ownerAddressButton">
+       <property name="text">
+        <string>戶籍地址同地主</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PushButton" name="contactSameButton">
+       <property name="text">
+        <string>聯絡地址同戶籍地址</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="PushButton" name="workSameButton">
+       <property name="text">
+        <string>工作地址同聯絡地址</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="helpersSpacer">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>0</width>
+         <height>0</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+ <customwidget>
+  <class>LineEdit</class>
+  <extends>QLineEdit</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>PlainTextEdit</class>
+  <extends>QPlainTextEdit</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ <customwidget>
+  <class>PushButton</class>
+  <extends>QPushButton</extends>
+  <header>qfluentwidgets</header>
+ </customwidget>
+ </customwidgets>
+ <tabstops>
+  <tabstop>nameEdit</tabstop>
+  <tabstop>externalIdEdit</tabstop>
+  <tabstop>mobileEdit</tabstop>
+  <tabstop>homeEdit</tabstop>
+  <tabstop>registeredAddressEdit</tabstop>
+  <tabstop>contactAddressEdit</tabstop>
+  <tabstop>workAddressEdit</tabstop>
+  <tabstop>birthYearEdit</tabstop>
+  <tabstop>ageEdit</tabstop>
+  <tabstop>identityNoteEdit</tabstop>
+  <tabstop>notesEdit</tabstop>
+  <tabstop>useMatchButton</tabstop>
+  <tabstop>unlinkButton</tabstop>
+  <tabstop>identityButton</tabstop>
+  <tabstop>ownerAddressButton</tabstop>
+  <tabstop>contactSameButton</tabstop>
+  <tabstop>workSameButton</tabstop>
+ </tabstops>
+ <resources />
+ <connections />
+</ui>

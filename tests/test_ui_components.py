@@ -5,11 +5,12 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QRect, Qt
+from PySide6.QtCore import QDate, QRect, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
+import customer_theme
 import customer_ui_qt as app
 from customer_dialogs import (
     AdvancedSearchDialog,
@@ -27,13 +28,13 @@ from customer_dialogs import (
     RecordHistoryDialog,
     SavedSearchDialog,
     SharedLandBatchDialog,
+    VisitCalendarDialog,
 )
 from customer_extra_dialogs import (
     ApplyTemplateDialog,
     AttachmentDialog,
     BatchCustomerCustomValuesDialog,
     BatchCustomerTagsDialog,
-    CaseManagementDialog,
     CaseSelectDialog,
     ContactLogDialog,
     CustomFieldManagementDialog,
@@ -137,7 +138,7 @@ class UiComponentTests(unittest.TestCase):
 
         self.assertEqual(model.data(note_index, Qt.BackgroundRole), QColor("#564113"))
         self.assertEqual(model.data(tag_index, Qt.BackgroundRole), QColor("#564113"))
-        self.assertEqual(model.data(tag_index, Qt.ForegroundRole), QColor("#f8fafc"))
+        self.assertEqual(model.data(tag_index, Qt.ForegroundRole), customer_theme.qcolor("ink"))
         self.assertEqual(
             model.data(tag_index, Qt.UserRole + 3),
             [{"tag_id": 3, "name": "優先", "color": "#FF0000"}],
@@ -185,6 +186,7 @@ class UiComponentTests(unittest.TestCase):
                 {
                     "district": "中正區",
                     "section": "一段",
+                    "subsection": "",
                     "land_number": "100",
                     "area": "120",
                     "declared_value": "20,000",
@@ -361,17 +363,38 @@ class UiComponentTests(unittest.TestCase):
                         "owner_name": "王小明",
                         "district": "桃園區",
                         "section": "一段",
+                        "subsection": "",
                         "land_number": "101",
                         "note": "再聯絡",
                     }
                 ]
             ),
         ]
+
+        class StubVisitCalendarWindow:
+            def load_visit_calendar_items(self, start_date, end_date, mine_only=False):
+                del start_date, end_date, mine_only
+                return [
+                    {
+                        "customer_id": 7,
+                        "date": QDate.currentDate().toString("yyyy-MM-dd"),
+                        "calendar_status": "completed",
+                        "owner_name": "王小明",
+                        "district": "桃園區",
+                        "section": "一段",
+                        "subsection": "",
+                        "land_number": "101",
+                    }
+                ]
+
+        dialogs.append(VisitCalendarDialog(StubVisitCalendarWindow()))
         try:
             self.assertEqual(dialogs[0].table.rowCount(), 12)
             self.assertEqual(dialogs[1].table.item(0, 2).text(), "地號")
             self.assertEqual(dialogs[2].values()["status"], "待回覆")
             self.assertEqual(dialogs[3].table.item(0, 2).text(), "王小明")
+            self.assertEqual(dialogs[4].table.item(0, 0).text(), "王小明")
+            self.assertEqual(dialogs[4].table.item(0, 5).text(), "已完成")
         finally:
             for dialog in dialogs:
                 dialog.close()
@@ -383,7 +406,11 @@ class UiComponentTests(unittest.TestCase):
         templates = [{"id": 4, "template_type": "note", "title": "Note", "content": "Call back"}]
         opened_attachments = []
         dialogs = [
-            CaseManagementDialog(cases),
+            # The old standalone CaseManagementDialog was unified into
+            # WorkflowDialog ("案件規劃", see customer_productivity.py) --
+            # a repository-backed, tabbed dialog no longer constructible
+            # from a plain in-memory case list like the fakes here, so
+            # it is no longer part of this shared-fixture smoke test.
             CaseSelectDialog(cases, 2),
             FieldVisitScheduleDialog(3),
             TagManagementDialog(tags),
@@ -425,27 +452,26 @@ class UiComponentTests(unittest.TestCase):
             BatchCustomerCustomValuesDialog(fields, 2),
         ]
         try:
-            self.assertEqual(dialogs[0].table.rowCount(), 1)
-            self.assertEqual(dialogs[1].selected_case_id(), 1)
-            self.assertEqual(dialogs[2].title(), "今日拜訪行程")
-            self.assertRegex(dialogs[2].selected_date(), r"^\d{4}-\d{2}-\d{2}$")
-            self.assertEqual(dialogs[2].priority(), 0)
-            dialogs[2].priority_checkbox.setChecked(True)
-            self.assertEqual(dialogs[2].priority(), 100)
-            self.assertEqual(dialogs[4].selected_ids(), [2])
-            dialogs[5].table.selectRow(0)
-            dialogs[5].open_selected_file()
+            self.assertEqual(dialogs[0].selected_case_id(), 1)
+            self.assertEqual(dialogs[1].title(), "今日拜訪行程")
+            self.assertRegex(dialogs[1].selected_date(), r"^\d{4}-\d{2}-\d{2}$")
+            self.assertEqual(dialogs[1].priority(), 0)
+            dialogs[1].priority_checkbox.setChecked(True)
+            self.assertEqual(dialogs[1].priority(), 100)
+            self.assertEqual(dialogs[3].selected_ids(), [2])
+            dialogs[4].table.selectRow(0)
+            dialogs[4].open_selected_file()
             self.assertEqual(opened_attachments, [5])
-            self.assertEqual(dialogs[5].table.item(0, 1).text(), "a.pdf")
-            self.assertEqual(dialogs[7].result_values()[3], "value")
-            self.assertEqual(dialogs[9].values()["template"]["title"], "Note")
-            self.assertEqual(dialogs[12].table.rowCount(), 1)
-            dialogs[13].list_widget.item(0).setCheckState(Qt.Checked)
-            self.assertEqual(dialogs[13].selected_ids(), [2])
-            checkbox, edit = dialogs[14].rows[3]
+            self.assertEqual(dialogs[4].table.item(0, 1).text(), "a.pdf")
+            self.assertEqual(dialogs[6].result_values()[3], "value")
+            self.assertEqual(dialogs[8].values()["template"]["title"], "Note")
+            self.assertEqual(dialogs[11].table.rowCount(), 1)
+            dialogs[12].list_widget.item(0).setCheckState(Qt.Checked)
+            self.assertEqual(dialogs[12].selected_ids(), [2])
+            checkbox, edit = dialogs[13].rows[3]
             checkbox.setChecked(True)
             edit.setText("batch value")
-            self.assertEqual(dialogs[14].result_values(), {3: "batch value"})
+            self.assertEqual(dialogs[13].result_values(), {3: "batch value"})
         finally:
             for dialog in dialogs:
                 dialog.close()
@@ -516,33 +542,13 @@ class UiComponentTests(unittest.TestCase):
             self.assertIn("Owner", xml)
             self.assertIn("地號", xml)
 
-    def test_case_management_new_mode_does_not_reuse_selected_case_id(self):
-        dialog = CaseManagementDialog(
-            [
-                {
-                    "id": 1,
-                    "title": "第一個案件",
-                    "status": "進行中",
-                    "note": "",
-                    "customer_count": 0,
-                }
-            ]
-        )
-        try:
-            dialog.table.selectRow(0)
-            self.application.processEvents()
-            self.assertEqual(dialog.selected_case_id(), 1)
-            self.assertEqual(dialog.save_button.text(), "更新選取案件")
-
-            dialog.clear_form()
-            self.application.processEvents()
-            dialog.title_edit.setText("第二個案件")
-
-            self.assertIsNone(dialog.selected_case_id())
-            self.assertIsNone(dialog.values()["case_id"])
-            self.assertEqual(dialog.save_button.text(), "新增案件")
-        finally:
-            dialog.close()
+    # test_case_management_new_mode_does_not_reuse_selected_case_id used to
+    # live here, covering CaseManagementDialog's new-vs-edit toggle. That
+    # dialog was unified into the repository-backed WorkflowDialog
+    # ("案件規劃", see customer_productivity.py), which uses a different
+    # internal widget layout; this coverage was lost to an accidental
+    # `git checkout` on this file (see MEMORY/session notes) and has not
+    # been rewritten against WorkflowDialog's actual API yet.
 
     def test_import_preview_dialog_update_existing_mode(self):
         dialog = ImportPreviewDialog(
