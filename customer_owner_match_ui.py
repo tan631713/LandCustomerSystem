@@ -48,9 +48,20 @@ OWNER_MATCH_DEFAULT_HINT = (
 )
 
 
-def candidate_reason_text(item):
+def candidate_reason_text(item, separator="\n"):
+    """「姓名✓ 身分證✓ 地址✗」 and the note under it, one per line."""
+
     reasons = [str(reason) for reason in item.get("reasons") or () if reason]
-    return "　".join(reasons) or "姓名相同"
+    if separator == "\n":
+        # A long note such as 地址相同、姓名不同（可能是家人或姓名打錯）
+        # goes on two lines so the narrow form does not cut it off.
+        reasons = [
+            reason.replace("（", "\n（", 1)
+            if len(reason) > 14 and "（" in reason
+            else reason
+            for reason in reasons
+        ]
+    return separator.join(reasons) or "姓名相同"
 
 
 def candidate_summary(item):
@@ -173,7 +184,7 @@ class OwnerMatchPanel(QWidget):
                 self.table.setItem(row, column, cell)
                 label = QLabel(text)
                 label.setObjectName("ownerMatchCellLabel")
-                label.setWordWrap(column == 1)
+                label.setWordWrap(False)
                 label.setToolTip(tips[column])
                 label.setContentsMargins(10, 4, 10, 4)
                 label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
@@ -496,7 +507,7 @@ class OwnerMatchWorkflowMixin:
         """"new" = 確定新增新地主, anything else = go back and choose."""
 
         lines = "\n".join(
-            f"・{candidate_summary(item)}（{candidate_reason_text(item)}）"
+            f"・{candidate_summary(item)}（{candidate_reason_text(item, '，')}）"
             for item in high[:5]
         )
         box_class = self._app_component("QMessageBox")
