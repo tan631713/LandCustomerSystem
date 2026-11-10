@@ -4,20 +4,23 @@ Pure functions shared by the API server (which does the matching, so the
 identity numbers and phones never leave it unmasked) and the tests.  Nothing
 here touches the database or Qt.
 
-Scores, highest first:
+姓名、身分證與地址一起判斷.  Identity numbers are compared on 前4碼＋末碼
+(most stored values are 5 characters, e.g. H2211 = H221 + last digit; a full
+10-character number gives characters 1-4 and 10, a masked H221*****1 its first
+four and last).  Addresses are normalized first (台/臺, full/half width,
+三段/3段, 之1/-1, 5F/5樓, spaces).  Scores, highest first:
 
-* 100 身分證相同（兩邊都是完整 10 碼且完全一樣）
-*  80 姓名相同＋身分證前4碼與末碼相同（多數資料只存 5 碼，例如 H2211 =
-      H221＋末碼 1；完整 10 碼取第 1-4 與第 10 碼，遮蔽格式 H221*****1 也取
-      前 4 與末碼）
-*  70 姓名相同＋電話相同
-*  60 姓名相同＋地址相同（台/臺、全半形、三段/3段、之1/-1、樓/F、空白都不計）
-*  50 姓名相同＋地址相似
-*  20 只有姓名相同
+* 100 兩邊都是完整 10 碼且完全相同（不看姓名）
+*  95 姓名相同＋身分證（5 碼鍵）相同＋地址相同          → 存檔前提醒
+*  75 姓名相同＋沒有身分證可比＋地址相同                → 存檔前提醒
+*  70 姓名相同＋身分證相同＋地址不同或一邊沒地址（可能搬家）→ 存檔前提醒
+*  70 姓名相同＋電話相同（沒有身分證可比時）            → 存檔前提醒
+*  50 姓名相同＋地址相似（不是完全相同）                → 只顯示
+*  30 只有姓名相同、其他都沒得比                          → 只顯示
+*  20 地址相同、姓名不同（可能是家人或姓名打錯；最多 5 位）→ 只顯示
 
-Same name but two complete, different identity numbers is a different
-person and is never offered.  A matching 5-character key under a different
-name is not offered either: about 50 000 combinations collide too easily.
+Same name but two different identity keys is a different person and is not
+offered.  Each candidate carries a 姓名✓ 身分證✓ 地址✗ checklist.
 """
 
 from __future__ import annotations
@@ -26,7 +29,8 @@ import re
 import unicodedata
 from difflib import SequenceMatcher
 
-HIGH_MATCH_SCORE = 50
+# Candidates at or above this are asked about again before saving.
+HIGH_MATCH_SCORE = 70
 DEFAULT_CANDIDATE_LIMIT = 10
 ADDRESS_SIMILARITY_RATIO = 0.85
 # Containment ("中壢區中正路3段10號" inside "桃園市中壢區中正路3段10號") only
@@ -34,12 +38,17 @@ ADDRESS_SIMILARITY_RATIO = 0.85
 ADDRESS_CONTAINMENT_MIN_LENGTH = 8
 
 SCORE_IDENTITY = 100
-SCORE_IDENTITY_PARTIAL = 80
-IDENTITY_KEY_LENGTH = 5
+SCORE_NAME_ID_ADDRESS = 95
+SCORE_NAME_ADDRESS = 75
+SCORE_NAME_ID_MOVED = 70
 SCORE_PHONE = 70
-SCORE_ADDRESS_SAME = 60
 SCORE_ADDRESS_SIMILAR = 50
-SCORE_NAME_ONLY = 20
+SCORE_NAME_ONLY = 30
+SCORE_ADDRESS_ONLY = 20
+IDENTITY_KEY_LENGTH = 5
+ADDRESS_ONLY_LIMIT = 5
+ADDRESS_ONLY_REASON = "地址相同、姓名不同（可能是家人或姓名打錯）"
+ADDRESS_ONLY_NO_NAME_REASON = "地址相同（尚未輸入姓名）"
 
 _CHINESE_DIGITS = {
     "零": 0, "〇": 0, "○": 0, "一": 1, "壹": 1, "二": 2, "貳": 2, "兩": 2,
@@ -172,9 +181,9 @@ def mask_phone(value):
     return digits[:2] + "*" * (len(digits) - 5) + digits[-3:]
 
 
-def addresses_similar(left, right):
-    left = normalize_owner_address(left)
-    right = normalize_owner_address(right)
+def normalized_addresses_similar(left, right):
+    """addresses_similar() for already normalized text (the hot path)."""
+
     if not left or not right:
         return False
     if left == right:
@@ -182,7 +191,21 @@ def addresses_similar(left, right):
     shorter, longer = sorted((left, right), key=len)
     if len(shorter) >= ADDRESS_CONTAINMENT_MIN_LENGTH and shorter in longer:
         return True
-    return SequenceMatcher(None, left, right).ratio() >= ADDRESS_SIMILARITY_RATIO
+    if len(shorter) < len(longer) * ADDRESS_SIMILARITY_RATIO:
+        # ratio() can never reach the threshold; skip the expensive part.
+        return False
+    matcher = SequenceMatcher(None, left, right)
+    return (
+        matcher.real_quick_ratio() >= ADDRESS_SIMILARITY_RATIO
+        and matcher.quick_ratio() >= ADDRESS_SIMILARITY_RATIO
+        and matcher.ratio() >= ADDRESS_SIMILARITY_RATIO
+    )
+
+
+def addresses_similar(left, right):
+    return normalized_addresses_similar(
+        normalize_owner_address(left), normalize_owner_address(right)
+    )
 
 
 def identity_match_key(value):
@@ -203,67 +226,101 @@ def identity_match_key(value):
     return None if "*" in key else key
 
 
+def _mark(state):
+    return {"same": "✓", "similar": "≈", "different": "✗"}.get(state, "—")
+
+
+def comparison_checklist(name_state, identity_state, address_state):
+    """「姓名✓ 身分證✓ 地址✗」: ✓ same, ≈ similar, ✗ different, — nothing to compare."""
+
+    return (
+        f"姓名{_mark(name_state)} 身分證{_mark(identity_state)} "
+        f"地址{_mark(address_state)}"
+    )
+
+
 def score_owner_candidate(query, owner):
     """(score, reasons) for one existing owner, or None when it is not a match.
 
     ``query`` and ``owner`` are plain dicts with owner_name, external_id,
-    address and phone (owner: phones, a list).
+    address and phone (owner: phones, a list).  reasons[0] is the
+    姓名／身分證／地址 checklist, the rest explain the level.
     """
 
     typed_name = normalize_owner_name(query.get("owner_name"))
-    owner_name = normalize_owner_name(owner.get("owner_name"))
+    owner_name = owner.get("_name_norm")
+    if owner_name is None:
+        owner_name = normalize_owner_name(owner.get("owner_name"))
     typed_id = normalize_identity(query.get("external_id"))
     stored_id = normalize_identity(owner.get("external_id"))
-    same_name = bool(typed_name) and typed_name == owner_name
+    typed_address = query.get("_address_norm")
+    if typed_address is None:
+        typed_address = normalize_owner_address(query.get("address"))
+    stored_address = owner.get("_address_norm")
+    if stored_address is None:
+        stored_address = normalize_owner_address(owner.get("address"))
+
+    if not typed_name or not owner_name:
+        name_state = None
+    else:
+        name_state = "same" if typed_name == owner_name else "different"
+    typed_key = identity_match_key(typed_id)
+    stored_key = identity_match_key(stored_id)
+    if typed_key is None or stored_key is None:
+        identity_state = None
+    else:
+        identity_state = "same" if typed_key == stored_key else "different"
+    if not typed_address or not stored_address:
+        address_state = None
+    elif typed_address == stored_address:
+        address_state = "same"
+    elif normalized_addresses_similar(typed_address, stored_address):
+        address_state = "similar"
+    else:
+        address_state = "different"
+
+    def result(score, *notes):
+        return score, [
+            comparison_checklist(name_state, identity_state, address_state), *notes
+        ]
 
     if (
         is_full_identity(typed_id)
         and is_full_identity(stored_id)
         and typed_id == stored_id
     ):
-        reasons = ["身分證相同"]
-        if same_name:
-            reasons.append("姓名相同")
-        return SCORE_IDENTITY, reasons
-    if not same_name:
+        return result(SCORE_IDENTITY, "身分證完全相同")
+
+    if name_state != "same":
+        # Another name: only the same (or nearly the same) address is
+        # worth showing -- a relative, or the name typed wrong.
+        if address_state in {"same", "similar"}:
+            return result(
+                SCORE_ADDRESS_ONLY,
+                ADDRESS_ONLY_REASON if typed_name else ADDRESS_ONLY_NO_NAME_REASON,
+            )
         return None
-    if (
-        typed_id
-        and stored_id
-        and is_full_identity(typed_id)
-        and is_full_identity(stored_id)
-        and typed_id != stored_id
-    ):
+
+    if identity_state == "different":
         # 同名不同人.
         return None
+    if identity_state == "same":
+        if address_state in {"same", "similar"}:
+            return result(SCORE_NAME_ID_ADDRESS)
+        return result(SCORE_NAME_ID_MOVED, "地址不同（可能搬家）")
 
-    score = SCORE_NAME_ONLY
-    reasons = ["姓名相同"]
-    typed_key = identity_match_key(typed_id)
-    if typed_key is not None and typed_key == identity_match_key(stored_id):
-        score = max(score, SCORE_IDENTITY_PARTIAL)
-        reasons.append("身分證前4碼與末碼相同")
-
+    if address_state == "same":
+        return result(SCORE_NAME_ADDRESS)
     typed_phone = normalize_phone(query.get("phone"))
-    if len(typed_phone) >= 6:
-        phones = {normalize_phone(phone) for phone in owner.get("phones") or ()}
-        if typed_phone in phones:
-            score = max(score, SCORE_PHONE)
-            reasons.append("電話相同")
-
-    typed_address = normalize_owner_address(query.get("address"))
-    stored_address = normalize_owner_address(owner.get("address"))
-    if typed_address and stored_address:
-        if typed_address == stored_address:
-            score = max(score, SCORE_ADDRESS_SAME)
-            if _text(query.get("address")) == _text(owner.get("address")):
-                reasons.append("地址相同")
-            else:
-                reasons.append("地址相同（寫法不同）")
-        elif addresses_similar(typed_address, stored_address):
-            score = max(score, SCORE_ADDRESS_SIMILAR)
-            reasons.append("地址相似")
-    return score, reasons
+    if len(typed_phone) >= 6 and typed_phone in {
+        normalize_phone(phone) for phone in owner.get("phones") or ()
+    }:
+        return result(SCORE_PHONE, "電話相同")
+    if address_state == "similar":
+        return result(SCORE_ADDRESS_SIMILAR, "地址相似")
+    if address_state == "different":
+        return result(SCORE_NAME_ONLY, "地址不同")
+    return result(SCORE_NAME_ONLY)
 
 
 def rank_owner_candidates(
@@ -278,6 +335,8 @@ def rank_owner_candidates(
     """
 
     ignored = {int(value) for value in ignored_owner_ids}
+    query = dict(query)
+    query["_address_norm"] = normalize_owner_address(query.get("address"))
     results = []
     for owner in owners:
         owner_id = int(owner["owner_id"])
@@ -305,6 +364,10 @@ def rank_owner_candidates(
             item["owner_id"],
         )
     )
+    address_only = [item for item in results if item["score"] == SCORE_ADDRESS_ONLY]
+    if len(address_only) > ADDRESS_ONLY_LIMIT:
+        dropped = {id(item) for item in address_only[ADDRESS_ONLY_LIMIT:]}
+        results = [item for item in results if id(item) not in dropped]
     return results[: max(1, int(limit))]
 
 
@@ -326,6 +389,7 @@ def candidate_response_item(result):
         "score": result["score"],
         "reasons": list(result["reasons"]),
         "same_owner_key": bool(result["same_owner_key"]),
+        "address_only": result["score"] == SCORE_ADDRESS_ONLY,
         "high_match": result["score"] >= HIGH_MATCH_SCORE,
     }
 

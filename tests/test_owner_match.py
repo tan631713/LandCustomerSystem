@@ -73,87 +73,6 @@ class AddressNormalizationTests(unittest.TestCase):
         self.assertEqual(mask_phone("0912-345-678"), "09*****678")
 
 
-class CandidateScoringTests(unittest.TestCase):
-    def test_same_name_different_people(self):
-        owners = [
-            owner(1, "王大明", "A123456789", "桃園市中壢區中正路1號"),
-            owner(2, "王大明", "B223456780", "新竹市東區光復路2號"),
-        ]
-        ranked = rank_owner_candidates(
-            {"owner_name": "王大明", "external_id": "A123456789"}, owners
-        )
-        self.assertEqual([item["owner_id"] for item in ranked], [1])
-        self.assertEqual(ranked[0]["score"], 100)
-        # A different complete ID under the same name is another person.
-        ranked = rank_owner_candidates(
-            {"owner_name": "王大明", "external_id": "C123456789"}, owners
-        )
-        self.assertEqual(ranked, [])
-        # Name only: both offered, neither is a high match.
-        ranked = rank_owner_candidates({"owner_name": "王大明"}, owners)
-        self.assertEqual({item["owner_id"] for item in ranked}, {1, 2})
-        self.assertTrue(all(item["score"] < HIGH_MATCH_SCORE for item in ranked))
-
-    def test_same_person_with_differently_written_address(self):
-        owners = [owner(7, "林美麗", "", "臺北市中正區忠孝東路三段12號之1五樓", land_count=3)]
-        score, reasons = score_owner_candidate(
-            {"owner_name": "林美麗", "address": "台北市中正區忠孝東路3段12-1號5F"},
-            owners[0],
-        )
-        self.assertGreaterEqual(score, HIGH_MATCH_SCORE)
-        self.assertIn("地址相同（寫法不同）", reasons)
-
-    def test_name_only(self):
-        score, reasons = score_owner_candidate({"owner_name": "陳一"}, owner(3, "陳 一"))
-        self.assertEqual(score, 20)
-        self.assertEqual(reasons, ["姓名相同"])
-        self.assertIsNone(score_owner_candidate({"owner_name": "陳二"}, owner(3, "陳一")))
-
-    def test_ranking_order_identity_partial_phone_address(self):
-        owners = [
-            owner(1, "張三", "", "桃園市中壢區中正路1號"),
-            owner(2, "張三", "", "", phones=["0912345678"]),
-            owner(3, "張三", "H123456789"),
-            owner(4, "張三", "H123456789".replace("H1", "Z9")),
-        ]
-        ranked = rank_owner_candidates(
-            {
-                "owner_name": "張三",
-                "external_id": "H123*****9",
-                "address": "桃園市中壢區中正路一號",
-                "phone": "0912-345-678",
-            },
-            owners,
-        )
-        self.assertEqual([item["owner_id"] for item in ranked[:3]], [3, 2, 1])
-        self.assertIn("身分證前4碼與末碼相同", ranked[0]["reasons"])
-
-    def test_partial_stored_identity_from_transcript(self):
-        # 謄本 keeps 前4碼＋末碼: S221912345 is stored as S2215.
-        score, reasons = score_owner_candidate(
-            {"owner_name": "李四", "external_id": "S221912345"}, owner(5, "李四", "S2215")
-        )
-        self.assertEqual(score, 80)
-        self.assertIn("身分證前4碼與末碼相同", reasons)
-        # The old "前段相符" reading (S2219 as the first five) no longer matches.
-        score, reasons = score_owner_candidate(
-            {"owner_name": "李四", "external_id": "S221912345"}, owner(5, "李四", "S2219")
-        )
-        self.assertEqual(score, 20)
-
-    def test_rejected_owners_are_left_out_and_response_is_masked(self):
-        owners = [owner(1, "王五", "A123456789", phones=["0912345678"])]
-        self.assertEqual(
-            rank_owner_candidates({"owner_name": "王五"}, owners, ignored_owner_ids={1}),
-            [],
-        )
-        item = candidate_response_item(rank_owner_candidates({"owner_name": "王五"}, owners)[0])
-        self.assertEqual(item["external_id_masked"], "A123*****9")
-        self.assertEqual(item["phones_masked"], ["09*****678"])
-        self.assertNotIn("external_id", item)
-        self.assertNotIn("A123456789", repr(item))
-
-
 class IdentityKeyTests(unittest.TestCase):
     def test_match_key(self):
         from customer_owner_match import identity_match_key
@@ -167,48 +86,205 @@ class IdentityKeyTests(unittest.TestCase):
         self.assertIsNone(identity_match_key("H221"))
         self.assertIsNone(identity_match_key(""))
 
-    def test_full_number_against_stored_five_characters(self):
-        score, reasons = score_owner_candidate(
-            {"owner_name": "邱小姐", "external_id": "H221345671"},
-            owner(1, "邱小姐", "H2211"),
-        )
-        self.assertEqual(score, 80)
-        self.assertGreaterEqual(score, HIGH_MATCH_SCORE)
-        self.assertIn("身分證前4碼與末碼相同", reasons)
 
-    def test_five_against_five_and_masked(self):
-        for typed in ("H2211", "H221*****1"):
-            with self.subTest(typed=typed):
-                score, reasons = score_owner_candidate(
-                    {"owner_name": "邱小姐", "external_id": typed},
-                    owner(1, "邱小姐", "H2211"),
+ADDRESS = "330桃園市桃園區國信街四十一號三樓"
+ADDRESS_TYPED = "桃園市桃園區國信街41號3F"
+
+
+class CandidateTierTests(unittest.TestCase):
+    """One test per level of the 姓名／身分證／地址 scoring."""
+
+    def score(self, query, stored):
+        return score_owner_candidate(query, stored)
+
+    def test_100_two_identical_complete_numbers_whatever_the_name(self):
+        score, reasons = self.score(
+            {"owner_name": "陳大文", "external_id": "H221987651"},
+            owner(2, "陳先生", "H221987651"),
+        )
+        self.assertEqual(score, 100)
+        self.assertIn("身分證完全相同", reasons)
+
+    def test_95_name_identity_and_address(self):
+        for typed_id in ("H221345671", "H2211", "H221*****1"):
+            with self.subTest(typed_id=typed_id):
+                score, reasons = self.score(
+                    {"owner_name": "邱小姐", "external_id": typed_id, "address": ADDRESS_TYPED},
+                    owner(1, "邱小姐", "H2211", ADDRESS),
                 )
-                self.assertEqual(score, 80)
-        score, _reasons = score_owner_candidate(
-            {"owner_name": "邱小姐", "external_id": "H2212"},
-            owner(1, "邱小姐", "H2211"),
+                self.assertEqual(score, 95)
+                self.assertEqual(reasons[0], "姓名✓ 身分證✓ 地址✓")
+                self.assertGreaterEqual(score, HIGH_MATCH_SCORE)
+
+    def test_70_name_and_identity_but_another_address(self):
+        for typed_address in ("台北市信義區松仁路1號", ""):
+            with self.subTest(address=typed_address):
+                score, reasons = self.score(
+                    {"owner_name": "邱小姐", "external_id": "H2211", "address": typed_address},
+                    owner(1, "邱小姐", "H2211", ADDRESS),
+                )
+                self.assertEqual(score, 70)
+                self.assertIn("地址不同（可能搬家）", reasons)
+                self.assertGreaterEqual(score, HIGH_MATCH_SCORE)
+        self.assertEqual(
+            self.score(
+                {"owner_name": "邱小姐", "external_id": "H2211", "address": "台北市信義區松仁路1號"},
+                owner(1, "邱小姐", "H2211", ADDRESS),
+            )[1][0],
+            "姓名✓ 身分證✓ 地址✗",
+        )
+
+    def test_75_name_and_address_without_identity_to_compare(self):
+        for stored_id, typed_id in (("", ""), ("H2211", ""), ("", "H2211")):
+            with self.subTest(stored=stored_id, typed=typed_id):
+                score, reasons = self.score(
+                    {"owner_name": "林美麗", "external_id": typed_id,
+                     "address": "台北市中正區忠孝東路3段12-1號5F"},
+                    owner(7, "林美麗", stored_id, "臺北市中正區忠孝東路三段12號之1五樓"),
+                )
+                self.assertEqual(score, 75)
+                self.assertEqual(reasons[0], "姓名✓ 身分證— 地址✓")
+
+    def test_50_name_and_similar_address_is_shown_only(self):
+        score, reasons = self.score(
+            {"owner_name": "林美麗", "address": "中壢區中正路23巷5號"},
+            owner(7, "林美麗", "", "桃園市中壢區中正路二十三巷5號"),
+        )
+        self.assertEqual(score, 50)
+        self.assertEqual(reasons[0], "姓名✓ 身分證— 地址≈")
+        self.assertLess(score, HIGH_MATCH_SCORE)
+
+    def test_same_name_different_identity_is_not_offered(self):
+        self.assertIsNone(
+            self.score(
+                {"owner_name": "邱小姐", "external_id": "H2212", "address": ADDRESS_TYPED},
+                owner(1, "邱小姐", "H2211", ADDRESS),
+            )
+        )
+        self.assertIsNone(
+            self.score(
+                {"owner_name": "王大明", "external_id": "C123456789"},
+                owner(1, "王大明", "A123456789"),
+            )
+        )
+
+    def test_30_name_only(self):
+        score, reasons = self.score({"owner_name": "陳一"}, owner(3, "陳 一"))
+        self.assertEqual(score, 30)
+        self.assertEqual(reasons, ["姓名✓ 身分證— 地址—"])
+        score, reasons = self.score(
+            {"owner_name": "陳一", "address": "新竹市東區光復路2號"},
+            owner(3, "陳一", "", "桃園市中壢區中正路1號"),
+        )
+        self.assertEqual(score, 30)
+        self.assertEqual(reasons, ["姓名✓ 身分證— 地址✗", "地址不同"])
+        self.assertIsNone(self.score({"owner_name": "陳二"}, owner(3, "陳一")))
+
+    def test_20_same_address_other_name(self):
+        score, reasons = self.score(
+            {"owner_name": "邱美鈴", "address": ADDRESS_TYPED},
+            owner(1, "邱小姐", "", ADDRESS),
+        )
+        self.assertEqual(score, 20)
+        self.assertEqual(
+            reasons, ["姓名✗ 身分證— 地址✓", "地址相同、姓名不同（可能是家人或姓名打錯）"]
+        )
+        score, reasons = self.score({"address": ADDRESS_TYPED}, owner(1, "邱小姐", "", ADDRESS))
+        self.assertEqual(score, 20)
+        self.assertIn("地址相同（尚未輸入姓名）", reasons)
+
+    def test_same_identity_key_under_another_name_needs_the_address(self):
+        query = {"owner_name": "林先生", "external_id": "H2211"}
+        self.assertIsNone(self.score(query, owner(1, "邱小姐", "H2211", ADDRESS)))
+        score, _reasons = self.score(
+            {**query, "address": ADDRESS_TYPED}, owner(1, "邱小姐", "H2211", ADDRESS)
         )
         self.assertEqual(score, 20)
 
-    def test_same_five_characters_under_another_name_is_not_offered(self):
-        owners = [owner(1, "邱小姐", "H2211"), owner(2, "陳先生", "H221987651")]
-        self.assertEqual(
-            rank_owner_candidates({"owner_name": "林先生", "external_id": "H2211"}, owners),
-            [],
+    def test_phone_without_identity(self):
+        score, reasons = self.score(
+            {"owner_name": "張三", "phone": "0912-345-678"},
+            owner(2, "張三", "", "", phones=["0912345678"]),
         )
+        self.assertEqual(score, 70)
+        self.assertIn("電話相同", reasons)
+
+    def test_ranking_order(self):
+        owners = [
+            owner(1, "張三", "", "新竹市東區光復路2號"),              # 30
+            owner(2, "張三", "", "桃園市中壢區中正路1號"),            # 75
+            owner(3, "張三", "H1239", "桃園市中壢區中正路1號"),       # 95
+            owner(4, "張三", "H1239", "台北市信義區松仁路1號"),       # 70
+            owner(5, "李四", "", "桃園市中壢區中正路一號"),           # 20
+            owner(6, "張三", "Z9999", "桃園市中壢區中正路1號"),       # not offered
+        ]
+        ranked = rank_owner_candidates(
+            {"owner_name": "張三", "external_id": "H123*****9", "address": "桃園市中壢區中正路一號"},
+            owners,
+        )
+        self.assertEqual([item["owner_id"] for item in ranked], [3, 2, 4, 1, 5])
+        self.assertEqual([item["score"] for item in ranked], [95, 75, 70, 30, 20])
+        high = [candidate_response_item(item)["high_match"] for item in ranked]
+        self.assertEqual(high, [True, True, True, False, False])
+
+    def test_address_only_is_capped_at_five_and_respects_rejections(self):
+        owners = [owner(1, "王一", "", "台中市西區民權路1號")]
+        owners += [
+            owner(10 + index, f"家人{index}", "", "台中市西區民權路1號")
+            for index in range(8)
+        ]
+        ranked = rank_owner_candidates(
+            {"owner_name": "王一", "address": "臺中市西區民權路一號"}, owners
+        )
+        self.assertEqual(ranked[0]["owner_id"], 1)
+        self.assertEqual(sum(1 for item in ranked if item["score"] == 20), 5)
+        self.assertTrue(candidate_response_item(ranked[-1])["address_only"])
         self.assertEqual(
             rank_owner_candidates(
-                {"owner_name": "林先生", "external_id": "H221345671"}, owners
+                {"owner_name": "某甲", "address": "台中市西區民權路1號"},
+                [owner(1, "某乙", "", "台中市西區民權路1號")],
+                ignored_owner_ids={1},
             ),
             [],
         )
 
-    def test_two_identical_complete_numbers_match_whatever_the_name(self):
-        ranked = rank_owner_candidates(
-            {"owner_name": "陳大文", "external_id": "H221987651"},
-            [owner(2, "陳先生", "H221987651")],
+    def test_rejected_owners_are_left_out_and_response_is_masked(self):
+        owners = [owner(1, "王五", "A123456789", phones=["0912345678"])]
+        self.assertEqual(
+            rank_owner_candidates({"owner_name": "王五"}, owners, ignored_owner_ids={1}),
+            [],
         )
-        self.assertEqual(ranked[0]["score"], 100)
+        item = candidate_response_item(rank_owner_candidates({"owner_name": "王五"}, owners)[0])
+        self.assertEqual(item["external_id_masked"], "A123*****9")
+        self.assertEqual(item["phones_masked"], ["09*****678"])
+        self.assertNotIn("A123456789", repr(item))
+
+    def test_ranking_twenty_thousand_owners_stays_fast(self):
+        import random
+        import time
+
+        rng = random.Random(7)
+        roads = ["中正路", "民權路", "國信街", "中山北路", "復興路", "建國路"]
+        owners = [
+            owner(
+                index,
+                f"測{index % 997}",
+                f"H{rng.randint(1000, 2999)}" if index % 2 else "",
+                f"桃園市桃園區{rng.choice(roads)}{rng.randint(1, 9)}段"
+                f"{rng.randint(1, 300)}巷{rng.randint(1, 80)}號{rng.randint(1, 15)}樓",
+            )
+            for index in range(20000)
+        ]
+        for item in owners:
+            item["_name_norm"] = item["owner_name"]
+            item["_address_norm"] = normalize_owner_address(item["address"])
+        started = time.perf_counter()
+        rank_owner_candidates(
+            {"owner_name": "測5", "external_id": "H1235",
+             "address": "桃園市桃園區中正路3段120巷8號5樓"},
+            owners,
+        )
+        self.assertLess(time.perf_counter() - started, 1.0)
 
 
 class _Result:
@@ -381,6 +457,18 @@ class PostgreSQLOwnerMatchTests(unittest.TestCase):
             self.user, {"owner_name": "王大明"}, rejected_record_ids=[21]
         )
         self.assertNotIn(1, [item["owner_id"] for item in result["items"]])
+
+    def test_address_only_query_finds_owners_under_other_names(self):
+        result = self.source.owner_candidates(
+            self.user, {"address": "新竹市東區光復路二號"}
+        )
+        self.assertEqual([item["owner_id"] for item in result["items"]], [2])
+        self.assertTrue(result["items"][0]["address_only"])
+        self.assertIsNone(result["exact_owner_id"])
+        # Decrypted owners are reused by the next lookup.
+        with patch("customer_api.postgres_owner_match.decrypt_value") as decrypt:
+            self.source.owner_candidates(self.user, {"address": "新竹市東區光復路2號"})
+        decrypt.assert_not_called()
 
     def test_choosing_an_existing_owner_does_not_create_a_new_one(self):
         owners_before = dict(self.conn.owners)
@@ -678,6 +766,74 @@ class DesktopOwnerMatchTests(unittest.TestCase):
         self.assertFalse(panel.isHidden())
         panel.new_owner_button.click()
         self.assertTrue(panel.isHidden())
+
+    def test_address_field_alone_triggers_the_lookup(self):
+        window = self.window
+        window.new_record()
+        window.set_field_text("address", "桃園市中壢區某路123號")
+        window.field_widgets["address"].editingFinished.emit()
+        self.assertEqual(len(self.server.candidate_queries), 1)
+        query = self.server.candidate_queries[0][0]
+        self.assertEqual(query["owner_name"], "")
+        self.assertEqual(query["address"], "桃園市中壢區某路123號")
+        self.assertFalse(window.owner_match_panel.isHidden())
+
+    def test_identity_field_alone_triggers_the_lookup(self):
+        window = self.window
+        window.new_record()
+        window.set_field_text("external_id", "H2211")
+        window.current_external_id_plain = "H2211"
+        window.field_widgets["external_id"].editingFinished.emit()
+        self.assertEqual(len(self.server.candidate_queries), 1)
+        self.assertEqual(self.server.candidate_queries[0][0]["external_id"], "H2211")
+        self.assertEqual(self.server.candidate_queries[0][0]["owner_name"], "")
+
+    def test_empty_fields_do_not_look_up(self):
+        self.window.new_record()
+        for key in ("owner_name", "external_id", "address"):
+            self.window.field_widgets[key].editingFinished.emit()
+        self.assertEqual(self.server.candidate_queries, [])
+
+    def test_no_more_lookups_after_choosing(self):
+        self.type_new_owner()
+        self.window.owner_match_panel.choose_button.click()
+        before = len(self.server.candidate_queries)
+        self.window.set_field_text("address", "另一個地址1號")
+        self.window.field_widgets["address"].editingFinished.emit()
+        self.window.field_widgets["owner_name"].editingFinished.emit()
+        self.assertEqual(len(self.server.candidate_queries), before)
+
+    def test_address_only_match_is_shown_but_never_prompts_on_save(self):
+        self.server.candidates = [
+            {
+                **CANDIDATE,
+                "owner_name": "邱小姐",
+                "score": 10,
+                "reasons": ["地址相同、姓名不同（可能是家人或姓名打錯）"],
+                "address_only": True,
+                "high_match": False,
+            }
+        ]
+        self.type_new_owner("邱美鈴")
+        self.assertFalse(self.window.owner_match_panel.isHidden())
+        with patch.object(self.window, "ask_owner_match_decision") as ask:
+            self.save()
+        ask.assert_not_called()
+        self.assertEqual(len(self.server.created_values), 1)
+        self.assertNotIn("owner_id", self.server.created_values[0])
+
+    def test_choosing_an_address_only_owner_uses_that_owners_name(self):
+        self.server.candidates = [
+            {**CANDIDATE, "owner_name": "邱小姐", "score": 10,
+             "reasons": ["地址相同、姓名不同（可能是家人或姓名打錯）"],
+             "address_only": True, "high_match": False}
+        ]
+        self.type_new_owner("邱美鈴")
+        self.window.owner_match_panel.choose_button.click()
+        self.assertEqual(self.window.get_field_text("owner_name"), "邱小姐")
+        self.save()
+        self.assertEqual(self.server.created_values[-1]["owner_id"], 3)
+        self.assertEqual(self.server.created_values[-1]["owner_name"], "邱小姐")
 
     def test_editing_an_existing_record_never_asks(self):
         self.window.load_record(2)

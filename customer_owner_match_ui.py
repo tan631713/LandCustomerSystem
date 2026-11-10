@@ -50,7 +50,7 @@ OWNER_MATCH_DEFAULT_HINT = (
 
 def candidate_reason_text(item):
     reasons = [str(reason) for reason in item.get("reasons") or () if reason]
-    return "、".join(reasons) or "姓名相同"
+    return "　".join(reasons) or "姓名相同"
 
 
 def candidate_summary(item):
@@ -312,6 +312,16 @@ class OwnerMatchWorkflowMixin:
         }
 
     @staticmethod
+    def _owner_match_query_has_terms(query):
+        """姓名、身分證或地址 -- any one is enough to look up."""
+
+        return bool(
+            normalize_owner_name(query.get("owner_name"))
+            or str(query.get("external_id") or "").strip()
+            or str(query.get("address") or "").strip()
+        )
+
+    @staticmethod
     def _owner_match_query_key(query):
         return (
             normalize_owner_name(query.get("owner_name")),
@@ -329,7 +339,7 @@ class OwnerMatchWorkflowMixin:
         if not self.owner_match_available() or self.owner_match_chosen() is not None:
             return
         query = self.owner_match_query()
-        if not normalize_owner_name(query["owner_name"]):
+        if not self._owner_match_query_has_terms(query):
             self.owner_match_panel.show_candidates([])
             return
         key = self._owner_match_query_key(query)
@@ -410,7 +420,11 @@ class OwnerMatchWorkflowMixin:
             self.set_field_text("external_id", masked_id)
         if item.get("address"):
             self.set_field_text("address", str(item["address"]))
-        if item.get("owner_name") and not self.get_field_text("owner_name"):
+        if item.get("owner_name") and (
+            item.get("address_only") or not self.get_field_text("owner_name")
+        ):
+            # Picking a different-name owner at the same address means the
+            # typed name was wrong: use the owner's own name.
             self.set_field_text("owner_name", str(item["owner_name"]))
             self.current_owner_name_plain = str(item["owner_name"])
         panel.set_chosen(item)
@@ -454,7 +468,7 @@ class OwnerMatchWorkflowMixin:
         if not self.owner_match_available() or self.owner_match_chosen() is not None:
             return True
         query = self.owner_match_query()
-        if not normalize_owner_name(query["owner_name"]):
+        if not self._owner_match_query_has_terms(query):
             return True
         key = self._owner_match_query_key(query)
         if self._owner_match_last is not None and self._owner_match_last[0] == key:

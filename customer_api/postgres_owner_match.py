@@ -6,10 +6,13 @@ addresses are stored as Fernet ciphertext: the server decrypts, compares and
 answers with masked identity numbers and phones only.
 """
 
+import threading
+
 from customer_owner_match import (
     DEFAULT_CANDIDATE_LIMIT,
     candidate_response_item,
     identity_is_placeholder,
+    normalize_owner_address,
     normalize_owner_name,
     rank_owner_candidates,
 )
@@ -21,8 +24,39 @@ class OwnerAttachError(ValueError):
     """The chosen owner cannot take this record (shown to the user as is)."""
 
 
+# Decrypted owner fields, kept per data key between lookups so a lookup only
+# decrypts owners whose ciphertext changed since the previous one (Fernet
+# decryption of every owner on every keystroke would not stay under ~1 s).
+_DECRYPTED_OWNER_CACHE = {}
+_DECRYPTED_OWNER_CACHE_LOCK = threading.Lock()
+
+
+def _decrypted_owner(cache, fernet, row):
+    owner_id = int(row["owner_id"])
+    signature = (
+        row.get("owner_key"), row.get("owner_name"), row.get("external_id"),
+        row.get("address"), row.get("phone"),
+    )
+    cached = cache.get(owner_id)
+    if cached is not None and cached[0] == signature:
+        return cached[1]
+    owner_name = decrypt_value(fernet, row.get("owner_name")) or ""
+    address = decrypt_value(fernet, row.get("address")) or ""
+    phone = decrypt_value(fernet, row.get("phone"))
+    plain = {
+        "owner_name": owner_name,
+        "external_id": decrypt_value(fernet, row.get("external_id")) or "",
+        "address": address,
+        "phones": [phone] if phone else [],
+        "_name_norm": normalize_owner_name(owner_name),
+        "_address_norm": normalize_owner_address(address),
+    }
+    cache[owner_id] = (signature, plain)
+    return plain
+
+
 class PostgreSQLOwnerMatchMixin:
-    def _owner_match_rows(self, conn, fernet):
+    def _owner_match_rows(self, conn, fernet, data_key=None):
         rows = conn.execute(
             """
             SELECT owner.id AS owner_id, owner.owner_key, owner.owner_name,
@@ -34,24 +68,30 @@ class PostgreSQLOwnerMatchMixin:
             GROUP BY owner.id
             """
         ).fetchall()
-        owners = []
-        for row in rows:
-            owners.append(
-                {
-                    "owner_id": int(row["owner_id"]),
-                    "owner_key": row.get("owner_key"),
-                    "owner_name": decrypt_value(fernet, row.get("owner_name")) or "",
-                    "external_id": decrypt_value(fernet, row.get("external_id")) or "",
-                    "address": decrypt_value(fernet, row.get("address")) or "",
-                    "phones": [
-                        value
-                        for value in [decrypt_value(fernet, row.get("phone"))]
-                        if value
-                    ],
-                    "land_count": int(row.get("land_count") or 0),
-                    "sample_record_id": int(row["sample_record_id"]),
-                }
+        cache_key = bytes(data_key) if data_key is not None else None
+        with _DECRYPTED_OWNER_CACHE_LOCK:
+            cache = (
+                _DECRYPTED_OWNER_CACHE.setdefault(cache_key, {})
+                if cache_key is not None
+                else {}
             )
+            owners = []
+            seen = set()
+            for row in rows:
+                plain = _decrypted_owner(cache, fernet, row)
+                seen.add(int(row["owner_id"]))
+                owners.append(
+                    {
+                        **plain,
+                        "phones": list(plain["phones"]),
+                        "owner_id": int(row["owner_id"]),
+                        "owner_key": row.get("owner_key"),
+                        "land_count": int(row.get("land_count") or 0),
+                        "sample_record_id": int(row["sample_record_id"]),
+                    }
+                )
+            for stale in set(cache) - seen:
+                del cache[stale]
         return owners
 
     @staticmethod
@@ -162,23 +202,29 @@ class PostgreSQLOwnerMatchMixin:
             "address": str(query.get("address") or "").strip(),
             "phone": str(query.get("phone") or "").strip(),
         }
-        if not normalize_owner_name(query["owner_name"]) and not query["external_id"]:
+        if (
+            not normalize_owner_name(query["owner_name"])
+            and not query["external_id"]
+            and not normalize_owner_address(query["address"])
+        ):
             return {"items": [], "exact_owner_id": None}
         fernet = make_fernet(user.data_key)
         with self._connect() as conn:
-            owners = self._owner_match_rows(conn, fernet)
+            owners = self._owner_match_rows(conn, fernet, user.data_key)
             key_values = dict(query)
             if "*" in key_values["external_id"]:
                 key_values["external_id"] = ""
             wanted_key = owner_key_for(key_values, user.data_key)
-            exact_owner_id = next(
-                (
-                    owner["owner_id"]
-                    for owner in owners
-                    if owner.get("owner_key") == wanted_key
-                ),
-                None,
-            )
+            exact_owner_id = None
+            if normalize_owner_name(key_values["owner_name"]) or key_values["external_id"]:
+                exact_owner_id = next(
+                    (
+                        owner["owner_id"]
+                        for owner in owners
+                        if owner.get("owner_key") == wanted_key
+                    ),
+                    None,
+                )
             rejected = self._owner_match_rejected_owner_ids(conn, exact_owner_id)
             rejected |= self._owner_match_rejected_for_records(
                 conn, rejected_record_ids
