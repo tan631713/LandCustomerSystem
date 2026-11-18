@@ -1652,6 +1652,7 @@ class CustomerRepository:
                 """
                 SELECT cl.id, cl.customer_id,
                        COALESCE(cl.contact_date, substr(cl.created_at, 1, 10)) AS date,
+                       'contact_log' AS item_kind,
                        'completed' AS calendar_status,
                        c.district, c.section, c.subsection, c.land_number, c.owner_name
                 FROM contact_logs cl

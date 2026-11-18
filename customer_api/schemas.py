@@ -551,6 +551,12 @@ class FieldVisitStatusUpdate(BaseModel):
         return self
 
 
+class FieldVisitItemMove(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_date: date
+
+
 class FieldVisitOptimizePreview(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

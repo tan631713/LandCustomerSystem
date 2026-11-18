@@ -447,6 +447,34 @@ class FieldVisitService:
             request_hash=field_visit_request_hash("transition_item", payload),
         )
 
+    def move_item(
+        self,
+        user,
+        item_id: int,
+        target_date: date,
+        *,
+        today: date | None = None,
+        idempotency_key: str | None = None,
+    ):
+        """行程月曆「移到其他天」: reschedule one item onto another day."""
+        require_field_visit_capability(user, FIELD_VISIT_UPDATE)
+        item_id = int(item_id)
+        if item_id <= 0:
+            raise ValueError("item_id must be a positive integer")
+        if isinstance(target_date, datetime) or not isinstance(target_date, date):
+            raise ValueError("target_date must be a date")
+        if target_date < (today or date.today()):
+            raise ValueError("不能把行程移到今天以前。")
+        payload = {"item_id": item_id, "target_date": target_date}
+        key = normalize_idempotency_key(idempotency_key)
+        return self.source.move_field_visit_item(
+            user,
+            item_id,
+            target_date,
+            idempotency_key=key,
+            request_hash=field_visit_request_hash("move_item", payload),
+        )
+
     def update_item(
         self,
         user,

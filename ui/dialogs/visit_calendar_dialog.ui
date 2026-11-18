@@ -257,7 +257,7 @@
     </widget>
    </item>
    <item>
-    <layout class="QHBoxLayout" name="buttonRow" stretch="1,0">
+    <layout class="QHBoxLayout" name="buttonRow" stretch="1,0,0">
      <property name="spacing">
       <number>10</number>
      </property>
@@ -285,6 +285,16 @@
         </size>
        </property>
       </spacer>
+     </item>
+     <item>
+      <widget class="PushButton" name="moveDateButton">
+       <property name="text">
+        <string>移到其他天…</string>
+       </property>
+       <property name="toolTip">
+        <string>把選取的已排定／已逾期地主移到其他日期</string>
+       </property>
+      </widget>
      </item>
      <item>
       <widget class="PushButton" name="closeButton">

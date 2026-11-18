@@ -463,6 +463,19 @@ class DesktopApiClient:
         )
         return dict(result or {})
 
+    def move_field_visit_item(self, item_id, target_date):
+        result = self._request(
+            "POST",
+            f"/api/v1/field-visit-items/{int(item_id)}/move",
+            payload={"target_date": str(target_date)},
+            request_headers={
+                "Idempotency-Key": self._field_visit_idempotency_key(
+                    "move-field-visit-item"
+                )
+            },
+        )
+        return dict(result or {})
+
     def import_records(self, items, source_file_name="import.xlsx", urban_plan_id=None):
         payload = {
             "source_file_name": str(source_file_name or "import.xlsx"),
@@ -1826,6 +1839,9 @@ class DesktopApiRecordRepository:
                 start_date, end_date, mine_only=mine_only
             )
         ]
+
+    def move_field_visit_item(self, item_id, target_date):
+        return self.client.move_field_visit_item(int(item_id), target_date)
 
     def list_cases(self):
         return [dict(row) for row in self.client.list_projects()]

@@ -599,6 +599,17 @@ class ProductivityWorkflowMixin:
             )
         ]
 
+    def move_visit_calendar_item(self, item, target_date):
+        """行程月曆「移到其他天」 -- only route items exist to move, and
+        those only live on the PostgreSQL server (see
+        CustomerRepository.list_visit_calendar_items()), so local/SQLite
+        mode has nothing that can be moved."""
+        repository = self.active_record_repository()
+        mover = getattr(repository, "move_field_visit_item", None)
+        if mover is None:
+            raise ValueError("單機模式沒有外勤行程，無法移動。")
+        return mover(int(item["id"]), str(target_date))
+
     def show_visit_calendar(self):
         # Replaces the old separate 每日外勤紀錄 / 未來排程 dialogs (see
         # VisitCalendarDialog's docstring) -- unlike 未來排程 alone, this
