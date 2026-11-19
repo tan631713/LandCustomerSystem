@@ -80,6 +80,7 @@ from customer_domain import (
 )
 from customer_excel import ExcelService
 from customer_export_controller import ExportControllerMixin, configure_export_controller
+from customer_owner_match_ui import OwnerMatchWorkflowMixin
 from customer_health import SystemHealthCheckService
 from customer_import_controller import ImportControllerMixin, configure_import_controller
 from customer_desktop import open_local_path
@@ -106,6 +107,7 @@ from customer_messages import (
     startup_backup_notice,
 )
 from customer_land_header import LandHeaderMixin
+from customer_owner_lands import OwnerLandsMixin
 from customer_models import RecordTableModel, configure_table_model
 from customer_quality import (
     DEFAULT_QUALITY_RULE_KEYS,
@@ -929,8 +931,10 @@ def configure_api_authentication(api_client):
 
 
 class LandApp(
+    OwnerMatchWorkflowMixin,
     UrbanPlanWorkflowMixin,
     LandHeaderMixin,
+    OwnerLandsMixin,
     DesktopSupportMixin,
     DesktopStateMixin,
     DesktopWindowMixin,

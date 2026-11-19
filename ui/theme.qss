@@ -400,3 +400,80 @@ QLabel#importPlanNote, QLabel#importPlanMoreLabel {
 QLabel#importPlanKeptLabel {
     color: $amber_ink;
 }
+/* 手動新增資料：「可能是同一位地主」候選清單（ui/main/owner_match_panel.ui） */
+QFrame#ownerMatchPanel {
+    background-color: $watch;
+    border: 1px solid $rule_strong;
+    border-radius: 4px;
+}
+QFrame#ownerMatchPanel QLabel {
+    background: transparent;
+}
+QLabel#ownerMatchTitle {
+    color: $seal;
+    font-weight: bold;
+}
+QLabel#ownerMatchHint {
+    color: $ink2;
+    font-size: 12px;
+}
+QLabel#ownerMatchChosenLabel {
+    color: $ink;
+    font-weight: bold;
+}
+/* 基本資料頂端「名下其他土地」標籤列（ui/main/owner_lands_bar.ui、customer_owner_lands.py） */
+QFrame#ownerLandsBar {
+    background-color: $field;
+    border: 1px solid $rule;
+    border-radius: 6px;
+}
+QFrame#ownerLandsBar QLabel {
+    background: transparent;
+    border: none;
+}
+QLabel#ownerLandsSummaryLabel {
+    color: $ink;
+}
+QLabel#ownerLandsTotalLabel, QLabel#ownerLandsBasisLabel {
+    color: $ink2;
+    font-size: 12px;
+}
+QWidget#ownerLandsChips {
+    background: transparent;
+}
+QFrame#ownerLandChip {
+    background-color: $green_soft;
+    border: 1px solid $green_line;
+    border-radius: 11px;
+}
+QFrame#ownerLandChip:hover {
+    border-color: $green;
+}
+QFrame#ownerLandChip:focus {
+    border: 2px solid $green;
+}
+QFrame#ownerLandChip[current="true"] {
+    background-color: $green;
+    border-color: $green;
+}
+QFrame#ownerLandChip[more="true"] {
+    background-color: $field;
+}
+QFrame#ownerLandChip QLabel#ownerLandChipLabel {
+    color: $ink;
+    font-size: 13px;
+}
+QFrame#ownerLandChip QLabel#ownerLandChipShare {
+    color: $ink2;
+    font-size: 11px;
+}
+QFrame#ownerLandChip[current="true"] QLabel#ownerLandChipLabel {
+    color: $green_ink;
+}
+QFrame#ownerLandChip[current="true"] QLabel#ownerLandChipShare {
+    color: $green_ink_soft;
+}
+QFrame#ownerLandChip[more="true"] QLabel#ownerLandChipLabel {
+    color: $green;
+    font-weight: 600;
+}

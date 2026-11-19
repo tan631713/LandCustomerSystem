@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ownerLandsBar</class>
+ <widget class="QFrame" name="ownerLandsBar">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>460</width>
+    <height>90</height>
+   </rect>
+  </property>
+  <property name="toolTip">
+   <string/>
+  </property>
+  <layout class="QVBoxLayout" name="ownerLandsLayout" stretch="0,0">
+   <property name="spacing">
+    <number>8</number>
+   </property>
+   <property name="leftMargin">
+    <number>10</number>
+   </property>
+   <property name="topMargin">
+    <number>9</number>
+   </property>
+   <property name="rightMargin">
+    <number>10</number>
+   </property>
+   <property name="bottomMargin">
+    <number>10</number>
+   </property>
+   <item>
+    <layout class="QHBoxLayout" name="ownerLandsHeaderRow" stretch="0,0,1,0">
+     <property name="spacing">
+      <number>12</number>
+     </property>
+     <item>
+      <widget class="QLabel" name="ownerLandsSummaryLabel">
+       <property name="text">
+        <string>名下共 0 筆土地</string>
+       </property>
+       <property name="textFormat">
+        <enum>Qt::TextFormat::RichText</enum>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLabel" name="ownerLandsTotalLabel">
+       <property name="text">
+        <string>合計 0 坪</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="ownerLandsHeaderSpacer">
+       <property name="orientation">
+        <enum>Qt::Orientation::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>0</width>
+         <height>0</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QLabel" name="ownerLandsBasisLabel">
+       <property name="text">
+        <string>ⓘ 依身分證歸戶</string>
+       </property>
+       <property name="toolTip">
+        <string>同一位地主的判斷方式：有身分證時依身分證，沒有時依姓名＋地址。身分證只有 5 碼時可能把不同人算在一起，請核對姓名與地址。</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QWidget" name="ownerLandsChips" native="true">
+     <property name="toolTip">
+      <string/>
+     </property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

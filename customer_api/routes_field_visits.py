@@ -14,6 +14,7 @@ from customer_api.field_visit_service import (
     FieldVisitTransitionError,
 )
 from customer_api.schemas import (
+    FieldVisitItemMove,
     FieldVisitItemUpdate,
     FieldVisitItemsCreate,
     FieldVisitManualOrder,
@@ -163,6 +164,23 @@ def register_field_visit_routes(
                 item_id,
                 priority=payload.priority,
                 is_order_locked=payload.is_order_locked,
+                idempotency_key=idempotency_key,
+            )
+        except Exception as exc:
+            _raise_field_visit_error(exc)
+
+    @app.post("/api/v1/field-visit-items/{item_id}/move")
+    def move_field_visit_item(
+        item_id: int,
+        payload: FieldVisitItemMove,
+        idempotency_key: IdempotencyKey,
+        user: Annotated[AuthenticatedUser, Depends(editor_user)],
+    ):
+        try:
+            return service.move_item(
+                user,
+                item_id,
+                payload.target_date,
                 idempotency_key=idempotency_key,
             )
         except Exception as exc:

@@ -45,8 +45,12 @@ def displayed_owner_name(record):
 def shares_from_group(group):
     """One dict per ownership of ``group`` that has a usable positive share."""
 
+    return shares_from_records(group.records)
+
+
+def shares_from_records(records):
     shares = []
-    for record in group.records:
+    for record in records:
         raw = record.get("raw") or {}
         numerator = _fraction(raw.get("numerator"))
         denominator = _fraction(raw.get("denominator"))
@@ -347,9 +351,13 @@ class LandHeaderMixin:
 
     def on_land_header_owner_clicked(self, record_id):
         # Same path as clicking that owner in the list: on_record_select loads it.
-        if self.plan_view_active():
+        # In the 都市計畫 view (or when the owner is outside the current search
+        # result) load it directly; load_record() also selects it in the plan tree.
+        if self.selected_record_id is not None and int(record_id) == int(self.selected_record_id):
             return
-        self.select_record_in_table(record_id)
+        if not self.plan_view_active() and self.select_record_in_table(record_id):
+            return
+        self.load_record(record_id)
 
     def _share_group_for_selected_record(self):
         """The LandGroup holding the selected record, without changing the list page.
@@ -396,6 +404,22 @@ class LandHeaderMixin:
             show_plan=self.urban_plans_available(),
         )
         group = None if self.plan_view_active() else self._share_group_for_selected_record()
-        header.set_shares(
-            shares_from_group(group) if group is not None else [], self.selected_record_id
-        )
+        if group is not None:
+            shares = shares_from_group(group)
+        else:
+            # 都市計畫 view, or the record is outside the current search result:
+            # build the bar from all the data the client holds.
+            shares = self._share_records_from_all_data()
+        header.set_shares(shares, self.selected_record_id)
+
+    def _share_records_from_all_data(self):
+        finder = getattr(self, "land_share_records_for_selected", None)
+        if not callable(finder):
+            return []
+        try:
+            return shares_from_records(finder())
+        except Exception:  # the header must never break loading a record
+            import logging
+
+            logging.getLogger(__name__).exception("持分橫條 could not be built")
+            return []

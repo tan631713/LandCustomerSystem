@@ -3,11 +3,11 @@
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QDate
-from PySide6.QtGui import QColor, QTextCursor
+from PySide6.QtCore import Qt, QDate, QMimeData, QTimer
+from PySide6.QtGui import QColor, QDrag, QTextCursor
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QCompleter,
-    QFileDialog, QFrame,
+    QApplication, QCheckBox, QComboBox, QCompleter, QDateEdit, QDialogButtonBox,
+    QFileDialog, QFrame, QHBoxLayout,
     QGridLayout, QHeaderView, QLabel, QLineEdit,
     QMessageBox, QPlainTextEdit, QPushButton, QScrollArea, QTableWidget,
     QTableWidgetItem, QTabWidget, QTextBrowser, QVBoxLayout, QWidget,
@@ -1053,15 +1053,143 @@ class _CalendarDayCell(QFrame):
     fragile shortcut.
     """
 
-    def __init__(self, date_value, on_click):
+    def __init__(self, date_value, on_click, on_drop=None):
         super().__init__()
         self.date_value = date_value
         self._on_click = on_click
+        self._on_drop = on_drop
+        # 行程月曆「移到其他天」: a name pill dragged here moves that visit.
+        self.setAcceptDrops(on_drop is not None)
 
     def mousePressEvent(self, event):
         if self._on_click is not None:
             self._on_click(self.date_value)
         super().mousePressEvent(event)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasFormat(VISIT_ITEM_MIME_TYPE):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        self.dragEnterEvent(event)
+
+    def dropEvent(self, event):
+        if self._on_drop is None or not event.mimeData().hasFormat(VISIT_ITEM_MIME_TYPE):
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        # Let the drag finish before the grid (and this cell) is rebuilt.
+        date_value = QDate(self.date_value)
+        QTimer.singleShot(0, lambda: self._on_drop(date_value))
+
+
+VISIT_ITEM_MIME_TYPE = "application/x-landcustomer-visit-item"
+MOVABLE_CALENDAR_STATUSES = ("scheduled", "overdue")
+
+
+def is_movable_calendar_item(item):
+    """Only route items nobody has started yet can be moved to another day;
+    finished/skipped visits and manually logged contacts are history."""
+    return (
+        str(item.get("item_kind") or "") == "route_item"
+        and str(item.get("calendar_status") or "") in MOVABLE_CALENDAR_STATUSES
+        and bool(item.get("id"))
+    )
+
+
+class _CalendarItemPill(QLabel):
+    """An owner-name pill inside a day cell. Pressing it still selects the
+    day (as before); dragging a movable one onto another day moves it."""
+
+    def __init__(self, text, date_value, item, on_click, on_drag_start):
+        super().__init__(text)
+        self.date_value = date_value
+        self.item = item
+        self._on_click = on_click
+        self._on_drag_start = on_drag_start
+        self._press_pos = None
+        self._dragged = False
+        if is_movable_calendar_item(item):
+            self.setCursor(Qt.OpenHandCursor)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._press_pos = event.position().toPoint()
+            self._dragged = False
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if (
+            self._press_pos is None
+            or not (event.buttons() & Qt.LeftButton)
+            or not is_movable_calendar_item(self.item)
+        ):
+            return
+        distance = (event.position().toPoint() - self._press_pos).manhattanLength()
+        if distance < QApplication.startDragDistance():
+            return
+        self._dragged = True
+        self._press_pos = None
+        self._on_drag_start(self.item)
+        mime = QMimeData()
+        mime.setData(VISIT_ITEM_MIME_TYPE, str(self.item.get("id")).encode("ascii"))
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        drag.setPixmap(self.grab())
+        drag.exec(Qt.MoveAction)
+
+    def mouseReleaseEvent(self, event):
+        was_click = self._press_pos is not None and not self._dragged
+        self._press_pos = None
+        if was_click and self._on_click is not None:
+            # Deferred: selecting a day rebuilds the grid, which removes
+            # this pill -- not something to do inside its own event.
+            date_value = QDate(self.date_value)
+            QTimer.singleShot(0, lambda: self._on_click(date_value))
+        super().mouseReleaseEvent(event)
+
+
+class MoveVisitDateDialog(QDialog):
+    """Pick the new day for 行程月曆「移到其他天…」."""
+
+    def __init__(self, owner_name, current_date, parent=None):
+        super().__init__(parent)
+        self.setModal(True)
+        self.setWindowTitle("移到其他天")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+        layout.addWidget(
+            QLabel(f"把「{owner_name}」從 {current_date.toString('yyyy/M/d')} 移到：")
+        )
+        row = QHBoxLayout()
+        self.date_edit = QDateEdit()
+        self.date_edit.setCalendarPopup(True)
+        self.date_edit.setDisplayFormat("yyyy/MM/dd")
+        today = QDate.currentDate()
+        self.date_edit.setMinimumDate(today)
+        default_date = current_date.addDays(1)
+        self.date_edit.setDate(default_date if default_date >= today else today)
+        row.addWidget(self.date_edit)
+        row.addStretch(1)
+        layout.addLayout(row)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Ok).setText("移動")
+        buttons.button(QDialogButtonBox.Cancel).setText("取消")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def selected_date(self):
+        return self.date_edit.date()
+
+
+# calendar_status values that count as "still scheduled" for 只看排程.
+SCHEDULED_CALENDAR_STATUSES = frozenset({"scheduled", "overdue"})
 
 
 class VisitCalendarDialog(QDialog):
@@ -1094,10 +1222,12 @@ class VisitCalendarDialog(QDialog):
         "monthLabel",
         "nextMonthButton",
         "mineOnlyCheckBox",
+        "scheduledOnlyCheckBox",
         "refreshButton",
         "calendarGrid",
         "summaryLabel",
         "detailTable",
+        "moveDateButton",
         "closeButton",
     )
 
@@ -1106,6 +1236,8 @@ class VisitCalendarDialog(QDialog):
         self.window = window
         self.on_record_activated = on_record_activated
         self.items_by_date = {}
+        self.rows = []
+        self._dragging_item = None
         self.selected_date = QDate.currentDate()
         self.displayed_month = QDate(self.selected_date.year(), self.selected_date.month(), 1)
         # Deliberately non-modal -- see the matching comment that used to
@@ -1126,6 +1258,11 @@ class VisitCalendarDialog(QDialog):
         # just a personal log.
         self.mine_only_checkbox = find_child(content, "mineOnlyCheckBox", QCheckBox)
         self.mine_only_checkbox.toggled.connect(self.refresh)
+        # 只看排程: hide completed/skipped records so only owners still
+        # waiting to be visited (scheduled or overdue) remain, in both the
+        # day cells and the detail list. Off by default.
+        self.scheduled_only_checkbox = find_child(content, "scheduledOnlyCheckBox", QCheckBox)
+        self.scheduled_only_checkbox.toggled.connect(self.refresh)
         find_child(content, "refreshButton", QPushButton).clicked.connect(self.refresh)
 
         self.grid_widget = find_child(content, "calendarGrid", QWidget)
@@ -1139,6 +1276,11 @@ class VisitCalendarDialog(QDialog):
             self.table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Stretch)
         size_like_unparented(self.table)
+        self.table.itemSelectionChanged.connect(self._update_move_button)
+
+        self.move_button = find_child(content, "moveDateButton", QPushButton)
+        self.move_button.clicked.connect(self.move_current_item)
+        self.move_button.setEnabled(False)
 
         find_child(content, "closeButton", QPushButton).clicked.connect(self.accept)
 
@@ -1167,6 +1309,12 @@ class VisitCalendarDialog(QDialog):
         except Exception as exc:
             QMessageBox.warning(self, "讀取失敗", str(exc))
             items = []
+        scheduled_only = self.scheduled_only_checkbox.isChecked()
+        if scheduled_only:
+            items = [
+                item for item in items
+                if item.get("calendar_status") in SCHEDULED_CALENDAR_STATUSES
+            ]
         self.items_by_date = {}
         for item in items:
             date_key = str(item.get("date") or "")
@@ -1176,9 +1324,15 @@ class VisitCalendarDialog(QDialog):
             today = QDate.currentDate()
             self.selected_date = today if (today.year() == year and today.month() == month) else start_date
         total_count = len(items)
+        count_text = (
+            f"共有 {total_count} 筆排程（只看排程）"
+            if scheduled_only
+            else f"共有 {total_count} 筆行程／紀錄"
+        )
         self.summary_label.setText(
-            f"{start_date.toString('yyyy年M月')} 共有 {total_count} 筆行程／紀錄；"
-            "點選日期可展開當天清單，雙擊清單列可載入該筆資料。"
+            f"{start_date.toString('yyyy年M月')} {count_text}；"
+            "點選日期可展開當天清單，雙擊清單列可載入該筆資料；"
+            "已排定／已逾期的地主可拖到別天，或選取後按「移到其他天…」。"
         )
         self._rebuild_grid(start_date, end_date)
         self._update_detail()
@@ -1223,7 +1377,7 @@ class VisitCalendarDialog(QDialog):
         date_key = date_value.toString("yyyy-MM-dd")
         items = self.items_by_date.get(date_key, [])
 
-        cell = _CalendarDayCell(date_value, self._select_day)
+        cell = _CalendarDayCell(date_value, self._select_day, self._drop_on_day)
         # Just tall enough for the date number plus two single-line name
         # pills -- a cell that wraps a long name just grows taller for
         # that one row on its own (QGridLayout sizes each row to its
@@ -1269,7 +1423,9 @@ class VisitCalendarDialog(QDialog):
                 item.get("calendar_status"), status_styles["scheduled"]
             )
             owner_name = str(item.get("owner_name") or "")
-            pill = QLabel(owner_name)
+            pill = _CalendarItemPill(
+                owner_name, date_value, item, self._select_day, self._start_drag
+            )
             # Wrap instead of letting the grid column clip long names --
             # a narrow 7-column-wide cell was cutting names off with no
             # way to see the rest without clicking through to the detail
@@ -1277,7 +1433,9 @@ class VisitCalendarDialog(QDialog):
             # still don't fully fit even after wrapping and widening the
             # dialog.
             pill.setWordWrap(True)
-            pill.setToolTip(owner_name)
+            pill.setToolTip(
+                f"{owner_name}（可拖到別天）" if is_movable_calendar_item(item) else owner_name
+            )
             pill.setStyleSheet(
                 f"background: {style['bg'].name()}; color: {style['text'].name()};"
                 " border-radius: 3px; padding: 0px 4px; font-size: 12px;"
@@ -1324,6 +1482,67 @@ class VisitCalendarDialog(QDialog):
                     cell.setForeground(style["text"])
                 self.table.setItem(row_number, column_number, cell)
         self.table.resizeRowsToContents()
+        self._update_move_button()
+
+    def _update_move_button(self):
+        item = self.current_item()
+        self.move_button.setEnabled(item is not None and is_movable_calendar_item(item))
+
+    def _start_drag(self, item):
+        self._dragging_item = item
+
+    def _drop_on_day(self, target_date):
+        item, self._dragging_item = self._dragging_item, None
+        if item is None:
+            return
+        source_date = QDate.fromString(str(item.get("date") or "")[:10], "yyyy-MM-dd")
+        if target_date == source_date:
+            return
+        owner_name = str(item.get("owner_name") or "")
+        answer = QMessageBox.question(
+            self,
+            "移到其他天",
+            f"把「{owner_name}」從 {source_date.toString('yyyy/M/d')} "
+            f"移到 {target_date.toString('yyyy/M/d')}？",
+        )
+        if answer != QMessageBox.Yes:
+            return
+        self.move_item_to(item, target_date)
+
+    def move_current_item(self, *_args):
+        item = self.current_item()
+        if item is None or not is_movable_calendar_item(item):
+            return
+        source_date = QDate.fromString(str(item.get("date") or "")[:10], "yyyy-MM-dd")
+        dialog = MoveVisitDateDialog(str(item.get("owner_name") or ""), source_date, self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        target_date = dialog.selected_date()
+        if target_date == source_date:
+            return
+        self.move_item_to(item, target_date)
+
+    def move_item_to(self, item, target_date):
+        """Ask the server to move one visit; returns True when it moved."""
+        if target_date < QDate.currentDate():
+            QMessageBox.information(self, "無法移動", "不能把行程移到今天以前。")
+            return False
+        try:
+            self.window.move_visit_calendar_item(item, target_date.toString("yyyy-MM-dd"))
+        except Exception as exc:
+            detail = str(getattr(exc, "detail", "") or exc)
+            if getattr(exc, "status_code", None) == 404 and detail == "Not Found":
+                detail = "家中伺服器還沒更新到支援「移到其他天」的版本，請先更新伺服器。"
+            QMessageBox.warning(self, "移動失敗", detail)
+            self.refresh()
+            return False
+        self.selected_date = QDate(target_date)
+        self.displayed_month = QDate(target_date.year(), target_date.month(), 1)
+        self.refresh()
+        self.summary_label.setText(
+            f"已把「{item.get('owner_name') or ''}」移到 {target_date.toString('yyyy/M/d')}。"
+        )
+        return True
 
     def current_item(self):
         row_number = self.table.currentRow()

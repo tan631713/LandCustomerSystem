@@ -772,6 +772,10 @@ def build_app_stylesheet(tokens=None):
     values = dict(tokens or _active_tokens)
     values["ink_hover"] = rgba("ink", 4, values)
     values["seal_hover"] = rgba("seal", 8, values)
+    # 「名下其他土地」 chips (QFrame#ownerLandChip in theme.qss).
+    values.setdefault("green_soft", rgba("green", 7, values))
+    values.setdefault("green_line", rgba("green", 33, values))
+    values.setdefault("green_ink_soft", rgba("green_ink", 80, values))
     urls = style_image_urls(values)
     values["arrow_rule"] = (
         f'.QComboBox::down-arrow {{ image: url("{urls["arrow"]}"); width: 10px; height: 10px; }}'

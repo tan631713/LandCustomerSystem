@@ -269,6 +269,8 @@ class PostgreSQLFieldVisitMixin:
         route_sql = """
             SELECT item.id, item.ownership_id AS customer_id,
                    route.visit_date AS "date",
+                   'route_item' AS item_kind,
+                   item.status AS item_status,
                    CASE
                        WHEN item.status = 'completed' THEN 'completed'
                        WHEN item.status IN ('skipped', 'cancelled') THEN 'skipped'
@@ -295,6 +297,8 @@ class PostgreSQLFieldVisitMixin:
             SELECT cl.id, cl.ownership_id AS customer_id,
                    COALESCE(cl.contact_date, cl.contacted_at::date, cl.created_at::date)
                        AS "date",
+                   'contact_log' AS item_kind,
+                   NULL AS item_status,
                    'completed' AS calendar_status,
                    land.district, land.section, land.subsection, land.land_number,
                    COALESCE(ownership.owner_name_override, owner.owner_name)
@@ -940,6 +944,211 @@ class PostgreSQLFieldVisitMixin:
                 "history_id": int(history["id"]),
                 "contact_log_id": contact_log_id,
                 "location_filled_ownership_ids": location_filled_ids,
+            }
+            self._save_idempotency_result(
+                conn,
+                user.id,
+                idempotency_key,
+                request_hash,
+                response,
+            )
+        return response
+
+    # 行程月曆「移到其他天」: only items nobody has started yet may move.
+    MOVABLE_FIELD_VISIT_STATUSES = frozenset({"planned", "postponed"})
+
+    def move_field_visit_item(
+        self,
+        user,
+        item_id,
+        target_date,
+        *,
+        idempotency_key=None,
+        request_hash="",
+    ):
+        """Move one not-yet-started route item to the same worker's route
+        on target_date (creating that day's route when there is none).
+
+        The item keeps its id, so its status history, attachments and any
+        contact logs linked to it follow it to the new day. It lands at the
+        end of the target route as 'planned' (a postponed item is now
+        rescheduled, so postponed_until is cleared). Nothing is deleted.
+        """
+        item_id = int(item_id)
+        with self._connect() as conn:
+            self._lock_idempotency_key(conn, user.id, idempotency_key)
+            cached = self._cached_idempotency_result(
+                conn, user.id, idempotency_key, request_hash
+            )
+            if cached is not None:
+                return cached
+            current = conn.execute(
+                """
+                SELECT item.id, item.route_id, item.status, item.ownership_id,
+                       route.user_id, route.visit_date, route.status AS route_status
+                FROM field_visit_route_items item
+                JOIN field_visit_routes route ON route.id = item.route_id
+                WHERE item.id = %s
+                FOR UPDATE OF item, route
+                """,
+                (item_id,),
+            ).fetchone()
+            if current is None:
+                raise KeyError(item_id)
+            if user.role != "admin" and int(current["user_id"]) != int(user.id):
+                raise PermissionError("field-visit item belongs to another user")
+            old_status = str(current["status"])
+            if old_status not in self.MOVABLE_FIELD_VISIT_STATUSES:
+                raise FieldVisitTransitionError(
+                    "only planned or postponed field-visit items can be moved"
+                )
+            source_route_id = int(current["route_id"])
+            source_date = str(current["visit_date"])
+            if source_date == str(target_date):
+                raise ValueError("這筆行程已經排在這一天。")
+            route_user_id = int(current["user_id"])
+            target = conn.execute(
+                """
+                SELECT id, status FROM field_visit_routes
+                WHERE user_id = %s AND visit_date = %s AND status <> 'cancelled'
+                FOR UPDATE
+                """,
+                (route_user_id, target_date),
+            ).fetchone()
+            created_route = False
+            if target is None:
+                target = conn.execute(
+                    """
+                    INSERT INTO field_visit_routes (visit_date, user_id, title, status)
+                    VALUES (%s, %s, '', 'planned')
+                    ON CONFLICT (user_id, visit_date)
+                        WHERE status <> 'cancelled'
+                    DO NOTHING
+                    RETURNING id, status
+                    """,
+                    (target_date, route_user_id),
+                ).fetchone()
+                created_route = target is not None
+                if target is None:
+                    target = conn.execute(
+                        """
+                        SELECT id, status FROM field_visit_routes
+                        WHERE user_id = %s AND visit_date = %s
+                          AND status <> 'cancelled'
+                        FOR UPDATE
+                        """,
+                        (route_user_id, target_date),
+                    ).fetchone()
+            target_route_id = int(target["id"])
+            duplicate = conn.execute(
+                """
+                SELECT id FROM field_visit_route_items
+                WHERE route_id = %s AND ownership_id = %s
+                """,
+                (target_route_id, int(current["ownership_id"])),
+            ).fetchone()
+            if duplicate is not None:
+                raise ValueError("那一天已經排了這位地主，不能重複排入。")
+            order_row = conn.execute(
+                """
+                SELECT COALESCE(MAX(route_order), 0)::integer + 1 AS next_order
+                FROM field_visit_route_items
+                WHERE route_id = %s
+                """,
+                (target_route_id,),
+            ).fetchone()
+            route_order = int(order_row["next_order"])
+            conn.execute(
+                """
+                UPDATE field_visit_route_items
+                SET route_id = %s,
+                    route_order = %s,
+                    status = 'planned',
+                    postponed_until = NULL,
+                    is_order_locked = FALSE,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                """,
+                (target_route_id, route_order, item_id),
+            )
+            move_note = f"改期：{source_date} → {target_date}"
+            history = conn.execute(
+                """
+                INSERT INTO field_visit_status_history (
+                    route_item_id, old_status, new_status, user_id, note
+                ) VALUES (%s, %s, 'planned', %s, %s)
+                RETURNING id
+                """,
+                (item_id, old_status, user.id, move_note),
+            ).fetchone()
+            # A finished route that gets new work is open again; the same
+            # rule transition_field_visit_item() applies when an item goes
+            # back to an unresolved status.
+            conn.execute(
+                """
+                UPDATE field_visit_routes
+                SET status = CASE WHEN status = 'completed' THEN 'in_progress'
+                                  ELSE status END,
+                    completed_at = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                """,
+                (target_route_id,),
+            )
+            remaining = conn.execute(
+                """
+                SELECT COUNT(*)::integer AS remaining
+                FROM field_visit_route_items
+                WHERE route_id = %s
+                  AND status IN ('planned', 'in_progress', 'postponed')
+                """,
+                (source_route_id,),
+            ).fetchone()
+            conn.execute(
+                """
+                UPDATE field_visit_routes
+                SET status = CASE
+                        WHEN %s = 0 AND status = 'in_progress' THEN 'completed'
+                        ELSE status
+                    END,
+                    completed_at = CASE
+                        WHEN %s = 0 AND status = 'in_progress'
+                        THEN COALESCE(completed_at, CURRENT_TIMESTAMP)
+                        ELSE completed_at
+                    END,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                """,
+                (int(remaining["remaining"]), int(remaining["remaining"]), source_route_id),
+            )
+            self._audit(
+                conn,
+                user,
+                "api_move_field_visit_item",
+                "field_visit_route_item",
+                item_id,
+                f"Moved field-visit item from {source_date} to {target_date}",
+                {
+                    "old_route_id": source_route_id,
+                    "new_route_id": target_route_id,
+                    "old_date": source_date,
+                    "new_date": str(target_date),
+                    "old_status": old_status,
+                    "created_route": created_route,
+                    "history_id": int(history["id"]),
+                },
+            )
+            response = {
+                "item_id": item_id,
+                "old_route_id": source_route_id,
+                "route_id": target_route_id,
+                "old_date": source_date,
+                "visit_date": str(target_date),
+                "old_status": old_status,
+                "new_status": "planned",
+                "route_order": route_order,
+                "created_route": created_route,
+                "history_id": int(history["id"]),
             }
             self._save_idempotency_result(
                 conn,

@@ -243,9 +243,20 @@ class PostgreSQLRecordMixin:
             previous_address = self._record_address_before_update(
                 conn, user, record_id
             )
-        owner_id, land_id, encrypted = self._save_owner_and_land(
-            conn, user, values
-        )
+        values = dict(values)
+        chosen_owner_id = values.pop("owner_id", None)
+        if chosen_owner_id is not None and record_id is None:
+            # A new record the user explicitly put under an existing owner.
+            values = self._attach_values_to_owner(
+                conn, user, values, chosen_owner_id
+            )
+            encrypted = _encrypted_record(user, values)
+            owner_id = int(chosen_owner_id)
+            land_id = int(self._save_land(conn, values)["id"])
+        else:
+            owner_id, land_id, encrypted = self._save_owner_and_land(
+                conn, user, values
+            )
         apply_record_urban_plan(conn, land_id, values.get("urban_plan_id"))
         if record_id is None:
             row = conn.execute(
